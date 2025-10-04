@@ -1,22 +1,20 @@
-{
- :paths ["src"]
- :deps {
-        org.clojure/clojure { :mvn/version "1.12.0" }
-        org.clojure/tools.cli { :mvn/version "1.1.230"}
-        org.clojure/core.async { :mvn/version "1.8.741" }
-
+{:paths ["src" "resources"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        org.clojure/tools.cli {:mvn/version "1.1.230"}
+        org.clojure/core.async {:mvn/version "1.6.681"}
         camel-snake-kebab/camel-snake-kebab {:mvn/version "0.4.3"}
-
-        nubank/k8s-api {:mvn/version  "1.0.0"}
-
         metosin/reitit {:mvn/version "0.9.1"}
-
-        ring/ring-jetty-adapter {:mvn/version "1.14.2"}
-        }
- :aliases {
-           :run {:main-opts [ "-m" "gpu-device-assigner.cli" ]}
+        ring/ring-jetty-adapter {:mvn/version "1.10.0"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        clj-http/clj-http {:mvn/version "3.13.0"}
+        com.taoensso/timbre {:mvn/version "6.0.4"}
+        integrant/integrant {:mvn/version "0.8.1"}
+        aero/aero {:mvn/version "1.1.6"}
+        tick/tick {:mvn/version "0.7.5"}}
+ :aliases {:run {:main-opts ["-m" "tunarr.scheduler.main"]}
            :test {:extra-paths ["test"]
-                  :extra-deps {org.clojure/test.check {:mvn/version "1.1.0"}}
-                  :main-opts ["-m" "gpu-device-assigner.all-tests"]}
-           }
- }
+                  :extra-deps {io.github.cognitect-labs/test-runner
+                               {:git/url "https://github.com/cognitect-labs/test-runner"
+                                :sha "dfb30ddc041883badfa153ed8d8a9030e5e3c46b"}
+                               ring/ring-mock {:mvn/version "0.4.0"}}
+                  :main-opts ["-m" "cognitect.test-runner"]}}}
