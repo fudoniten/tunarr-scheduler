@@ -1,24 +1,70 @@
 {
-  description = "Tunarr Scheduler service";
+  description = ''
+    Tunarr Scheduler -- Schedule Tunarr channels with LLM
+      assistance.'';
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
-
-  outputs = { self, nixpkgs }:
-    let
-      systems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs systems;
-    in {
-      devShells = forAllSystems (system:
-        let
-          pkgs = import nixpkgs { inherit system; };
-        in pkgs.mkShell {
-          buildInputs = [
-            pkgs.clojure
-            pkgs.openjdk21
-            pkgs.clj-kondo
-            pkgs.babashka
-            pkgs.git
-          ];
-        });
+  inputs = {
+    nixpkgs.url = "nixpkgs/nixos-25.05";
+    utils.url = "github:numtide/flake-utils";
+    nix-helpers = {
+      url = "github:fudoniten/fudo-nix-helpers";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
+  };
+
+  outputs = { self, nixpkgs, utils, nix-helpers, ... }:
+    utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = nixpkgs.legacyPackages."${system}";
+        helpers = nix-helpers.packages."${system}";
+        cljLibs = { };
+      in {
+        packages = rec {
+          default = tunarrScheduler;
+
+          tunarrScheduler = helpers.mkClojureBin {
+            name = "org.fudo/tunarr-scheduler";
+            primaryNamespace = "tunarr-scheduler.cli";
+            src = ./.;
+          };
+
+          deployContainer = helpers.deployContainers {
+            name = "tunarr-scheduler";
+            repo = "registry.kube.sea.fudo.link";
+            tags = [ "latest" ];
+            entrypoint =
+              let tunarrScheduler = self.packages."${system}".tunarrScheduler;
+              in [ "${tunarrScheduler}/bin/tunarr-scheduler" ];
+            verbose = true;
+          };
+        };
+
+        checks = {
+          clojureTests = pkgs.runCommand "clojure-tests" { } ''
+            mkdir -p $TMPDIR
+            cd $TMPDIR
+            ${pkgs.clojure}/bin/clojure -M:test
+          '';
+        };
+
+        devShells = rec {
+          default = updateDeps;
+          updateDeps = pkgs.mkShell {
+            buildInputs = [ (helpers.updateClojureDeps cljLibs) ];
+          };
+          tunarrSchedulerServer = pkgs.mkShell {
+            buildInputs = with self.packages."${system}"; [ tunarrScheduler ];
+          };
+        };
+
+        apps = rec {
+          default = deployContainer;
+          deployContainer = {
+            type = "app";
+            program =
+              let deployContainer = self.packages."${system}".deployContainer;
+              in "${deployContainer}/bin/deployContainers";
+          };
+        };
+      });
 }
