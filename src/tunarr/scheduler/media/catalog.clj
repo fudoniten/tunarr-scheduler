@@ -2,19 +2,62 @@
   "Media catalog integration with Jellyfin or Tunarr."
   (:require [clj-http.client :as http]
             [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [taoensso.timbre :as log]
-            [tunarr.scheduler.llm :as llm]))
+            [tunarr.scheduler.llm :as llm]
+            [cemerick.url :as url]))
 
-(defn- jellyfin-request [config path]
-  (let [base (:base-url config)
-        url (str base path)
-        opts {:headers {"X-Emby-Token" (:api-key config)}}]
+(defn- jellyfin-request [{api-key :api-key} url]
+  (let [opts {:headers {"X-Emby-Token" api-key}}]
     (log/info "Fetching Jellyfin resources" {:url url})
     (-> (http/get url opts)
         :body
         (json/parse-string true))))
+
+(defn- build-url
+  [base-url & {:keys [params path]}]
+  (-> (url/url base-url path)
+      (assoc :query params)
+      str))
+
+(def DEFAULT_FIELDS ["AirTime"
+                     "Id"
+                     "ProductionYear"
+                     "HasSubtitles"
+                     "PremiereDate"
+                     "Name"
+                     "Type"
+                     "OfficialRating"
+                     "CriticRating"
+                     "CommunityRating"
+                     "Overview"
+                     "Genres"
+                     "Taglines"])
+
+(defn- jellyfin:get-library-items
+  ([config library-uuid]
+   (jellyfin:get-library-items config
+                               library-uuid
+                               DEFAULT_FIELDS))
+  ([{:keys [base-url] :as config} library-uuid fields]
+   (let [url (build-url base-url
+                        :path   "/Items"
+                        :params {:Recursive        true
+                                 :SortBy           "SortName"
+                                 :ParentId         library-uuid
+                                 :IncludeItemTypes "Movie,Series"
+                                 :Fields           (str/join "," fields)})]
+     (jellyfin-request config url))))
+
+(defprotocol MediaCollection
+  (get-library-items [self library-uuid]))
+
+(defrecord JellyfinMediaCollection [config]
+  MediaCollection
+  (get-library-items [_ library-uuid]
+    (jellyfin:get-library-items config library-uuid)))
 
 (defn fetch-library
   "Fetch media metadata from Jellyfin. In the skeleton this returns an empty vector."
