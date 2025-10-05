@@ -1,0 +1,18 @@
+{:server {:port #or [#env PORT 8080]}
+ :jellyfin {:base-url #or [#env JELLYFIN_URL "http://localhost:8096"]
+            :api-key #or [#env JELLYFIN_API_KEY "change-me"]
+            :library-ids []}
+ :tunarr {:base-url #or [#env TUNARR_URL "http://localhost:8000"]}
+ :llm {:provider #or [#env LLM_PROVIDER :mock]
+       :model #or [#env LLM_MODEL "gpt-4o"]
+       :endpoint #or [#env LLM_ENDPOINT "https://api.openai.com/v1"]
+       :api-key #or [#env LLM_API_KEY nil]}
+ :tts {:provider #or [#env TTS_PROVIDER :mock]
+       :voice #or [#env TTS_VOICE "default"]}
+ :scheduler {:time-zone #or [#env TIME_ZONE "UTC"]
+             :daytime-hours {:start 6 :end 20}
+             :seasonal {:december [:holiday]
+                        :october [:spooky]}
+             :preferences {}}
+ :persistence {:type :memory
+               :path #or [#env STATE_PATH "data/state.edn"]}}
