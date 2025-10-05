@@ -85,6 +85,19 @@ docker run -p 8080:8080 tunarr-scheduler
 The container defaults to serving HTTP on port `8080` and reads configuration
 from environment variables defined in `resources/config.edn`.
 
+#### LLM configuration
+
+To use the OpenAI client set the following environment variables (or override
+the configuration file):
+
+* `LLM_PROVIDER=openai`
+* `LLM_API_KEY=<your-openai-api-key>`
+* `LLM_MODEL` (defaults to `gpt-4o`)
+* `LLM_ENDPOINT` (defaults to `https://api.openai.com/v1`)
+
+The service will call the Chat Completions API for media classification,
+scheduling suggestions, and bumper script generation.
+
 ### Kubernetes deployment
 
 The resulting image can be used in Kubernetes by defining a `Deployment` and

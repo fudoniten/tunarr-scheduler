@@ -5,7 +5,8 @@
  :tunarr {:base-url #or [#env TUNARR_URL "http://localhost:8000"]}
  :llm {:provider #or [#env LLM_PROVIDER :mock]
        :model #or [#env LLM_MODEL "gpt-4o"]
-       :endpoint #or [#env LLM_ENDPOINT "http://localhost:11434"]}
+       :endpoint #or [#env LLM_ENDPOINT "https://api.openai.com/v1"]
+       :api-key #or [#env LLM_API_KEY nil]}
  :tts {:provider #or [#env TTS_PROVIDER :mock]
        :voice #or [#env TTS_VOICE "default"]}
  :scheduler {:time-zone #or [#env TIME_ZONE "UTC"]
