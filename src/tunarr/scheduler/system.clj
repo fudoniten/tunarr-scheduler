@@ -6,6 +6,7 @@
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.scheduling.engine :as engine]
             [tunarr.scheduler.llm :as llm]
+            [tunarr.scheduler.llm.openai]
             [tunarr.scheduler.tts :as tts]
             [tunarr.scheduler.bumpers :as bumpers]))
 
