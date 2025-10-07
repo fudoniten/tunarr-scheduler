@@ -59,13 +59,33 @@
         content (some-> body response-content)]
     (or (->json content) {})))
 
-(defn- openai-classify-media [client media]
-  (let [prompt (str "Classify the media item and respond with strict JSON containing the keys "
-                    "'tags' (array of lowercase strings), 'channels' (array of lowercase strings), "
-                    "and 'kid_friendly' (boolean). Media details: " (pr-str media))
+(defn- openai-classify-media [client media channels existing-tags]
+  (let [prompt (str/join \newline
+                         ["Classify the following media item, and respond with strict JSON containing the keys"
+                          "'tags' (array of lowercase string), 'channels' (array of lowercase strings),"
+                          "and 'kid-friendly' (boolean)."
+                          ""
+                          "A media item is 'kid-friendly' if it's suitable for a kid of about 12-14 years old."
+                          "Don't be too conservative."
+                          ""
+                          "Tags should include genre (general and specific), style, period, nation of origin,"
+                          "and so on. Tags will be used to group and select media for scheduling. Prefer tags"
+                          "which already exist, but invent new ones when helpful."
+                          ""
+                          "Existing tags:"
+                          (str/join "," existing-tags)
+                          ""
+                          "Channels must be selected from the following list, and cannot be invented. Every piece"
+                          "of media must be mapped to at least one channel, and can be mapped to more than one."
+                          ""
+                          "Channels:"
+                          (str/join \newline (map (fn [[k v]] (format "* %s - %s" k v)) channels))
+                          ""
+                          "Media item:"
+                          media])
         response (openai-json-response client
                                        [{:role "system"
-                                         :content "You are a content scheduler that categorises media for TV channels."}
+                                         :content "You are a content scheduler that categorises media for TV channels. Your responses should always be in strict JSON."}
                                         {:role "user" :content prompt}])
         tags (->> (:tags response)
                   (keep #(when (string? %) (str/lower-case %)))
@@ -81,9 +101,11 @@
 
 (defrecord OpenAIClient [model endpoint api-key http-opts]
   llm/LLMClient
-  (classify-media! [client media]
+
+  (classify-media! [client media channels existing-tags]
     (log/info "Classifying media" {:title (:name media) :type :openai})
-    (openai-classify-media client media))
+    (openai-classify-media client media channels existing-tags))
+
   (schedule-programming! [client request]
     (log/info "Scheduling programming via LLM" {:request request :type :openai})
     (let [prompt (str "Create a JSON schedule with a 'slots' array. Each slot should have "
@@ -96,6 +118,7 @@
       (if (contains? response :slots)
         {:slots (:slots response)}
         {:slots []})))
+
   (generate-bumper-script [client {:keys [channel upcoming]}]
     (log/info "Generating bumper script" {:channel channel :type :openai})
     (let [messages [{:role "system"
@@ -106,6 +129,7 @@
           body (request-openai! client messages {:temperature 0.7})
           content (response-content body)]
       (or content (format "Up next on %s: %s" channel (or upcoming "More great content!")))))
+
   (close! [_]
     (log/info "Closing LLM client" {:type :openai})))
 
