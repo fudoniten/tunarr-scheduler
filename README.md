@@ -24,7 +24,8 @@ custom bumpers complete with text-to-speech narration.
 
 ```
 ├── resources/
-│   └── config.edn          # default configuration
+│   ├── config.edn          # default service configuration
+│   └── migratus.edn        # default database migration configuration
 ├── src/tunarr/scheduler/
 │   ├── config.clj          # config loading helpers
 │   ├── main.clj            # CLI entry point
@@ -84,6 +85,29 @@ docker run -p 8080:8080 tunarr-scheduler
 
 The container defaults to serving HTTP on port `8080` and reads configuration
 from environment variables defined in `resources/config.edn`.
+
+### Database migrations
+
+Database migrations are managed with
+[Migratus](https://github.com/yogthos/migratus). The default configuration lives
+in `resources/migratus.edn` and assumes a PostgreSQL database reachable at
+`jdbc:postgresql://localhost:5432/tunarr_scheduler`. Point the migratus runner
+at an alternate configuration by setting the `MIGRATUS_CONFIG` environment
+variable when invoking the `tunarr-scheduler-migratus` container or binary.
+
+For example, to run migrations locally with the default config:
+
+```bash
+clojure -Sdeps '{:deps {migratus/migratus {:mvn/version "1.6.3"}}}' \
+  -M -m migratus.core migrate resources/migratus.edn
+```
+
+Or, using a custom config file:
+
+```bash
+MIGRATUS_CONFIG=infra/prod-migratus.edn \
+  tunarr-scheduler-migratus
+```
 
 #### LLM configuration
 

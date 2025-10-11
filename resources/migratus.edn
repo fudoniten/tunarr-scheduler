@@ -1,0 +1,6 @@
+;; Default migratus configuration for Tunarr Scheduler database migrations.
+;; Override by setting MIGRATUS_CONFIG to a different file when running the
+;; migratus container.
+{:store :database
+ :migration-dir "migrations"
+ :db {:connection-uri "jdbc:postgresql://localhost:5432/tunarr_scheduler"}}
