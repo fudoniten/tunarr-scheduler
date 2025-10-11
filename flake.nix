@@ -28,8 +28,13 @@
             src = ./.;
           };
 
-          migratusRunner = pkgs.writeShellScriptBin "tunarr-scheduler-migratus" ''
-            set -euo pipefail
+          migratusRunner = pkgs.writeShellApplication {
+            name = "tunarr-scheduler-migratus";
+
+            runtimeInputs = with pkgs; [ clojure ];
+
+            text = ''
+              set -euo pipefail
 
             default_config="${./resources}/migratus.edn"
             config="${MIGRATUS_CONFIG:-}"
@@ -61,7 +66,7 @@
           migrationContainer = helpers.deployContainers {
             name = "tunarr-scheduler-migratus";
             repo = "registry.kube.sea.fudo.link";
-            tags = [ "latest" "migrations" ];
+            tags = [ "latest" ];
             entrypoint =
               let migratus = self.packages."${system}".migratusRunner;
               in [ "${migratus}/bin/tunarr-scheduler-migratus" ];
