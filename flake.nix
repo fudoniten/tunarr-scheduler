@@ -28,6 +28,13 @@
             src = ./.;
           };
 
+          migratusRunner = pkgs.writeShellScriptBin "tunarr-scheduler-migratus" ''
+            set -euo pipefail
+            exec ${pkgs.clojure}/bin/clojure \
+              -Sdeps '{:deps {migratus/migratus {:mvn/version "1.6.3"}}}' \
+              -M -m migratus.core migrate
+          '';
+
           deployContainer = helpers.deployContainers {
             name = "tunarr-scheduler";
             repo = "registry.kube.sea.fudo.link";
@@ -35,6 +42,16 @@
             entrypoint =
               let tunarrScheduler = self.packages."${system}".tunarrScheduler;
               in [ "${tunarrScheduler}/bin/tunarr-scheduler" ];
+            verbose = true;
+          };
+
+          migratusContainer = helpers.deployContainers {
+            name = "tunarr-scheduler-migratus";
+            repo = "registry.kube.sea.fudo.link";
+            tags = [ "latest" "migrations" ];
+            entrypoint =
+              let migratus = self.packages."${system}".migratusRunner;
+              in [ "${migratus}/bin/tunarr-scheduler-migratus" ];
             verbose = true;
           };
         };
@@ -64,6 +81,12 @@
             program =
               let deployContainer = self.packages."${system}".deployContainer;
               in "${deployContainer}/bin/deployContainers";
+          };
+          migratusContainer = {
+            type = "app";
+            program =
+              let migratusContainer = self.packages."${system}".migratusContainer;
+              in "${migratusContainer}/bin/deployContainers";
           };
         };
       });
