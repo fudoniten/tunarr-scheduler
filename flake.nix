@@ -28,25 +28,28 @@
             src = ./.;
           };
 
-          migratusRunner = pkgs.writeShellScriptBin "tunarr-scheduler-migratus" ''
-            set -euo pipefail
+          migratusRunner =
+            pkgs.writeShellScriptBin "tunarr-scheduler-migratus" ''
+              set -euo pipefail
 
-            default_config="${./resources}/migratus.edn"
-            config="${MIGRATUS_CONFIG:-}"
+              default_config="${./resources}/migratus.edn"
+              config="$MIGRATUS_CONFIG"
 
-            if [ -z "$config" ] && [ -f "$default_config" ]; then
-              config="$default_config"
-            fi
+              if [ -z "$config" ] && [ -f "$default_config" ]; then
+                config="$default_config"
+              fi
 
-            if [ -z "$config" ]; then
-              echo "No Migratus config provided via MIGRATUS_CONFIG and no default found at $default_config" >&2
-              exit 1
-            fi
+              if [ -z "$config" ]; then
+                echo "No Migratus config provided via MIGRATUS_CONFIG and no default found at $default_config" >&2
+                exit 1
+              fi
 
-            exec ${pkgs.clojure}/bin/clojure \
-              -Sdeps '{:deps {migratus/migratus {:mvn/version "1.6.3"}} :paths ["${./resources}"]}' \
-              -M -m migratus.core migrate "$config"
-          '';
+              exec ${pkgs.clojure}/bin/clojure \
+                -Sdeps '{:deps {migratus/migratus {:mvn/version "1.6.3"}} :paths ["${
+                  ./resources
+                }"]}' \
+                -M -m migratus.core migrate "$config"
+            '';
 
           deployContainer = helpers.deployContainers {
             name = "tunarr-scheduler";
@@ -58,7 +61,7 @@
             verbose = true;
           };
 
-          migratusContainer = helpers.deployContainers {
+          migrationContainer = helpers.deployContainers {
             name = "tunarr-scheduler-migratus";
             repo = "registry.kube.sea.fudo.link";
             tags = [ "latest" "migrations" ];
@@ -95,11 +98,11 @@
               let deployContainer = self.packages."${system}".deployContainer;
               in "${deployContainer}/bin/deployContainers";
           };
-          migratusContainer = {
+          migrationContainer = {
             type = "app";
-            program =
-              let migratusContainer = self.packages."${system}".migratusContainer;
-              in "${migratusContainer}/bin/deployContainers";
+            program = let
+              migrationContainer = self.packages."${system}".migrationContainer;
+            in "${migrationContainer}/bin/deployContainers";
           };
         };
       });
