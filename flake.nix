@@ -58,7 +58,7 @@
             verbose = true;
           };
 
-          migratusContainer = helpers.deployContainers {
+          migrationContainer = helpers.deployContainers {
             name = "tunarr-scheduler-migratus";
             repo = "registry.kube.sea.fudo.link";
             tags = [ "latest" "migrations" ];
@@ -95,11 +95,11 @@
               let deployContainer = self.packages."${system}".deployContainer;
               in "${deployContainer}/bin/deployContainers";
           };
-          migratusContainer = {
+          migrationContainer = {
             type = "app";
-            program =
-              let migratusContainer = self.packages."${system}".migratusContainer;
-              in "${migratusContainer}/bin/deployContainers";
+            program = let
+              migrationContainer = self.packages."${system}".migrationContainer;
+            in "${migrationContainer}/bin/deployContainers";
           };
         };
       });
