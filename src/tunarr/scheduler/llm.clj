@@ -1,7 +1,8 @@
 (ns tunarr.scheduler.llm
   "Abstraction for Large Language Model providers used by the scheduler."
   (:require
-   [taoensso.timbre :as log]))
+   [taoensso.timbre :as log]
+   [tunarr.schedular.media :as media]))
 
 ;; TODO: Flesh out what these requests should look like.
 ;;
@@ -28,14 +29,29 @@
 
 (defprotocol LLMClient
   "Protocol describing the interactions supported by LLM providers."
-  (classify-media! [client media channels existing-tags]
+  (classify-media! [client context media-item]
     "Classify a media entity by delegating to the configured LLM.")
-  (schedule-programming! [client request]
+  (schedule-programming! [client context catalog]
     "Generate a schedule via the LLM. Placeholder implementation.")
-  (generate-bumper-script [client request]
-    "Generate narration script for bumpers using the LLM.")
-  (close! [client]
-    "Clean up any LLM client resources."))
+  (generate-schedule-bumper-script [client schedule]
+    "Generate narration script for bumper based on upcoming schedule.")
+  (generate-preview-bumper-script [client summary]
+    "Generate narration script for bumpers for upcoming 'events'.")
+  (generate-channel-bumper-script [client channel-schedules]
+    "Generate narration script for bumpers for other channels."))
+
+(defn llm-client? [o] (satisfies? LLMClient o))
+
+(s/fdef ::llm-client llm-client?)
+
+(s/def ::classify-media-request
+  (s/keys :req [::media/tags
+                ::media/channel-descriptions
+                ::media/media-metadata]))
+
+(s/fdef classify-media!
+  :args (s/cat :client llm-client? :request ::classify-media-request)
+  :ret  ::catalog/media-classification)
 
 (defmulti create-client
   "Create an LLM client from configuration."

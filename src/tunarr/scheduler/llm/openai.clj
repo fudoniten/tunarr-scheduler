@@ -3,8 +3,19 @@
    [cheshire.core :as json]
    [clj-http.client :as http]
    [clojure.string :as str]
+   [clojure.spec.alpha :as s]
    [taoensso.timbre :as log]
    [tunarr.scheduler.llm :as llm]))
+
+(defn- ensure-spec
+  [spec x]
+  (let [cx (s/conform spec x)]
+    (if (s/invalid? cx)
+      (throw (ex-info (str "value does not conform to spec: " spec)
+                      (assoc (s/explain-data spec x)
+                             :spec spec
+                             :value x)))
+      cx)))
 
 (defn- sanitize-url [endpoint]
   (when endpoint
@@ -95,6 +106,7 @@
                       vec)
         kid-friendly? (boolean (or (:kid_friendly response)
                                    (:kid-friendly response)))]
+    
     {:tags (if (seq tags) tags #{"unspecified"})
      :channels (if (seq channels) channels [:general])
      :kid-friendly? kid-friendly?}))
