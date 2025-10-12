@@ -55,11 +55,12 @@
 
 (defrecord SqlCatalog [db]
   catalog/Catalog
-  (add-media [_ media])
+  (add-media [_ media-id media])
   (get-media [_])
   (get-media-by-library-id [_ library-id])
   (get-media-by-id [_ media-id])
   (set-media-tags [_ media-id tags])
   (set-media-channels [_ media-id channels])
   (get-media-by-channel [_ channel])
-  (get-media-by-tag [_ tag]))
+  (get-media-by-tag [_ tag])
+  (close! [_]))

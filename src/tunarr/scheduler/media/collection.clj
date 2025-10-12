@@ -11,7 +11,7 @@
            [java.time.format DateTimeFormatter]
            [java.util Locale]))
 
-(def ::library-id string?)
+(s/def ::library-id string?)
 
 (defprotocol MediaCollection
   (fetch-library-items [self library-id]))

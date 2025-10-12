@@ -30,26 +30,26 @@
   (let [router
         (ring/router
          [["/healthz" {:get (fn [_]
-                               (ok {:status "ok"}))}]
+                              (ok {:status "ok"}))}]
           ["/api"
-           ["/media/retag" {:post (fn [request]
-                                     (log/info "Retagging media")
-                                     (let [payload (or (read-json request) {})
-                                           result (catalog/tag-media! media llm persistence)]
-                                       (accepted {:retagged (count result)})))}]
-           ["/channels/:channel-id/schedule" {:post (fn [{{:keys [channel-id]} :path-params :as request}]
-                                                    (log/info "Scheduling channel" {:channel channel-id})
-                                                    (let [payload (or (read-json request) {})
-                                                          schedule (engine/schedule-week!
-                                                                    scheduler llm persistence
-                                                                    {:channel-id channel-id
-                                                                     :preferences (:preferences payload)})]
-                                                      (ok schedule)))}]
-           ["/bumpers/up-next" {:post (fn [request]
-                                         (let [payload (read-json request)
-                                               bumper (bumpers/generate-bumper!
-                                                        bumpers
-                                                        {:channel (:channel payload)
-                                                         :upcoming (:upcoming payload)})]
-                                           (accepted bumper)))}]]])]
+           #_["/media/retag" {:post (fn [request]
+                                    (log/info "Retagging media") 
+                                    (let [payload (or (read-json request) {})
+                                          result (catalog/tag-media! media llm persistence)]
+                                      (accepted {:retagged (count result)})))}]
+           #_["/channels/:channel-id/schedule" {:post (fn [{{:keys [channel-id]} :path-params :as request}]
+                                                      (log/info "Scheduling channel" {:channel channel-id})
+                                                      (let [payload (or (read-json request) {})
+                                                            schedule (engine/schedule-week!
+                                                                      scheduler llm persistence
+                                                                      {:channel-id channel-id
+                                                                       :preferences (:preferences payload)})]
+                                                        (ok schedule)))}]
+           #_["/bumpers/up-next" {:post (fn [request]
+                                        (let [payload (read-json request)
+                                              bumper (bumpers/generate-bumper!
+                                                      bumpers
+                                                      {:channel (:channel payload)
+                                                       :upcoming (:upcoming payload)})]
+                                          (accepted bumper)))}]]])]
     (ring/ring-handler router (ring/create-default-handler))))

@@ -12,7 +12,7 @@
 (defn close! [_]
   (log/info "Closing bumper service"))
 
-(defn generate-bumper!
+#_(defn generate-bumper!
   "Generate bumper metadata and audio stub."
   [{:keys [llm tts]} {:keys [channel upcoming]}]
   (let [script (llm/generate-bumper-script llm {:channel channel :upcoming upcoming})

@@ -1,6 +1,6 @@
 (ns tunarr.scheduler.util.time
   "Time utility helpers for the scheduler."
-  (:require [tick.alpha.api :as t]))
+  (:require [tick.core :as t]))
 
 (defn daytime?
   "Return true if the instant falls within the configured daytime window."

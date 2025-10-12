@@ -2,7 +2,8 @@
   "Abstraction for Large Language Model providers used by the scheduler."
   (:require
    [taoensso.timbre :as log]
-   [tunarr.schedular.media :as media]))
+   [tunarr.scheduler.media :as media]
+   [clojure.spec.alpha :as s]))
 
 ;; TODO: Flesh out what these requests should look like.
 ;;
@@ -38,11 +39,13 @@
   (generate-preview-bumper-script [client summary]
     "Generate narration script for bumpers for upcoming 'events'.")
   (generate-channel-bumper-script [client channel-schedules]
-    "Generate narration script for bumpers for other channels."))
+    "Generate narration script for bumpers for other channels.")
+  (close! [client]
+    "Perform any required close or teardown operations."))
 
 (defn llm-client? [o] (satisfies? LLMClient o))
 
-(s/fdef ::llm-client llm-client?)
+(s/def ::llm-client llm-client?)
 
 (s/def ::classify-media-request
   (s/keys :req [::media/tags
@@ -51,7 +54,7 @@
 
 (s/fdef classify-media!
   :args (s/cat :client llm-client? :request ::classify-media-request)
-  :ret  ::catalog/media-classification)
+  :ret  ::media/classification)
 
 (defmulti create-client
   "Create an LLM client from configuration."
@@ -59,21 +62,18 @@
 
 (defrecord GenericLLMClient [provider close-fn]
   LLMClient
-  (classify-media! [_ media channels existing-tags]
-    (log/info "Classifying media" {:title (:name media) :type :generic})
-    {:tags #{"unspecified"}
-     :channels [:general]
-     :kid-friendly? false})
-  (schedule-programming! [_ request]
-    (log/info "Scheduling programming via LLM" {:request request :type :generic})
-    {:slots []})
-  (generate-bumper-script [_ {:keys [channel upcoming]}]
-    (log/info "Generating bumper script" {:channel channel :type :generic})
-    (format "Up next on %s: %s" channel (or upcoming "More great content!")))
-  (close! [_]
-    (log/info "Closing LLM client" {:type :generic :provider provider})
-    (when close-fn
-      (close-fn))))
+  (classify-media! [_ context media-item]
+    (throw (ex-info "not implemented: classify-media!" {})))
+  (schedule-programming! [_ context catalog]
+    (throw (ex-info "not implemented: schedule-programming!" {})))
+  (generate-schedule-bumper-script [client schedule]
+    (throw (ex-info "not implemented: generate-schedule-bumper-script" {})))
+  (generate-preview-bumper-script [client summary]
+    (throw (ex-info "not implemented: generate-preview-bumper-script" {})))
+  (generate-channel-bumper-script [client channel-schedules]
+    (throw (ex-info "not implemented: generate-channel-bumper-script" {})))
+  (close! [client]
+    (throw (ex-info "not implemented: close!" {}))))
 
 (defmethod create-client :default [config]
   (log/info "Initialising generic LLM client" {:provider (:provider config)})

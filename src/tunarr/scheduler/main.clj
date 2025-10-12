@@ -2,7 +2,7 @@
   (:gen-class)
   (:require [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
-            [integrant.core :as ig]
+;;            [integrant.core :as ig]
             [taoensso.timbre :as log]
             [tunarr.scheduler.config :as config]
             [tunarr.scheduler.system :as system]))

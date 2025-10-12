@@ -1,5 +1,6 @@
 (ns app.migrate
-  (:require [migratus.core :as migratus]))
+  (:require [migratus.core :as migratus])
+  (:gen-class))
 
 (defn- getenv [k] (System/getenv k))
 

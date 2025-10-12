@@ -114,15 +114,15 @@
 (defrecord OpenAIClient [model endpoint api-key http-opts]
   llm/LLMClient
 
-  (classify-media! [client media channels existing-tags]
-    (log/info "Classifying media" {:title (:name media) :type :openai})
-    (openai-classify-media client media channels existing-tags))
+  (classify-media! [client {:keys [channels existing-tags]} media-item]
+    (log/info "Classifying media" {:title (:name media-item) :type :openai})
+    (openai-classify-media client media-item channels existing-tags))
 
-  (schedule-programming! [client request]
-    (log/info "Scheduling programming via LLM" {:request request :type :openai})
+  (schedule-programming! [client context catalog]
+    (log/info "Scheduling programming via LLM" {:context context :type :openai})
     (let [prompt (str "Create a JSON schedule with a 'slots' array. Each slot should have "
                       "'start' (ISO8601 timestamp), 'end', 'title', and 'tags' (array). "
-                      "Request context: " (pr-str request))
+                      "Request context: " (pr-str context))
           response (openai-json-response client
                                          [{:role "system"
                                            :content "You are a TV channel scheduler."}
@@ -131,19 +131,14 @@
         {:slots (:slots response)}
         {:slots []})))
 
-  (generate-bumper-script [client {:keys [channel upcoming]}]
-    (log/info "Generating bumper script" {:channel channel :type :openai})
-    (let [messages [{:role "system"
-                     :content "You write concise, energetic TV bumper narration."}
-                    {:role "user"
-                     :content (str "Write a single-sentence bumper for channel " channel
-                                   " introducing " (or upcoming "our upcoming program") ".")}]
-          body (request-openai! client messages {:temperature 0.7})
-          content (response-content body)]
-      (or content (format "Up next on %s: %s" channel (or upcoming "More great content!")))))
-
-  (close! [_]
-    (log/info "Closing LLM client" {:type :openai})))
+  (generate-schedule-bumper-script [client schedule]
+    (throw (ex-info "not implemented: generate-schedule-bumper-script" {})))
+  (generate-preview-bumper-script [client summary]
+    (throw (ex-info "not implemented: generate-preview-bumper-script" {})))
+  (generate-channel-bumper-script [client channel-schedules]
+    (throw (ex-info "not implemented: generate-channel-bumper-script" {})))
+  (close! [client]
+    (throw (ex-info "not implemented: close!" {}))))
 
 (defmethod llm/create-client :openai
   [{:keys [api-key endpoint model http-opts]}]

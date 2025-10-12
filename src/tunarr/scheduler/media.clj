@@ -47,7 +47,7 @@
    ::library-id])
 
 (s/def ::metadata
-  (s/keys :req media-fields))
+  (s/keys :req [media-fields]))
 
 (s/def ::classification
   (s/keys :req [::tags
