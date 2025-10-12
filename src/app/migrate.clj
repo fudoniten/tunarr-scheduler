@@ -23,12 +23,17 @@
 (defn migrate! []
   (migratus/migrate @cfg))
 
-(defn run [_]
-  (try
-    (migrate!)
-    (println "✅ migrations complete")
-    (System/exit 0)
-    (catch Throwable t
-      (binding [*out* *err*]
-        (println "❌ migration failed:" (.getMessage t)))
-      (System/exit 1))))
+(defn run
+  ([] (run nil))
+  ([_]
+   (try
+     (migrate!)
+     (println "✅ migrations complete")
+     (System/exit 0)
+     (catch Throwable t
+       (binding [*out* *err*]
+         (println "❌ migration failed:" (.getMessage t)))
+       (System/exit 1)))))
+
+(defn -main [& _]
+  (run))
