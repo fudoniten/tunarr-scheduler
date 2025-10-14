@@ -4,21 +4,15 @@
 
 (defn- getenv [k] (System/getenv k))
 
-(defn- build-jdbc-url []
-  (let [url (getenv "JDBC_URL")]
-    (if (seq url)
-      url
-      (let [host (or (getenv "PGHOST") "postgres")
-            port (or (getenv "PGPORT") "5432")
-            db   (or (getenv "PGDATABASE") "appdb")]
-        (format "jdbc:postgresql://%s:%s/%s" host port db)))))
-
 (def ^:private cfg
   (delay
     {:store :database
      :migration-dir "migrations"
-     :db {:connection-uri (build-jdbc-url)
-          :user (getenv "DB_USER")
+     :db {:dbtype   "postgresql"
+          :host     (or (getenv "PGHOST") "postgres")
+          :port     (or (getenv "PGPORT") "5432")
+          :dbname   (or (getenv "PGDATABASE") "tunarr-scheduler")
+          :user     (getenv "DB_USER")
           :password (getenv "DB_PASS")}}))
 
 (defn migrate! []
