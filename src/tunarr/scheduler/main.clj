@@ -9,7 +9,6 @@
 
 (def cli-options
   [["-c" "--config PATH" "Path to configuration EDN file"]
-   [nil "--no-block" "Do not block the main thread after starting the service."]
    ["-h" "--help"]])
 
 (defn- usage [options-summary]
@@ -45,6 +44,5 @@
                           (Thread. (fn []
                                      (log/info "Shutdown requested")
                                      (system/stop system))))
-        (when-not (:no-block options)
-          (log/info "Blocking main thread; press Ctrl+C to exit")
-          (deref (promise)))))))
+        (log/info "Blocking main thread; press Ctrl+C to exit")
+        (deref (promise))))))

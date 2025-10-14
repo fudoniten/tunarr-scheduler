@@ -19,61 +19,76 @@
   (log/info "Logger shut down"))
 
 (defmethod ig/init-key :tunarr/llm [_ config]
-  (llm/create-client config))
+  (log/info "initializing llm client")
+  #_(llm/create-client config))
 
 (defmethod ig/halt-key! :tunarr/llm [_ client]
-  (llm/close! client))
+  (log/info "closing llm client")
+  #_(llm/close! client))
 
 (defmethod ig/init-key :tunarr/tts [_ config]
-  (tts/create-client config))
+  (log/info "initializing tts client")
+  #_(tts/create-client config))
 
 (defmethod ig/halt-key! :tunarr/tts [_ client]
-  (tts/close! client))
+  (log/info "initializing tts client")
+  #_(tts/close! client))
 
 (defmethod ig/init-key :tunarr/media-source [_ config]
-  (catalog/create-catalog config))
+  (log/info "initializing catalog")
+  #_(catalog/create-catalog config))
 
 (defmethod ig/halt-key! :tunarr/media-source [_ state]
-  (catalog/close! state))
+  (log/info "closing catalog")
+  #_(catalog/close! state))
 
 (defmethod ig/init-key :tunarr/tunarr-source [_ config]
-  config)
+  (log/info "initializing media source")
+  #_config)
 
 (defmethod ig/halt-key! :tunarr/tunarr-source [_ _]
-  (log/info "Releasing Tunarr source resources"))
+  (log/info "closing media source")
+  #_(log/info "Releasing Tunarr source resources"))
 
 (defmethod ig/init-key :tunarr/persistence [_ config]
-  (catalog/create-persistence config))
+  (log/info "initializing catalog persistence")
+  #_(catalog/create-persistence config))
 
 (defmethod ig/halt-key! :tunarr/persistence [_ state]
-  (catalog/close-persistence! state))
+  (log/info "closing catalog persistence")
+  #_(catalog/close-persistence! state))
 
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
-  (engine/create-engine (assoc config
-                               :time-zone time-zone
-                               :daytime-hours daytime-hours
-                               :seasonal seasonal
-                               :preferences preferences)))
+  (log/info "initializing scheduler")
+  #_(engine/create-engine (assoc config
+                                 :time-zone time-zone
+                                 :daytime-hours daytime-hours
+                                 :seasonal seasonal
+                                 :preferences preferences)))
 
 (defmethod ig/halt-key! :tunarr/scheduler [_ engine]
-  (engine/stop! engine))
+  (log/info "closing scheduler")
+  #_(engine/stop! engine))
 
 (defmethod ig/init-key :tunarr/bumpers [_ {:keys [llm tts]}]
-  (bumpers/create-service {:llm llm :tts tts}))
+  (log/info "initializing bumpers")
+  #_(bumpers/create-service {:llm llm :tts tts}))
 
 (defmethod ig/halt-key! :tunarr/bumpers [_ svc]
-  (bumpers/close! svc))
+  (log/info "closing bumpers")
+  #_(bumpers/close! svc))
 
 (defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media llm tts bumpers tunarr persistence logger]}]
   (http/start! {:port port
-                :scheduler scheduler
-                :media media
-                :llm llm
-                :tts tts
-                :bumpers bumpers
-                :tunarr tunarr
-                :persistence persistence}))
+                ;:scheduler scheduler
+                ;:media media
+                ;:llm llm
+                ;:tts tts
+                ;:bumpers bumpers
+                ;:tunarr tunarr
+                ;:persistence persistence
+                }))
 
 (defmethod ig/halt-key! :tunarr/http-server [_ server]
   (http/stop! server))

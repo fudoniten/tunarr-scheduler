@@ -1,4 +1,4 @@
--- Ccreate core tables
+-- Create core tables
 
 CREATE TABLE library (
   id         VARCHAR(128) PRIMARY KEY,
