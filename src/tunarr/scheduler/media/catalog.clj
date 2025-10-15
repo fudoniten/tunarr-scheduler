@@ -20,11 +20,6 @@
 
 (defmulti initialize-catalog :store-type)
 
-(defn create-catalog [{:keys [type] :as config}]
-  (log/info "Initialising media catalog" {:source (if (:base-url config) :jellyfin :tunarr)})
-  {:config config
-   :state (atom {})})
-
 (defn create-persistence [config]
   (log/info "Initialising persistence layer" {:type (:type config)})
   (case (:type config)
