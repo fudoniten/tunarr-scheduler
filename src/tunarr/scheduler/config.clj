@@ -41,7 +41,7 @@
                                              (:dbtype catalog-config)
                                              (:dbtype config)))
         catalog-config (-> {:type catalog-type}
-                           (merge (dissoc catalog-config :type :dbtype)))
+                           (merge catalog-config))
         add-default (fn [cfg k default]
                       (if (contains? cfg k) cfg (assoc cfg k default)))
         catalog-config (if (= :postgresql catalog-type)

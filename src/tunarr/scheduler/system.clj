@@ -52,7 +52,7 @@
 
 (defmethod ig/init-key :tunarr/catalog [_ config]
   (log/info "initializing catalog")
-  (catalog/initialize-catalog! (get config :catalog {})))
+  (catalog/initialize-catalog! config))
 
 (defmethod ig/halt-key! :tunarr/catalog [_ state]
   (log/info "closing catalog")
