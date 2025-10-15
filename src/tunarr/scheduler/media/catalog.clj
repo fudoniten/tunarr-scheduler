@@ -1,9 +1,6 @@
 (ns tunarr.scheduler.media.catalog
   "Media catalog integration with Jellyfin or Tunarr."
-  (:require [clojure.java.io :as io]
-            [clojure.edn :as edn]
-            [clojure.spec.alpha :as s]
-            [taoensso.timbre :as log]))
+  (:require [taoensso.timbre :as log]))
 
 (defprotocol Catalog
   (add-media [catalog media])
@@ -18,5 +15,5 @@
   (get-media-by-genre [catalog genre])
   (close! [catalog]))
 
-(defmulti initialize-catalog :store-type)
+(defmulti initialize-catalog :type)
 

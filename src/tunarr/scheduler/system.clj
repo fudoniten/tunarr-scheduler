@@ -50,13 +50,13 @@
   (log/info "closing media source")
   #_(log/info "Releasing Tunarr source resources"))
 
-(defmethod ig/init-key :tunarr/persistence [_ config]
-  (log/info "initializing catalog persistence")
-  (catalog/create-persistence config))
+(defmethod ig/init-key :tunarr/catalog [_ config]
+  (log/info "initializing catalog")
+  (catalog/create-catalog config))
 
-(defmethod ig/halt-key! :tunarr/persistence [_ state]
-  (log/info "closing catalog persistence")
-  (catalog/close-persistence! state))
+(defmethod ig/halt-key! :tunarr/catalog [_ state]
+  (log/info "closing catalog")
+  (catalog/close-catalog! state))
 
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
@@ -79,7 +79,7 @@
   (log/info "closing bumpers")
   #_(bumpers/close! svc))
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media llm tts bumpers tunarr persistence logger]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media llm tts bumpers tunarr catalog logger]}]
   (http/start! {:port port
                 ;:scheduler scheduler
                 ;:media media
@@ -87,7 +87,7 @@
                 ;:tts tts
                 ;:bumpers bumpers
                 ;:tunarr tunarr
-                ;:persistence persistence
+                ;:catalog catalog
                 }))
 
 (defmethod ig/halt-key! :tunarr/http-server [_ server]
