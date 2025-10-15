@@ -52,11 +52,11 @@
 
 (defmethod ig/init-key :tunarr/persistence [_ config]
   (log/info "initializing catalog persistence")
-  #_(catalog/create-persistence config))
+  (catalog/create-persistence config))
 
 (defmethod ig/halt-key! :tunarr/persistence [_ state]
   (log/info "closing catalog persistence")
-  #_(catalog/close-persistence! state))
+  (catalog/close-persistence! state))
 
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]

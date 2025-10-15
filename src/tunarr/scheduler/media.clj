@@ -24,9 +24,9 @@
 (s/def ::critic-rating (s/nilable rating?))
 (s/def ::rating (s/nilable string?))
 (s/def ::id string?)
-(s/def ::type #{:movie :series})
+(s/def ::media-type #{:movie :series})
 (s/def ::production-year year?)
-(s/def ::subtitles? boolean?)
+(s/def ::subtitles boolean?)
 (s/def ::premiere date?)
 (s/def ::taglines (s/coll-of string?))
 (s/def ::library-id string?)
@@ -44,7 +44,8 @@
    ::subtitles?
    ::premiere
    ::taglines
-   ::library-id])
+   ::library-id
+   ::kid-friendly?])
 
 (s/def ::metadata
   (s/keys :req [media-fields]))
