@@ -1,9 +1,6 @@
 (ns tunarr.scheduler.media.catalog
   "Media catalog integration with Jellyfin or Tunarr."
-  (:require [clojure.java.io :as io]
-            [clojure.edn :as edn]
-            [clojure.spec.alpha :as s]
-            [taoensso.timbre :as log]))
+  (:require [taoensso.timbre :as log]))
 
 (defprotocol Catalog
   (add-media [catalog media])
@@ -18,14 +15,30 @@
   (get-media-by-genre [catalog genre])
   (close! [catalog]))
 
-(defmulti initialize-catalog :store-type)
+(defmulti initialize-catalog :type)
 
-(defn create-persistence [config]
-  (log/info "Initialising persistence layer" {:type (:type config)})
-  (case (:type config)
-    :filesystem {:type :filesystem :path (:path config)}
-    :memory {:type :memory :state (atom {:media {}})}
-    {:type :memory :state (atom {:media {}})}))
+(defmethod initialize-catalog :default [config]
+  (throw (ex-info "Unsupported catalog type" {:type (:type config)})))
 
-(defn close-persistence! [_]
-  (log/info "Closing persistence layer"))
+(defn- ensure-memory-state
+  [config]
+  (if (= :memory (:type config))
+    (update config :state #(or % (atom {:media {}})))
+    config))
+
+(defn create-catalog
+  "Initialize a catalog implementation based on the provided configuration."
+  [config]
+  (let [config (merge {:type :memory} (or config {}))
+        config (cond-> config
+                 (string? (:type config)) (update :type keyword))
+        config (ensure-memory-state config)]
+    (log/info "Initializing catalog" {:type (:type config)})
+    (initialize-catalog config)))
+
+(defn close-catalog!
+  "Shut down the provided catalog implementation if present."
+  [catalog]
+  (when (satisfies? Catalog catalog)
+    (log/info "Closing catalog")
+    (close! catalog)))
