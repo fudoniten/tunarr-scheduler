@@ -3,6 +3,7 @@
             [honey.sql :as sql]
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by]]
             [next.jdbc :as jdbc]
+            [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
             [clojure.stacktrace :refer [print-stack-trace]]))
 
@@ -205,11 +206,13 @@
     (sql:fetch! store verbose
                 (-> (sql:get-media)
                     (where [:= :media_genres.genre genre]))))
-  (close! [_]))
+  (close-catalog! [_] true))
 
-(defmethod catalog/initialize-catalog :postgresql
+(defmethod catalog/initialize-catalog! :postgresql
   [{:keys [host port user password database verbose]
-    :or   {verbose false}}]
+    :or   {verbose false}
+    :as config}]
+  (log/info (format "CATALOG: using config: %s" config))
   (let [db (jdbc/get-datasource {:dbtype   "postgresql"
                                  :dbname   database
                                  :user     user

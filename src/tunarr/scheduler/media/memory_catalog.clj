@@ -87,10 +87,10 @@
          vals
          (filter #(some #{genre} (::media/genres %)))
          vec))
-  (close! [_]
+  (close-catalog! [_]
     (reset! state {:media {}})
     nil))
 
-(defmethod catalog/initialize-catalog :memory
+(defmethod catalog/initialize-catalog! :memory
   [{:keys [state]}]
   (->MemoryCatalog (or state (atom {:media {}}))))

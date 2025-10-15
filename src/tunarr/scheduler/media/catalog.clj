@@ -13,7 +13,7 @@
   (get-media-by-channel [catalog channel])
   (get-media-by-tag [catalog tag])
   (get-media-by-genre [catalog genre])
-  (close! [catalog]))
+  (close-catalog! [catalog]))
 
-(defmulti initialize-catalog :type)
+(defmulti initialize-catalog! :type)
 
