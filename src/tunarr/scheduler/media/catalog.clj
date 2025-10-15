@@ -24,8 +24,8 @@
   (log/info "Initialising persistence layer" {:type (:type config)})
   (case (:type config)
     :filesystem {:type :filesystem :path (:path config)}
-    :memory {:type :memory :state (atom {})}
-    {:type :memory :state (atom {})}))
+    :memory {:type :memory :state (atom {:media {}})}
+    {:type :memory :state (atom {:media {}})}))
 
 (defn close-persistence! [_]
   (log/info "Closing persistence layer"))

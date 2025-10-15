@@ -1,7 +1,7 @@
 (ns tunarr.scheduler.media.sql-catalog
   (:require [tunarr.scheduler.media.catalog :as catalog]
             [honey.sql :as sql]
-            [honey.sql.helpers :refer [select from join where insert-into update values set delete-from returning on-conflict do-nothing columns] :as honey]
+            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by]]
             [next.jdbc :as jdbc]
             [tunarr.scheduler.media :as media]
             [clojure.stacktrace :refer [print-stack-trace]]))
@@ -33,26 +33,38 @@
             sql)]
     (try
       (jdbc/with-transaction [tx (jdbc/get-connection store)]
-        (doseq [sql sqls]
-          (jdbc/execute! tx (log! (sql/format sql)))))
+        (doseq [statement (->> sqls
+                                (mapcat #(if (sequential? %) % [%]))
+                                (remove nil?))]
+          (jdbc/execute! tx (log! (sql/format statement)))))
       (catch Exception e
-        (when (:verbose store)
+        (when verbose
           (println (capture-stack-trace e)))
         (throw e)))))
 
-(defn sql:fetch!  
-  "Fetch results for the given SQL query" 
+(defn sql:fetch!
+  "Fetch results for the given SQL query"
   [store verbose sql]
   (letfn [(log! [sql]
-            (when (:verbose store)
-              (println (str "fetching: " sql))
-              sql))]
+            (when verbose
+              (println (str "fetching: " sql)))
+            sql))]
     (try
-      (jdbc/execute! (:datasource store) (log! (sql/format sql)))
+      (jdbc/execute! store (log! (sql/format sql)))
       (catch Exception e
-        (when (:verbose store)
+        (when verbose
           (println (capture-stack-trace e)))
         (throw e)))))
+
+(defn media->row
+  "Rename the media map keys to match the SQL schema."
+  [media]
+  (reduce (fn [acc [media-key column]]
+            (if (contains? media media-key)
+              (assoc acc column (get media media-key))
+              acc))
+          {}
+          field-map))
 
 (defn sql:insert-tag
   [tag]
@@ -68,14 +80,18 @@
 
 (defn sql:insert-media-tags
   [media-id tags]
-  (concat (map sql:insert-tag tags)
-          (map (partial sql:insert-media-tag media-id) tags)))
+  (let [tags (seq tags)]
+    (if tags
+      (concat (map sql:insert-tag tags)
+              (map (partial sql:insert-media-tag media-id) tags))
+      ())))
 
 (defn sql:insert-genre
   [genre]
   (-> (insert-into :genre)
       (values {:name genre})
-      (on-conflict [:name] (do-nothing))))
+      (on-conflict [:name])
+      (do-nothing)))
 
 (defn sql:insert-media-genre
   [media-id genre]
@@ -85,14 +101,18 @@
 
 (defn sql:insert-media-genres
   [media-id genres]
-  (concat (map sql:insert-genre genres)
-          (map (partial sql:insert-media-genre media-id) genres)))
+  (let [genres (seq genres)]
+    (if genres
+      (concat (map sql:insert-genre genres)
+              (map (partial sql:insert-media-genre media-id) genres))
+      ())))
 
 (defn sql:insert-channel
   [channel]
   (-> (insert-into :channel)
       (values {:name channel})
-      (on-conflict [:name] (do-nothing))))
+      (on-conflict [:name])
+      (do-nothing)))
 
 (defn sql:insert-media-channel
   [media-id channel]
@@ -102,8 +122,11 @@
 
 (defn sql:insert-media-channels
   [media-id channels]
-  (concat (map sql:insert-channel channels)
-          (map (partial sql:insert-media-channel media-id) channels)))
+  (let [channels (seq channels)]
+    (if channels
+      (concat (map sql:insert-channel channels)
+              (map (partial sql:insert-media-channel media-id) channels))
+      ())))
 
 (defn sql:add-media
   [{:keys [::media/id
@@ -111,23 +134,12 @@
            ::media/channels
            ::media/genres]
     :as media}]
-  (let [media-keys [::media/id
-                    ::media/name
-                    ::media/library-id
-                    ::media/overview
-                    ::media/community-rating
-                    ::media/critic-rating
-                    ::media/type
-                    ::media/production-year
-                    ::media/premiere
-                    ::media/subtitles
-                    ::media/kid-friendly]]
+  (let [row (media->row media)]
     (concat [(-> (insert-into :media)
-                 (values (update-keys (select-keys media-keys media)
-                                      field-map)))]
-            (map (partial sql:insert-media-tags id) tags)
-            (map (partial sql:insert-media-genres id) genres)
-            (map (partial sql:insert-media-channels id) channels))))
+                 (values row))]
+            (sql:insert-media-tags id tags)
+            (sql:insert-media-genres id genres)
+            (sql:insert-media-channels id channels))))
 
 (defn sql:get-media
   []
@@ -142,18 +154,29 @@
               :media.subtitles
               :media.kid_friendly
               :media.library_id
-              [[:array_agg :distinct :media_tags.tag] :tags]
-              [[:array_agg :distinct :media_channels.channel] :channels]
-              [[:array_agg :distinct :media_genres.genre] :genres])
+              [[:array_agg [:distinct :media_tags.tag]] :tags]
+              [[:array_agg [:distinct :media_channels.channel]] :channels]
+              [[:array_agg [:distinct :media_genres.genre]] :genres])
       (from :media)
-      (join :media_tags [:= :media.id :media_tags.media_id]
-            :media_channels [:= :media.id :media_channels.media_id]
-            :media_genres [:= :media.id :media_genres.media_id])))
+      (left-join :media_tags [:= :media.id :media_tags.media_id])
+      (left-join :media_channels [:= :media.id :media_channels.media_id])
+      (left-join :media_genres [:= :media.id :media_genres.media_id])
+      (group-by :media.id
+                :media.name
+                :media.overview
+                :media.community_rating
+                :media.critic_rating
+                :media.media_type
+                :media.production_year
+                :media.premiere
+                :media.subtitles
+                :media.kid_friendly
+                :media.library_id)))
 
 (defrecord SqlCatalog [store verbose]
   catalog/Catalog
   (add-media [_ media]
-    (sql:exec! store verbose (sql:add-media media)))
+    (apply sql:exec! store verbose (sql:add-media media)))
   (get-media [_]
     (sql:fetch! store verbose (sql:get-media)))
   (get-media-by-library-id [_ library-id]
@@ -165,23 +188,23 @@
                 (-> (sql:get-media)
                     (where [:= :media.id media-id]))))
   (add-media-tags [_ media-id tags]
-    (sql:exec! store verbose (sql:insert-media-tags media-id tags)))
+    (apply sql:exec! store verbose (sql:insert-media-tags media-id tags)))
   (add-media-channels [_ media-id channels]
-    (sql:exec! store verbose (sql:insert-media-channels media-id channels)))
+    (apply sql:exec! store verbose (sql:insert-media-channels media-id channels)))
   (add-media-genres [_ media-id genres]
-    (sql:exec! store verbose (sql:insert-media-channels media-id genres)))
+    (apply sql:exec! store verbose (sql:insert-media-genres media-id genres)))
   (get-media-by-channel [_ channel]
     (sql:fetch! store verbose
                 (-> (sql:get-media)
-                    (where [:= :media_channels channel]))))
+                    (where [:= :media_channels.channel channel]))))
   (get-media-by-tag [_ tag]
     (sql:fetch! store verbose
                 (-> (sql:get-media)
-                    (where [:= :media_tags tag]))))
+                    (where [:= :media_tags.tag tag]))))
   (get-media-by-genre [_ genre]
     (sql:fetch! store verbose
                 (-> (sql:get-media)
-                    (where [:= :media_genres genre]))))
+                    (where [:= :media_genres.genre genre]))))
   (close! [_]))
 
 (defmethod catalog/initialize-catalog :postgresql
