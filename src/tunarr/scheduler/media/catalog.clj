@@ -20,12 +20,3 @@
 
 (defmulti initialize-catalog :store-type)
 
-(defn create-persistence [config]
-  (log/info "Initialising persistence layer" {:type (:type config)})
-  (case (:type config)
-    :filesystem {:type :filesystem :path (:path config)}
-    :memory {:type :memory :state (atom {})}
-    {:type :memory :state (atom {})}))
-
-(defn close-persistence! [_]
-  (log/info "Closing persistence layer"))
