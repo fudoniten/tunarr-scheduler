@@ -3,11 +3,7 @@
   (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [reitit.ring :as ring]
-            [ring.util.response :as response]
-            [taoensso.timbre :as log]
-            [tunarr.scheduler.media.catalog :as catalog]
-            [tunarr.scheduler.scheduling.engine :as engine]
-            [tunarr.scheduler.bumpers :as bumpers]))
+            [ring.util.response :refer [response status content-type]]))
 
 (defn- read-json [request]
   (when-let [body (:body request)]
@@ -15,22 +11,21 @@
       (json/parse-stream r true))))
 
 (defn- ok [data]
-  (-> (response/response (json/generate-string data))
-      (response/status 200)
-      (response/content-type "application/json")))
+  (-> (response (json/generate-string data))
+      (status 200)
+      (content-type "application/json")))
 
 (defn- accepted [data]
-  (-> (response/response (json/generate-string data))
-      (response/status 202)
-      (response/content-type "application/json")))
+  (-> (response (json/generate-string data))
+      (status 202)
+      (content-type "application/json")))
 
 (defn handler
   "Create the ring handler for the API."
   [{:keys [media scheduler llm persistence bumpers]}]
   (let [router
         (ring/router
-         [["/healthz" {:get (fn [_]
-                              (ok {:status "ok"}))}]
+         [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
           ["/api"
            #_["/media/retag" {:post (fn [request]
                                     (log/info "Retagging media") 

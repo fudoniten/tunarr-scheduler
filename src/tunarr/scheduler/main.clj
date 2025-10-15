@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [taoensso.timbre :as log]
             [tunarr.scheduler.config :as config]
-            [tunarr.scheduler.system :as system]))
+            [tunarr.scheduler.system :as system])
+  (:gen-class))
 
 (def cli-options
   [["-c" "--config PATH" "Path to configuration EDN file"

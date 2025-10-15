@@ -10,7 +10,7 @@
   (testing "unsupported types throw"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Unsupported port value"
-                          (#'config/parse-port {:not "a-port"}))))))
+                          (#'config/parse-port {:not "a-port"})))))
 
 (deftest load-config-default-test
   (let [cfg (config/load-config)]
