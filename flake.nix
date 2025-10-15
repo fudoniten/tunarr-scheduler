@@ -24,7 +24,7 @@
 
           tunarrScheduler = helpers.mkClojureBin {
             name = "org.fudo/tunarr-scheduler";
-            primaryNamespace = "tunarr-scheduler.cli";
+            primaryNamespace = "tunarr.scheduler.main";
             src = ./.;
           };
 

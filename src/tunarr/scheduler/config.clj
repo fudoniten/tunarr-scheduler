@@ -33,13 +33,19 @@
    ;:tunarr/tts (:tts config)
    ;:tunarr/media-source (:jellyfin config)
    ;:tunarr/tunarr-source (:tunarr config)
-   :tunarr/persistence (:persistence config)
+   ;:tunarr/persistence (:persistence config)
    ;:tunarr/scheduler {:time-zone (get-in config [:scheduler :time-zone])
    ;                   :daytime-hours (get-in config [:scheduler :daytime-hours])
    ;                   :seasonal (get-in config [:scheduler :seasonal])
    ;                   :preferences (get-in config [:scheduler :preferences])}
    ;:tunarr/bumpers {:llm (ig/ref :tunarr/llm)
    ;                 :tts (ig/ref :tunarr/tts)}
+   :tunarr/catalog {:dbtype   (get config :dbtype :in-memory)
+                    :dbname   (get config :dbname "tunarr-scheduler")
+                    :user     (get config :user   "tunarr-scheduler")
+                    :password (get config :password)
+                    :host     (get config :host   "postgres")
+                    :port     (get config :port   5432)}
    :tunarr/http-server {:port (get-in config [:server :port])
                         ;:scheduler (ig/ref :tunarr/scheduler)
                         ;:media (ig/ref :tunarr/media-source)

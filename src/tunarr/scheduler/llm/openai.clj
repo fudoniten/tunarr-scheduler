@@ -13,6 +13,7 @@
     (if (s/invalid? cx)
       (throw (ex-info (str "value does not conform to spec: " spec)
                       (assoc (s/explain-data spec x)
+                             :type :spec-failure
                              :spec spec
                              :value x)))
       cx)))

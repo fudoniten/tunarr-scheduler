@@ -8,7 +8,10 @@
             [tunarr.scheduler.system :as system]))
 
 (def cli-options
-  [["-c" "--config PATH" "Path to configuration EDN file"]
+  [["-c" "--config PATH" "Path to configuration EDN file"
+    :multi true
+    :default []
+    :validate [#(.exists (io/file %)) "config file not found"]]
    ["-h" "--help"]])
 
 (defn- usage [options-summary]
@@ -19,6 +22,20 @@
         "Options:"
         options-summary]
        (str/join \newline)))
+
+(defn deep-merge
+  ([] {})
+  ([a] a)
+  ([a b] (if (and (map? a) (map? b))
+           (merge-with deep-merge a b)
+           b))
+  ([a b & etc] (reduce deep-merge (deep-merge a b) etc)))
+
+(defn merge-configs
+  [configs]
+  (apply deep-merge
+         (map config/load-config
+              configs)))
 
 (defn -main [& args]
   (let [{:keys [options errors summary]} (parse-opts args cli-options)]
@@ -36,7 +53,7 @@
           (System/exit 1))
 
       :else
-      (let [config-map (config/load-config (:config options))
+      (let [config-map (merge-configs (:config options))
             system-config (config/config->system config-map)
             system (system/start system-config)]
         (log/info "Tunarr scheduler started" {:port (get-in config-map [:server :port])})
