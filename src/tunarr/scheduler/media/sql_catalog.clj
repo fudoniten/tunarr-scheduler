@@ -48,7 +48,7 @@
   (letfn [(log! [sql]
             (when verbose
               (println (str "fetching: " sql)))
-            sql))]
+            sql)]
     (try
       (jdbc/execute! store (log! (sql/format sql)))
       (catch Exception e
