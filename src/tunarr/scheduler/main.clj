@@ -12,6 +12,8 @@
   [["-c" "--config PATH" "Path to configuration EDN file"
     :multi true
     :default []
+    :update-fn (fnil conj [])
+    :missing "at least one config file is required."
     :validate [#(.exists (io/file %)) "config file not found"]]
    ["-h" "--help"]])
 
@@ -54,9 +56,9 @@
           (System/exit 1))
 
       :else
-      (let [config-map (merge-configs (:config options))
+      (let [config-map    (merge-configs (:config options))
             system-config (config/config->system config-map)
-            system (system/start system-config)]
+            system        (system/start system-config)]
         (log/info "Tunarr scheduler started" {:port (get-in config-map [:server :port])})
         (.addShutdownHook (Runtime/getRuntime)
                           (Thread. (fn []

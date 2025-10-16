@@ -210,9 +210,7 @@
 
 (defmethod catalog/initialize-catalog! :postgresql
   [{:keys [host port user password database verbose]
-    :or   {verbose false}
-    :as config}]
-  (log/info (format "CATALOG: using config: %s" config))
+    :or   {verbose false}}]
   (let [db (jdbc/get-datasource {:dbtype   "postgresql"
                                  :dbname   database
                                  :user     user

@@ -4,6 +4,7 @@
             [taoensso.timbre :as log]
             [tunarr.scheduler.http.server :as http]
             [tunarr.scheduler.media.catalog :as catalog]
+            [tunarr.scheduler.media.sql-catalog]
             [tunarr.scheduler.scheduling.engine :as engine]
             [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.llm.openai]
