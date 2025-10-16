@@ -157,22 +157,14 @@
               :media.library_id
               [[:array_agg [:distinct :media_tags.tag]] :tags]
               [[:array_agg [:distinct :media_channels.channel]] :channels]
-              [[:array_agg [:distinct :media_genres.genre]] :genres])
+              [[:array_agg [:distinct :media_genres.genre]] :genres]
+              [[:array_agg [:distinct :taglines.tagline] :taglines]])
       (from :media)
       (left-join :media_tags [:= :media.id :media_tags.media_id])
       (left-join :media_channels [:= :media.id :media_channels.media_id])
       (left-join :media_genres [:= :media.id :media_genres.media_id])
-      (group-by :media.id
-                :media.name
-                :media.overview
-                :media.community_rating
-                :media.critic_rating
-                :media.media_type
-                :media.production_year
-                :media.premiere
-                :media.subtitles
-                :media.kid_friendly
-                :media.library_id)))
+      (left-join :media_genres [:= :media.id :taglines.media_id])
+      (group-by :media.id)))
 
 (defrecord SqlCatalog [store verbose]
   catalog/Catalog

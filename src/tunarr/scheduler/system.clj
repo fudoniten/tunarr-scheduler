@@ -5,6 +5,8 @@
             [tunarr.scheduler.http.server :as http]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.sql-catalog]
+            [tunarr.scheduler.media.collection :as collection]
+            [tunarr.scheduler.media.jellyfin-collection]
             [tunarr.scheduler.scheduling.engine :as engine]
             [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.llm.openai]
@@ -35,13 +37,13 @@
   (log/info "initializing tts client")
   #_(tts/close! client))
 
-(defmethod ig/init-key :tunarr/media-source [_ config]
-  (log/info "initializing catalog")
-  #_(catalog/create-catalog config))
+(defmethod ig/init-key :tunarr/media-collection [_ config]
+  (log/info "initializing media collection")
+  (collection/initialize-collection! config))
 
-(defmethod ig/halt-key! :tunarr/media-source [_ state]
-  (log/info "closing catalog")
-  #_(catalog/close! state))
+(defmethod ig/halt-key! :tunarr/media-collection [_ collection]
+  (log/info "closing media collection")
+  (collection/close! collection))
 
 (defmethod ig/init-key :tunarr/tunarr-source [_ config]
   (log/info "initializing media source")

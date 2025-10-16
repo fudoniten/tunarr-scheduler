@@ -18,16 +18,16 @@
 (defn date? [o] (instance? Instant o))
 
 (s/def ::name string?)
-(s/def ::overview string?)
+(s/def ::overview (s/nilable string?))
 (s/def ::genres (s/coll-of ::genre))
-(s/def ::community-rating rating?)
+(s/def ::community-rating (s/nilable rating?))
 (s/def ::critic-rating (s/nilable rating?))
 (s/def ::rating (s/nilable string?))
 (s/def ::id string?)
 (s/def ::media-type #{:movie :series})
 (s/def ::production-year year?)
 (s/def ::subtitles boolean?)
-(s/def ::premiere date?)
+(s/def ::premiere inst?)
 (s/def ::taglines (s/coll-of string?))
 (s/def ::library-id string?)
 
@@ -40,6 +40,8 @@
    ::rating
    ::id
    ::type
+   ::media-type
+   ::subtitles
    ::production-year
    ::subtitles?
    ::premiere
