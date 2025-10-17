@@ -66,6 +66,7 @@
                              (add-default :port     (get config :port 5432)))
                          catalog-config)]
     {:tunarr/logger {:level (get config :log-level :info)}
+     :tunarr/job-runner (get config :jobs {})
                                         ;:tunarr/llm (:llm config)
                                         ;:tunarr/tts (:tts config)
                                         ;:tunarr/media-source (:jellyfin config)
@@ -81,6 +82,7 @@
      :tunarr/catalog catalog-config
      :tunarr/http-server {:port (or (System/getenv "TUNARR_SCHEDULER_PORT")
                                     (get-in config [:server :port]))
+                          :job-runner (ig/ref :tunarr/job-runner)
                                         ;:scheduler (ig/ref :tunarr/scheduler)
                                         ;:media (ig/ref :tunarr/media-source)
                                         ;:llm (ig/ref :tunarr/llm)
