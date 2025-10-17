@@ -1,5 +1,6 @@
 (ns tunarr.scheduler.config-test
   (:require [clojure.test :refer [deftest is testing]]
+            [integrant.core :as ig]
             [tunarr.scheduler.config :as config]))
 
 (deftest parse-port-test
@@ -26,7 +27,15 @@
 (deftest config->system-defaults-test
   (let [system (config/config->system {:server {:port 3000}})]
     (is (= {:type :memory} (:tunarr/catalog system)))
+    (is (= {} (:tunarr/job-runner system)))
     (is (= 3000 (get-in system [:tunarr/http-server :port])))))
+
+(deftest config->system-job-runner-config-test
+  (let [system (config/config->system {:server {:port 3000}
+                                       :jobs {:max-concurrency 8}})]
+    (is (= {:max-concurrency 8} (:tunarr/job-runner system)))
+    (is (= (ig/ref :tunarr/job-runner)
+           (get-in system [:tunarr/http-server :job-runner])))))
 
 (deftest config->system-postgres-defaults-test
   (let [system (config/config->system {:server {:port 3000}

@@ -3,6 +3,7 @@
   (:require [integrant.core :as ig]
             [taoensso.timbre :as log]
             [tunarr.scheduler.http.server :as http]
+            [tunarr.scheduler.jobs.runner :as job-runner]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.sql-catalog]
             [tunarr.scheduler.media.collection :as collection]
@@ -37,11 +38,19 @@
   (log/info "initializing tts client")
   #_(tts/close! client))
 
-(defmethod ig/init-key :tunarr/media-collection [_ config]
+(defmethod ig/init-key :tunarr/job-runner [_ config]
+  (log/info "initializing job runner")
+  (job-runner/create config))
+
+(defmethod ig/halt-key! :tunarr/job-runner [_ runner]
+  (log/info "shutting down job runner")
+  (job-runner/shutdown! runner))
+
+(defmethod ig/init-key :tunarr/collection [_ config]
   (log/info "initializing media collection")
   (collection/initialize-collection! config))
 
-(defmethod ig/halt-key! :tunarr/media-collection [_ collection]
+(defmethod ig/halt-key! :tunarr/collection [_ collection]
   (log/info "closing media collection")
   (collection/close! collection))
 
@@ -82,8 +91,11 @@
   (log/info "closing bumpers")
   #_(bumpers/close! svc))
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media llm tts bumpers tunarr catalog logger]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media llm tts bumpers tunarr catalog logger job-runner collection]}]
   (http/start! {:port port
+                :job-runner job-runner
+                :collection collection
+                :catalog catalog
                 ;:scheduler scheduler
                 ;:media media
                 ;:llm llm
