@@ -21,16 +21,40 @@
     (.toString inst)))
 
 (defn- ->public-job
-  [{:keys [id type status created-at started-at completed-at metadata result error]}]
+  [{:keys [id type status created-at started-at completed-at metadata result error progress]}]
   (cond-> {:id id
            :type type
            :status status
            :created-at (format-ts created-at)}
     metadata (assoc :metadata metadata)
+    (some? progress) (assoc :progress progress)
     started-at (assoc :started-at (format-ts started-at))
     completed-at (assoc :completed-at (format-ts completed-at))
     (contains? #{:succeeded :failed} status) (assoc :result result)
     (= :failed status) (assoc :error error)))
+
+(defn- sanitize-job-config
+  [job-config]
+  (cond
+    (map? job-config) job-config
+    (keyword? job-config) {:type job-config}
+    :else (throw (ex-info "Job config must be a map or keyword"
+                          {:job-config job-config}))))
+
+(defn- require-job-type
+  [{:keys [type] :as job-config}]
+  (when-not type
+    (throw (ex-info "Job type is required" {:job-config job-config})))
+  job-config)
+
+(defn- run-task
+  "Execute the task function, supporting either zero-arity jobs or jobs that
+  accept an update-progress callback."
+  [task-fn update-progress]
+  (try
+    (task-fn update-progress)
+    (catch clojure.lang.ArityException _
+      (task-fn))))
 
 (defmulti update-job! class)
 
@@ -54,11 +78,10 @@
 
   The job-config map must include a :type keyword describing the job. Optional
   :metadata will be stored alongside the job record."
-  [runner {:keys [type metadata] :as job-config} task-fn]
-  (when-not type
-    (throw (ex-info "Job type is required" {:job-config job-config})))
+  [runner {:keys [type metadata]} task-fn]
   (let [job-id (str (UUID/randomUUID))
-        update-progress (fn [progress] (update-job! runner job-id merge {:progress progress}))]
+        update-progress (fn [progress]
+                          (update-job! runner job-id merge {:progress progress}))]
     (add-job! runner job-id
               {:id job-id
                :type type
@@ -68,7 +91,7 @@
     (future
       (update-job! runner job-id merge {:status :running :started-at (now)})
       (try
-        (let [result (task-fn update-progress)]
+        (let [result (run-task task-fn update-progress)]
           (update-job! runner job-id merge {:status :succeeded
                                             :completed-at (now)
                                             :result result}))
@@ -77,8 +100,7 @@
           (update-job! runner job-id merge {:status :failed
                                             :completed-at (now)
                                             :error {:message (.getMessage t)
-                                                    :type (.getName (class t))
-                                                    :error t}}))))
+                                                    :type (.getName (class t))}}))))
     (job-info runner job-id)))
 
 (defn shutdown!
@@ -104,7 +126,10 @@
          (map ->public-job)
          (vec)))
   (submit! [self config task-fn]
-    (submit-job! self config task-fn))
+    (submit-job! self (-> config
+                          sanitize-job-config
+                          require-job-type)
+                 task-fn))
     
   java.io.Closeable
   (close [_] (reset! jobs {})))
