@@ -1,6 +1,7 @@
 (ns tunarr.scheduler.jobs.runner
   "In-memory asynchronous job runner for the Tunarr Scheduler service."
-  (:require [taoensso.timbre :as log])
+  (:require [taoensso.timbre :as log]
+            [clojure.spec.alpha :as s])
   (:import (java.time Instant)
            (java.util UUID)))
 
@@ -21,12 +22,13 @@
     (.toString inst)))
 
 (defn- ->public-job
-  [{:keys [id type status created-at started-at completed-at metadata result error]}]
+  [{:keys [id type status created-at started-at completed-at metadata result error progress]}]
   (cond-> {:id id
            :type type
            :status status
            :created-at (format-ts created-at)}
     metadata (assoc :metadata metadata)
+    (some? progress) (assoc :progress progress)
     started-at (assoc :started-at (format-ts started-at))
     completed-at (assoc :completed-at (format-ts completed-at))
     (contains? #{:succeeded :failed} status) (assoc :result result)
@@ -34,31 +36,27 @@
 
 (defmulti update-job! class)
 
-#_(defn job-info
-  "Fetch public information about a job."
-  [runner job-id]
-  (when-let [job (get @(.jobs runner) job-id)]
-    (->public-job job)))
+(def job-runner? (partial satisfies? IJobRunner))
 
-#_(defn list-jobs
-  "Return public information about all known jobs ordered by creation time."
-  [runner]
-  (->> @(.jobs runner)
-       vals
-       (sort-by :created-at #(compare %2 %1))
-       (map ->public-job)
-       vec))
+(s/def ::type #{:basic})
+
+(s/def ::config
+  (s/keys :req-un [::type]))
+
+(s/def ::task-fn
+  (s/fspec :args (s/cat :report-progress (s/fspec :args (s/cat :progress any?)))))
 
 (defn submit-job!
   "Submit an asynchronous job. Returns the initial job information.
 
   The job-config map must include a :type keyword describing the job. Optional
   :metadata will be stored alongside the job record."
-  [runner {:keys [type metadata] :as job-config} task-fn]
-  (when-not type
-    (throw (ex-info "Job type is required" {:job-config job-config})))
+  [runner {:keys [type metadata] :as config} task-fn]
+  (when-not (s/valid? ::config config)
+    (throw (ex-info "invalid task config" {:error (s/explain-data ::config config)})))
   (let [job-id (str (UUID/randomUUID))
-        update-progress (fn [progress] (update-job! runner job-id merge {:progress progress}))]
+        update-progress (fn [progress]
+                          (update-job! runner job-id merge {:progress progress}))]
     (add-job! runner job-id
               {:id job-id
                :type type
@@ -77,9 +75,13 @@
           (update-job! runner job-id merge {:status :failed
                                             :completed-at (now)
                                             :error {:message (.getMessage t)
-                                                    :type (.getName (class t))
-                                                    :error t}}))))
+                                                    :type (.getName (class t))}}))))
     (job-info runner job-id)))
+
+(s/fdef submit-job!
+  :args (s/cat :runner  job-runner?
+               :config  ::config
+               :task-fn ::task-fn))
 
 (defn shutdown!
   "Clear all tracked jobs."
@@ -95,7 +97,7 @@
   (get-job [_ job-id]
     (get @jobs job-id nil))
   (job-info [self job-id]
-    (when-let [job  (get-job self job-id)]
+    (when-let [job (get-job self job-id)]
       (->public-job job)))
   (list-jobs [_]
     (->> @jobs

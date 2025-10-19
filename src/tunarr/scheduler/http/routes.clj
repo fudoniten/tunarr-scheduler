@@ -38,8 +38,10 @@
       (let [job (jobs/submit! job-runner
                               {:type :media/rescan
                                :metadata {:libraries libraries}}
-                              #(media-sync/rescan-libraries!
-                                collection catalog {:libraries libraries}))]
+                              (fn [report-progress]
+                                (media-sync/rescan-libraries!
+                                 collection catalog {:libraries libraries
+                                                     :report-progress report-progress})))]
         (accepted {:job job}))
       (bad-request "At least one library must be provided"))))
 
