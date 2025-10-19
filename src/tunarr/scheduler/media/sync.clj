@@ -16,19 +16,23 @@
   them in the catalog.
 
   Returns a map detailing how many items were imported per library." 
-  [collection catalog {:keys [libraries]}]
+  [collection catalog {:keys [libraries report-progress]}]
   (when (empty? libraries)
     (throw (ex-info "No libraries provided" {})))
   (let [libraries (map normalize-library libraries)]
     (log/info "Starting media rescan" {:libraries libraries})
     (let [results
           (for [library libraries]
-            (let [items (vec (collection/get-library-items collection library))]
-              (doseq [item items]
-                (catalog/add-media catalog item))
+            (let [items (map-indexed vector (collection/get-library-items collection library))
+                  total-items (count items)]
+              (doseq [[n item] items]
+                (catalog/add-media catalog item)
+                (report-progress {:library library
+                                  :total-items total-items
+                                  :complete-items n}))
               {:library (name library)
                :count (count items)}))]
       (log/info "Completed media rescan" {:libraries libraries
-                                           :results results})
+                                          :results results})
       {:libraries results
        :total (reduce + 0 (map :count results))})))
