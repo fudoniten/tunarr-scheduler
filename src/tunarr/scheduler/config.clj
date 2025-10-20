@@ -48,7 +48,7 @@
         add-default (fn [cfg k default]
                       (if (contains? cfg k) cfg (assoc cfg k default)))
         collection-config (if (= :jellyfin (-> collection-config :type))
-                            (-> catalog-config
+                            (-> collection-config
                                 (replace-envvar :api-key "COLLECTION_API_KEY")
                                 (replace-envvar :base-url "COLLECTION_BASE_URL"))
                             collection-config)
