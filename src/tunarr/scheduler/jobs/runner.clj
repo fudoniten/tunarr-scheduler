@@ -99,7 +99,9 @@
   IJobRunner
   (jobs [_] @jobs)
   (add-job! [_ job-id job]
-    (apply swap! jobs assoc job-id job))
+    (log/info (format "adding job %s with config %s"
+                      job-id job))
+    (swap! jobs assoc job-id job))
   (get-job [_ job-id]
     (get @jobs job-id nil))
   (job-info [self job-id]
