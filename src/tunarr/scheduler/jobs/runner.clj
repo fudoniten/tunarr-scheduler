@@ -126,4 +126,4 @@
 
 (defmethod update-job! tunarr.scheduler.jobs.runner.JobRunner
   [runner id f & args]
-  (apply swap! (:jobs runner) update id f args))
+  (swap! (:jobs runner) update id f args))
