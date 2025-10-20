@@ -81,8 +81,9 @@
                                                     :type (.getName (class t))}}))))
     (->public-job new-job)))
 
+(s/def ::job-runner job-runner?)
 (s/fdef submit-job!
-  :args (s/cat :runner  job-runner?
+  :args (s/cat :runner  ::job-runner
                :config  ::config
                :task-fn ::task-fn))
 
