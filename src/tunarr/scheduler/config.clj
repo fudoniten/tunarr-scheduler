@@ -80,8 +80,9 @@
                                         ;                 :tts (ig/ref :tunarr/tts)}
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
-     :tunarr/http-server {:port (or (System/getenv "TUNARR_SCHEDULER_PORT")
-                                    (get-in config [:server :port]))
+     :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
+                                    (or (get-in config [:server :port]))
+                                    (parse-port))
                           :job-runner (ig/ref :tunarr/job-runner)
                                         ;:scheduler (ig/ref :tunarr/scheduler)
                                         ;:media (ig/ref :tunarr/media-source)
