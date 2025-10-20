@@ -2,6 +2,7 @@
   (:require [clj-http.client :as http]
             [cheshire.core :as json]
             [clojure.spec.alpha :as s]
+            [clojure.string :as str]
             [clojure.instant :refer [read-instant-date]]
             [cemerick.url :as url]
             [taoensso.timbre :as log]
@@ -81,7 +82,9 @@
         (transform-field :Tags ::media/tags
                          (default []))
         (transform-field :Taglines ::media/taglines
-                         (default [])))))
+                         (fn [tags] (some->> tags
+                                            (or [])
+                                            (map ->kebab-case-keyword)))))))
 
 (defn jellyfin:fetch-library-items
   [{:keys [base-url libraries] :as config} library]
@@ -92,7 +95,7 @@
                                   :SortBy           "SortName"
                                   :ParentId         library-id
                                   :IncludeItemTypes "Movie,Series"
-                                  :Fields           JELLYFIN_DEFAULT_FIELDS})]
+                                  :Fields           (str/join "," JELLYFIN_DEFAULT_FIELDS)})]
       (->> (jellyfin-request config url)
            :Items
            (map parse-jellyfin-item)

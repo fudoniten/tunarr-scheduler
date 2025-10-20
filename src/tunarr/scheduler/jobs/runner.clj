@@ -127,4 +127,5 @@
 
 (defmethod update-job! JobRunner
   [runner id f & args]
-  (swap! (:jobs runner) update id f args))
+  (swap! (:jobs runner) update id
+         (fn [job] (apply f (cons job args)))))
