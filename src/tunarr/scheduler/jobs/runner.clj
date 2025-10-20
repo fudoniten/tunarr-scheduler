@@ -22,17 +22,20 @@
     (.toString inst)))
 
 (defn- ->public-job
-  [{:keys [id type status created-at started-at completed-at metadata result error progress]}]
-  (cond-> {:id id
-           :type type
-           :status status
-           :created-at (format-ts created-at)}
-    metadata (assoc :metadata metadata)
-    (some? progress) (assoc :progress progress)
-    started-at (assoc :started-at (format-ts started-at))
-    completed-at (assoc :completed-at (format-ts completed-at))
-    (contains? #{:succeeded :failed} status) (assoc :result result)
-    (= :failed status) (assoc :error error)))
+  [job]
+  (when job
+    (let [{:keys [id type status created-at started-at completed-at metadata result error progress]}
+          job]
+      (cond-> {:id id
+               :type type
+               :status status
+               :created-at (format-ts created-at)}
+        metadata (assoc :metadata metadata)
+        (some? progress) (assoc :progress progress)
+        started-at (assoc :started-at (format-ts started-at))
+        completed-at (assoc :completed-at (format-ts completed-at))
+        (contains? #{:succeeded :failed} status) (assoc :result result)
+        (= :failed status) (assoc :error error)))))
 
 (defmulti update-job! class)
 
@@ -55,14 +58,14 @@
   (when-not (s/valid? ::config config)
     (throw (ex-info "invalid task config" {:error (s/explain-data ::config config)})))
   (let [job-id (str (UUID/randomUUID))
+        new-job {:id job-id
+                 :type type
+                 :status :queued
+                 :metadata metadata
+                 :created-at (now)}
         update-progress (fn [progress]
                           (update-job! runner job-id merge {:progress progress}))]
-    (add-job! runner job-id
-              {:id job-id
-               :type type
-               :status :queued
-               :metadata metadata
-               :created-at (now)})
+    (add-job! runner job-id new-job)
     (future
       (update-job! runner job-id merge {:status :running :started-at (now)})
       (try
@@ -76,7 +79,7 @@
                                             :completed-at (now)
                                             :error {:message (.getMessage t)
                                                     :type (.getName (class t))}}))))
-    (job-info runner job-id)))
+    (->public-job new-job)))
 
 (s/fdef submit-job!
   :args (s/cat :runner  job-runner?
