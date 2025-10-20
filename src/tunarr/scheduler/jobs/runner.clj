@@ -38,7 +38,7 @@
 
 (def job-runner? (partial satisfies? IJobRunner))
 
-(s/def ::type #{:basic})
+(s/def ::type #{:media/rescan})
 
 (s/def ::config
   (s/keys :req-un [::type]))

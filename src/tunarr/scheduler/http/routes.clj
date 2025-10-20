@@ -58,10 +58,16 @@
                                         (submit-rescan-job!
                                          {:job-runner job-runner
                                           :collection collection
-                                          :catalog catalog}
+                                          :catalog    catalog}
                                          payload)))}]
+           ["/media/:library/rescan" {:post (fn [{{:keys [library]} :path-params}]
+                                              (submit-rescan-job!
+                                               {:job-runner job-runner
+                                                :collection collection
+                                                :catalog    catalog}
+                                               {:libraries [library]}))}]
            ["/jobs" {:get (fn [_]
-                             (ok {:jobs (jobs/list-jobs job-runner)}))}]
+                            (ok {:jobs (jobs/list-jobs job-runner)}))}]
            ["/jobs/:job-id" {:get (fn [{{:keys [job-id]} :path-params}]
                                      (if-let [job (jobs/job-info job-runner job-id)]
                                        (ok {:job job})

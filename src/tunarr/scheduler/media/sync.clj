@@ -26,6 +26,7 @@
             (let [items (map-indexed vector (collection/get-library-items collection library))
                   total-items (count items)]
               (doseq [[n item] items]
+                (log/info (format "adding media item: %s" (:name item)))
                 (catalog/add-media catalog item)
                 (report-progress {:library library
                                   :total-items total-items
