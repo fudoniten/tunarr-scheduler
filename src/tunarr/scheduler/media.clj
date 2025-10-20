@@ -46,6 +46,7 @@
    ::subtitles?
    ::premiere
    ::taglines
+   ::tags
    ::library-id
    ::kid-friendly?])
 

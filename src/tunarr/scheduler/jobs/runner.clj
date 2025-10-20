@@ -1,7 +1,8 @@
 (ns tunarr.scheduler.jobs.runner
   "In-memory asynchronous job runner for the Tunarr Scheduler service."
   (:require [taoensso.timbre :as log]
-            [clojure.spec.alpha :as s])
+            [clojure.spec.alpha :as s]
+            [clojure.stacktrace :refer [print-stack-trace]])
   (:import (java.time Instant)
            (java.util UUID)))
 
@@ -37,7 +38,7 @@
         (contains? #{:succeeded :failed} status) (assoc :result result)
         (= :failed status) (assoc :error error)))))
 
-(defmulti update-job! class)
+(defmulti update-job! (fn [o & _] (class o)))
 
 (def job-runner? (partial satisfies? IJobRunner))
 
@@ -68,8 +69,8 @@
     (log/info (format "creating job: %s" job-id))
     (add-job! runner job-id new-job)
     (future
-      (update-job! runner job-id merge {:status :running :started-at (now)})
       (try
+        (update-job! runner job-id merge {:status :running :started-at (now)})
         (log/info (format "job running: %s" job-id))
         (let [result (task-fn update-progress)]
           (update-job! runner job-id merge {:status :succeeded
@@ -77,6 +78,7 @@
                                             :result result}))
         (catch Throwable t
           (log/error t "Job failed" {:job-id job-id :type type})
+          (log/info (with-out-str (print-stack-trace t)))
           (update-job! runner job-id merge {:status :failed
                                             :completed-at (now)
                                             :error {:message (.getMessage t)
@@ -99,8 +101,7 @@
   IJobRunner
   (jobs [_] @jobs)
   (add-job! [_ job-id job]
-    (log/info (format "adding job %s with config %s"
-                      job-id job))
+    (log/info (format "adding job %s with config %s" job-id job))
     (swap! jobs assoc job-id job))
   (get-job [_ job-id]
     (get @jobs job-id nil))
@@ -124,6 +125,6 @@
   [_]
   (->JobRunner (atom {})))
 
-(defmethod update-job! tunarr.scheduler.jobs.runner.JobRunner
+(defmethod update-job! JobRunner
   [runner id f & args]
   (swap! (:jobs runner) update id f args))

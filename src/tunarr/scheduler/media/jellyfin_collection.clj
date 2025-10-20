@@ -34,6 +34,7 @@
    "OfficialRating"
    "CriticRating"
    "CommunityRating"
+   "Tags"
    "Overview"
    "Genres"
    "Taglines"])
@@ -77,6 +78,8 @@
         (transform-field :PremiereDate ::media/premiere
                          (fn [d] (or (some-> d read-instant-date)
                                     (Instant/now))))
+        (transform-field :Tags ::media/tags
+                         (default []))
         (transform-field :Taglines ::media/taglines
                          (default [])))))
 
