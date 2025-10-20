@@ -65,10 +65,12 @@
                  :created-at (now)}
         update-progress (fn [progress]
                           (update-job! runner job-id merge {:progress progress}))]
+    (log/info (format "creating job: %s" job-id))
     (add-job! runner job-id new-job)
     (future
       (update-job! runner job-id merge {:status :running :started-at (now)})
       (try
+        (log/info (format "job running: %s" job-id))
         (let [result (task-fn update-progress)]
           (update-job! runner job-id merge {:status :succeeded
                                             :completed-at (now)

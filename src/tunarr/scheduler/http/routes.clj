@@ -40,7 +40,7 @@
                                :metadata {:libraries libraries}}
                               (fn [report-progress]
                                 (media-sync/rescan-libraries!
-                                 collection catalog {:libraries libraries
+                                 collection catalog {:libraries       libraries
                                                      :report-progress report-progress})))]
         (accepted {:job job}))
       (bad-request "At least one library must be provided"))))
@@ -52,14 +52,6 @@
         (ring/router
          [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
           ["/api"
-           ["/media/rescan" {:post (fn [req]
-                                      (log/info "Scheduling media rescan")
-                                      (let [payload (or (read-json req) {})]
-                                        (submit-rescan-job!
-                                         {:job-runner job-runner
-                                          :collection collection
-                                          :catalog    catalog}
-                                         payload)))}]
            ["/media/:library/rescan" {:post (fn [{{:keys [library]} :path-params}]
                                               (submit-rescan-job!
                                                {:job-runner job-runner
