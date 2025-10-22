@@ -6,7 +6,8 @@
             [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
             [clojure.stacktrace :refer [print-stack-trace]]
-            [clojure.spec.alpha :as s]))
+            [clojure.spec.alpha :as s]
+            [clojure.spec.test.alpha :refer [instrument]]))
 
 (def field-map
   {::media/name             :name
@@ -31,7 +32,7 @@
   [store verbose & sqls]
   (letfn [(log! [sql]
             (when verbose
-              (println (str "executing: " sql)))
+              (log/info (str "executing: " sql)))
             sql)]
     (try
       (jdbc/with-transaction [tx (jdbc/get-connection store)]
@@ -67,16 +68,6 @@
               acc))
           {}
           field-map))
-
-(defn sql:insert-channels
-  [channels]
-  (-> (insert-into :channel)
-      (columns [:name :description])
-      (values (into [] channels))
-      (on-conflict [:name]) (do-nothing)))
-
-(s/fdef sql:insert-channels
-  :args (s/cat :channels ::media/channel-descriptions))
 
 (defn sql:insert-tag
   [tag]
@@ -115,18 +106,24 @@
 
 (defn sql:insert-channels
   [channels]
-  (-> (insert-into :channel)
-      (columns [:name :full_name :id :description])
-      (values (map (fn [channel {:keys [name id description]}]
-                     [(name channel) name id description])))
-      (on-conflict [:name]) (do-update-set [:name :full_name :id :description])))
+  [(-> (insert-into :channel)
+       (columns [:name :full_name :id :description])
+       (values (map (fn [channel {:keys [name id description]}]
+                      [(name channel) name id description])
+                    channels))
+       (on-conflict [:name]) (do-update-set [:name :full_name :id :description]))])
+
+(s/fdef sql:insert-channels
+  :args (s/cat :channels ::media/channel-descriptions))
+
+(instrument 'sql:insert-channels)
 
 (defn sql:insert-media-channels
   [media-id channels]
-  (-> (insert-into :media_channels)
-      (columns [:media_id :channel])
-      (values (map (fn [channel] [media-id channel]) channels))
-      (on-conflict [:media_id :channel]) (do-nothing)))
+  [(-> (insert-into :media_channels)
+       (columns [:media_id :channel])
+       (values (map (fn [channel] [media-id channel]) channels))
+       (on-conflict [:media_id :channel]) (do-nothing))])
 
 (defn sql:insert-taglines
   [media-id taglines]

@@ -71,6 +71,8 @@
   (catalog/close-catalog! state))
 
 (defmethod ig/init-key :tunarr/channel-sync [_ {:keys [channels catalog]}]
+  (when (not channels)
+    (throw (ex-info "missing required key: channels" {})))
   (log/info "syncing channels with config")
   (catalog/update-channels catalog channels)
   channels)
