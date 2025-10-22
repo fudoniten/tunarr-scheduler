@@ -4,7 +4,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [taoensso.timbre :as log]
-            [integrant.core :as ig]))
+            [integrant.core :as ig]
+            [tunarr.scheduler.media :as media]))
 
 (def default-config-resource "config.edn")
 
@@ -28,6 +29,9 @@
     (string? value) (keyword (str/trim value))
     (nil? value) :memory
     :else value))
+
+(defn update-key [m k new-k f]
+  (assoc m new-k (f (get m k))))
 
 (defn config->system
   "Produce the Integrant system configuration map from the raw config map."
@@ -65,7 +69,13 @@
                              (add-default :host     (get config :host "postgres"))
                              (add-default :port     (get config :port 5432)))
                          catalog-config)
-        channel-config (get config :channels {})]
+        channel-config (into {}
+                             (map (fn [[ch cfg]]
+                                    [ch (-> cfg
+                                            (update-key :id ::media/channel-id identity)
+                                            (update-key :description ::media/channel-description identity)
+                                            (update-key :full_name ::media/channel-fullname identity))]))
+                             (get config :channels {}))]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
                                         ;:tunarr/llm (:llm config)

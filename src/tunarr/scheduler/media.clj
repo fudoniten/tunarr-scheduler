@@ -5,8 +5,14 @@
 (s/def ::tag keyword?)
 (s/def ::tags (s/coll-of ::tag))
 (s/def ::channel-name keyword?)
+(s/def ::channel-fullname string?)
+(s/def ::channel-description string?)
+(s/def ::channel-id string?)
 (s/def ::channel-descriptions
-  (s/map-of ::channel-name string?))
+  (s/map-of ::channel-name
+            (s/keys :req [::channel-fullname
+                          ::channel-id
+                          ::channel-description])))
 (s/def ::channel-names (s/coll-of ::channel-name))
 (s/def ::kid-friendly? boolean?)
 (s/def ::genre keyword)

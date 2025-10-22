@@ -73,13 +73,13 @@
   [tag]
   [(-> (insert-into :tag)
        (values [{:name tag}])
-       (on-conflict [:name]) (do-nothing))])
+       (on-conflict :name) (do-nothing))])
 
 (defn sql:insert-media-tag
   [media-id tag]
   [(-> (insert-into :media_tags)
        (values [{:tag tag :media_id media-id}])
-       (on-conflict [:tag :media_id]) (do-nothing))])
+       (on-conflict :tag :media_id) (do-nothing))])
 
 (defn sql:insert-media-tags
   [media-id tags]
@@ -93,7 +93,7 @@
   [genre]
   [(-> (insert-into :genre)
        (values [{:name genre}])
-       (on-conflict [:name])
+       (on-conflict :name)
        (do-nothing))])
 
 (defn sql:insert-media-genres
@@ -102,16 +102,18 @@
           [(-> (insert-into :media_genres)
                (columns [:media_id :genre])
                (values (map (fn [genre] [media-id genre]) genres))
-               (on-conflict [:media_id :genre]) (do-nothing))]))
+               (on-conflict :media_id :genre) (do-nothing))]))
 
 (defn sql:insert-channels
   [channels]
   [(-> (insert-into :channel)
-       (columns [:name :full_name :id :description])
-       (values (map (fn [channel {:keys [name id description]}]
-                      [(name channel) name id description])
+       (columns :name :full_name :id :description)
+       (values (map (fn [[channel {:keys [::media/channel-id
+                                         ::media/channel-fullname
+                                         ::media/channel-description]}]]
+                      [(name channel) channel-fullname channel-id channel-description])
                     channels))
-       (on-conflict [:name]) (do-update-set [:name :full_name :id :description]))])
+       (on-conflict :name) (do-update-set :name :full_name :id :description))])
 
 (s/fdef sql:insert-channels
   :args (s/cat :channels ::media/channel-descriptions))
@@ -123,7 +125,7 @@
   [(-> (insert-into :media_channels)
        (columns [:media_id :channel])
        (values (map (fn [channel] [media-id channel]) channels))
-       (on-conflict [:media_id :channel]) (do-nothing))])
+       (on-conflict :media_id :channel) (do-nothing))])
 
 (defn sql:insert-taglines
   [media-id taglines]
@@ -131,7 +133,7 @@
        (columns [:media_id :tagline])
        (values (map (fn [tagline] [media-id tagline])
                     taglines))
-       (on-conflict [:media_id :tagline] (do-nothing)))])
+       (on-conflict :media_id :tagline (do-nothing)))])
 
 (defn sql:add-media
   [{:keys [::media/id
