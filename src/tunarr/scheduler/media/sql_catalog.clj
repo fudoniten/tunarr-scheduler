@@ -1,11 +1,12 @@
 (ns tunarr.scheduler.media.sql-catalog
   (:require [tunarr.scheduler.media.catalog :as catalog]
             [honey.sql :as sql]
-            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by]]
+            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set]]
             [next.jdbc :as jdbc]
             [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
-            [clojure.stacktrace :refer [print-stack-trace]]))
+            [clojure.stacktrace :refer [print-stack-trace]]
+            [clojure.spec.alpha :as s]))
 
 (def field-map
   {::media/name             :name
@@ -67,80 +68,90 @@
           {}
           field-map))
 
+(defn sql:insert-channels
+  [channels]
+  (-> (insert-into :channel)
+      (columns [:name :description])
+      (values (into [] channels))
+      (on-conflict [:name]) (do-nothing)))
+
+(s/fdef sql:insert-channels
+  :args (s/cat :channels ::media/channel-descriptions))
+
 (defn sql:insert-tag
   [tag]
-  (-> (insert-into :tag)
-      (values {:name tag})
-      (on-conflict [:name]) (do-nothing)))
+  [(-> (insert-into :tag)
+       (values [{:name tag}])
+       (on-conflict [:name]) (do-nothing))])
 
 (defn sql:insert-media-tag
   [media-id tag]
-  (-> (insert-into :media_tags)
-      (values {:tag tag :media_id media-id})
-      (on-conflict [:tag :media_id]) (do-nothing)))
+  [(-> (insert-into :media_tags)
+       (values [{:tag tag :media_id media-id}])
+       (on-conflict [:tag :media_id]) (do-nothing))])
 
 (defn sql:insert-media-tags
   [media-id tags]
-  (let [tags (seq tags)]
-    (if tags
-      (concat (map sql:insert-tag tags)
-              (map (partial sql:insert-media-tag media-id) tags))
-      ())))
+  [(let [tags (seq tags)]
+     (if tags
+       (concat (map sql:insert-tag tags)
+               (map (partial sql:insert-media-tag media-id) tags))
+       ()))])
 
 (defn sql:insert-genre
   [genre]
-  (-> (insert-into :genre)
-      (values {:name genre})
-      (on-conflict [:name])
-      (do-nothing)))
-
-(defn sql:insert-media-genre
-  [media-id genre]
-  (-> (insert-into :media_genres)
-      (values {:genre genre :media_id media-id})
-      (on-conflict [:genre :media_id]) (do-nothing)))
+  [(-> (insert-into :genre)
+       (values [{:name genre}])
+       (on-conflict [:name])
+       (do-nothing))])
 
 (defn sql:insert-media-genres
   [media-id genres]
-  (let [genres (seq genres)]
-    (if genres
-      (concat (map sql:insert-genre genres)
-              (map (partial sql:insert-media-genre media-id) genres))
-      ())))
+  (concat (map sql:insert-genre (seq genres))
+          [(-> (insert-into :media_genres)
+               (columns [:media_id :genre])
+               (values (map (fn [genre] [media-id genre]) genres))
+               (on-conflict [:media_id :genre]) (do-nothing))]))
 
-(defn sql:insert-channel
-  [channel]
+(defn sql:insert-channels
+  [channels]
   (-> (insert-into :channel)
-      (values {:name channel})
-      (on-conflict [:name])
-      (do-nothing)))
-
-(defn sql:insert-media-channel
-  [media-id channel]
-  (-> (insert-into :media_channels)
-      (values {:channel channel :media_id media-id})
-      (on-conflict [:channel :media_id]) (do-nothing)))
+      (columns [:name :full_name :id :description])
+      (values (map (fn [channel {:keys [name id description]}]
+                     [(name channel) name id description])))
+      (on-conflict [:name]) (do-update-set [:name :full_name :id :description])))
 
 (defn sql:insert-media-channels
   [media-id channels]
-  (let [channels (seq channels)]
-    (if channels
-      (concat (map sql:insert-channel channels)
-              (map (partial sql:insert-media-channel media-id) channels))
-      ())))
+  (-> (insert-into :media_channels)
+      (columns [:media_id :channel])
+      (values (map (fn [channel] [media-id channel]) channels))
+      (on-conflict [:media_id :channel]) (do-nothing)))
+
+(defn sql:insert-taglines
+  [media-id taglines]
+  [(-> (insert-into :taglines)
+       (columns [:media_id :tagline])
+       (values (map (fn [tagline] [media-id tagline])
+                    taglines))
+       (on-conflict [:media_id :tagline] (do-nothing)))])
 
 (defn sql:add-media
   [{:keys [::media/id
            ::media/tags
            ::media/channels
-           ::media/genres]
+           ::media/genres
+           ::media/taglines]
     :as media}]
-  (let [row (media->row media)]
+  (let [row (-> media
+                (media->row)
+                (update :media_type name))]
     (concat [(-> (insert-into :media)
-                 (values row))]
+                 (values [row]))]
             (sql:insert-media-tags id tags)
             (sql:insert-media-genres id genres)
-            (sql:insert-media-channels id channels))))
+            (sql:insert-media-channels id channels)
+            (sql:insert-taglines id taglines))))
 
 (defn sql:get-media
   []
@@ -182,6 +193,8 @@
                     (where [:= :media.id media-id]))))
   (add-media-tags [_ media-id tags]
     (apply sql:exec! store verbose (sql:insert-media-tags media-id tags)))
+  (update-channels [_ channels]
+    (sql:exec! store verbose (sql:insert-channels channels)))
   (add-media-channels [_ media-id channels]
     (apply sql:exec! store verbose (sql:insert-media-channels media-id channels)))
   (add-media-genres [_ media-id genres]

@@ -1,6 +1,6 @@
 (ns tunarr.scheduler.media
   (:require [clojure.spec.alpha :as s])
-  (:import java.time.Instant))
+  (:import java.time.LocalDate))
 
 (s/def ::tag keyword?)
 (s/def ::tags (s/coll-of ::tag))
@@ -15,7 +15,7 @@
 
 (defn year? [n] (and (number? n) (<= 0 n 2100)))
 
-(defn date? [o] (instance? Instant o))
+(defn date? [o] (instance? LocalDate o))
 
 (s/def ::name string?)
 (s/def ::overview (s/nilable string?))
@@ -27,7 +27,7 @@
 (s/def ::media-type #{:movie :series})
 (s/def ::production-year year?)
 (s/def ::subtitles boolean?)
-(s/def ::premiere inst?)
+(s/def ::premiere date?)
 (s/def ::taglines (s/coll-of string?))
 (s/def ::library-id string?)
 

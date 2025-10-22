@@ -70,6 +70,15 @@
   (log/info "closing catalog")
   (catalog/close-catalog! state))
 
+(defmethod ig/init-key :tunarr/channel-sync [_ {:keys [channels catalog]}]
+  (log/info "syncing channels with config")
+  (catalog/update-channels catalog channels)
+  channels)
+
+(defmethod ig/halt-key! :tunarr/channel-sync [_ _]
+  (log/info "shutting down channel sync")
+  nil)
+
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
   (log/info "initializing scheduler")

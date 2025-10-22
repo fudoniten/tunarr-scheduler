@@ -31,19 +31,18 @@
   (json-response {:error message} 404))
 
 (defn- submit-rescan-job!
-  [{:keys [job-runner collection catalog]} payload]
-  (let [libraries (or (:libraries payload)
-                      (some-> (:library payload) vector))]
-    (if (seq libraries)
-      (let [job (jobs/submit! job-runner
-                              {:type :media/rescan
-                               :metadata {:libraries libraries}}
-                              (fn [report-progress]
-                                (media-sync/rescan-libraries!
-                                 collection catalog {:libraries       libraries
-                                                     :report-progress report-progress})))]
-        (accepted {:job job}))
-      (bad-request "At least one library must be provided"))))
+  [{:keys [job-runner collection catalog]} {:keys [library]}]
+  (if-not library
+    (bad-request "library not specified for rescan")
+    (let [job (jobs/submit! job-runner
+                            {:type :media/rescan
+                             :metadata {:library library}}
+                            (fn [report-progress]
+                              (media-sync/rescan-library! collection
+                                                          catalog
+                                                          {:library         library
+                                                           :report-progress report-progress})))]
+      (accepted {:job job}))))
 
 (defn handler
   "Create the ring handler for the API."
@@ -57,7 +56,7 @@
                                                {:job-runner job-runner
                                                 :collection collection
                                                 :catalog    catalog}
-                                               {:libraries [library]}))}]
+                                               {:library    library}))}]
            ["/jobs" {:get (fn [_]
                             (ok {:jobs (jobs/list-jobs job-runner)}))}]
            ["/jobs/:job-id" {:get (fn [{{:keys [job-id]} :path-params}]

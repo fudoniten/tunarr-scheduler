@@ -64,7 +64,8 @@
                              (add-default :password (get config :password))
                              (add-default :host     (get config :host "postgres"))
                              (add-default :port     (get config :port 5432)))
-                         catalog-config)]
+                         catalog-config)
+        channel-config (get config :channels {})]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
                                         ;:tunarr/llm (:llm config)
@@ -80,6 +81,8 @@
                                         ;                 :tts (ig/ref :tunarr/tts)}
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
+     :tunarr/channel-sync {:channels channel-config
+                           :catalog (ig/ref :tunarr/catalog)}
      :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
                                     (or (get-in config [:server :port]))
                                     (parse-port))

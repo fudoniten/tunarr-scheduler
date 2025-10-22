@@ -9,7 +9,7 @@
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.collection :as collection]
             [camel-snake-kebab.core :refer [->kebab-case-keyword]])
-  (:import [java.time Instant]))
+  (:import [java.time LocalDate ZoneId]))
 
 (defn jellyfin-request [{api-key :api-key} url]
   (let [opts {:headers {"X-Emby-Token" api-key}}]
@@ -53,6 +53,14 @@
                (-> (Instant/parse d)
                    (ZonedDateTime/ofInstant (ZoneId/of "America/Los_Angeles")))))))
 
+(defn normalize-rating
+  "Most ratings are between 1 - 10, but some are between 1 - 100. If it's <10,
+  assume it's 1-10, but if it's greater we should 'normalize' it to 1-10."
+  [n]
+  (if (and (number? n) (> n 10))
+    (* n 0.1)
+    n))
+
 (defn parse-jellyfin-item [item]
   (letfn [(default [d] (fn [o] (or o d)))]
     (-> item
@@ -63,9 +71,9 @@
         (transform-field :Genres ::media/genres
                          (fn [genres] (map ->kebab-case-keyword genres)))
         (transform-field :CommunityRating ::media/community-rating
-                         identity)
+                         normalize-rating)
         (transform-field :CriticRating ::media/critic-rating
-                         identity)
+                         normalize-rating)
         (transform-field :OfficialRating ::media/rating
                          identity)
         (transform-field :Id ::media/id
@@ -77,14 +85,17 @@
         (transform-field :Subtitles ::media/subtitles?
                          (fn [s] (or s false)))
         (transform-field :PremiereDate ::media/premiere
-                         (fn [d] (or (some-> d read-instant-date)
-                                    (Instant/now))))
+                         (fn [d] (or (some-> d
+                                            (read-instant-date)
+                                            (.toInstant)
+                                            (.atZone (ZoneId/systemDefault))
+                                            (.toLocalDate))
+                                    (LocalDate/now))))
         (transform-field :Tags ::media/tags
-                         (default []))
+                         (fn [tags] (->> (or tags [])
+                                        (map ->kebab-case-keyword))))
         (transform-field :Taglines ::media/taglines
-                         (fn [tags] (some->> tags
-                                            (or [])
-                                            (map ->kebab-case-keyword)))))))
+                         (default [])))))
 
 (defn jellyfin:fetch-library-items
   [{:keys [base-url libraries] :as config} library]
