@@ -11,6 +11,7 @@
   (get-media-by-library-id [catalog library-id])
   (add-media-tags [catalog media-id tags])
   (update-channels [catalog channels])
+  (update-libraries [catalog libraries])
   (add-media-channels [catalog media-id channels])
   (add-media-genres [catalog media-id channels])
   (get-media-by-channel [catalog channel])
@@ -51,6 +52,11 @@
   :args (s/cat :catalog  ::catalog
                :channels ::media/channel-descriptions))
 
+(s/fdef update-libraries
+  :args (s/cat :catalog   ::catalog
+               :libraries (s/map-of ::media/library-name
+                                    ::media/library-id)))
+
 (s/fdef add-media-channels
   :args (s/cat :catalog  ::catalog
                :media-id ::media/id
@@ -85,6 +91,7 @@
 (instrument 'get-media-by-library-id)
 (instrument 'add-media-tags)
 (instrument 'update-channels)
+(instrument 'update-libraries)
 (instrument 'add-media-channels)
 (instrument 'add-media-genres)
 (instrument 'get-media-by-channel)

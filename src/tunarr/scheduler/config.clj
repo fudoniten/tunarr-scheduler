@@ -74,7 +74,7 @@
                                     [ch (-> cfg
                                             (update-key :id ::media/channel-id identity)
                                             (update-key :description ::media/channel-description identity)
-                                            (update-key :full_name ::media/channel-fullname identity))]))
+                                            (update-key :name ::media/channel-fullname identity))]))
                              (get config :channels {}))]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
@@ -91,8 +91,9 @@
                                         ;                 :tts (ig/ref :tunarr/tts)}
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
-     :tunarr/channel-sync {:channels channel-config
-                           :catalog (ig/ref :tunarr/catalog)}
+     :tunarr/config-sync {:channels channel-config
+                          :libraries (get collection-config :libraries)
+                          :catalog (ig/ref :tunarr/catalog)}
      :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
                                     (or (get-in config [:server :port]))
                                     (parse-port))

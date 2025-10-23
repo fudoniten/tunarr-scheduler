@@ -2,6 +2,7 @@
   "Integrant system definition for the Tunarr Scheduler service."
   (:require [integrant.core :as ig]
             [taoensso.timbre :as log]
+            [clojure.string :as str]
             [tunarr.scheduler.http.server :as http]
             [tunarr.scheduler.jobs.runner :as job-runner]
             [tunarr.scheduler.media.catalog :as catalog]
@@ -70,14 +71,20 @@
   (log/info "closing catalog")
   (catalog/close-catalog! state))
 
-(defmethod ig/init-key :tunarr/channel-sync [_ {:keys [channels catalog]}]
+(defmethod ig/init-key :tunarr/config-sync [_ {:keys [channels libraries catalog]}]
   (when (not channels)
     (throw (ex-info "missing required key: channels" {})))
-  (log/info "syncing channels with config")
+  (when (not libraries)
+    (throw (ex-info "missing required key: libraries" {})))
+  (log/info (format "syncing channels with config: %s"
+                    (str/join "," (map name (keys channels)))))
   (catalog/update-channels catalog channels)
+  (log/info (format "syncing libraries with config: %s"
+                    (str/join "," (map name (keys libraries)))))
+  (catalog/update-libraries catalog libraries)
   channels)
 
-(defmethod ig/halt-key! :tunarr/channel-sync [_ _]
+(defmethod ig/halt-key! :tunarr/config-sync [_ _]
   (log/info "shutting down channel sync")
   nil)
 
