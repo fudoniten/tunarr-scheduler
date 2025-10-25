@@ -1,13 +1,15 @@
 (ns tunarr.scheduler.media.sql-catalog
-  (:require [tunarr.scheduler.media.catalog :as catalog]
+  (:require [tunarr.scheduler.media :as media]
+            [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.sql.executor :as executor]
-            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set]]
-            [next.jdbc :as jdbc]
-            [taoensso.timbre :as log]
-            [tunarr.scheduler.media :as media]
+            
             [clojure.stacktrace :refer [print-stack-trace]]
             [clojure.spec.alpha :as s]
-            [clojure.spec.test.alpha :refer [instrument]]))
+            [clojure.spec.test.alpha :refer [instrument]]
+            
+            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from] :as sql]
+            [next.jdbc :as jdbc]
+            [camel-snake-kebab.core :refer [->snake_case_keyword]]))
 
 (def field-map
   {::media/name             :name
@@ -88,6 +90,10 @@
       (values (map (comp vector name) tags))
       (on-conflict :name) (do-nothing)))
 
+(defn sql:get-tags
+  []
+  (-> (select :tag) (from :tag)))
+
 (defn sql:insert-media-tags
   [media-id tags]
   (-> (insert-into :media_tags)
@@ -140,13 +146,43 @@
       (values (map (fn [channel] [media-id channel]) channels))
       (on-conflict :media_id :channel) (do-nothing)))
 
-(defn sql:insert-taglines
+(defn sql:insert-media-taglines
   [media-id taglines]
   (-> (insert-into :media_taglines)
       (columns :media_id :tagline)
       (values (map (fn [tagline] [media-id tagline])
                    taglines))
       (on-conflict :media_id :tagline (do-nothing))))
+
+(defn sql:delete-tag
+  [tag]
+  (-> (delete-from :tag)
+      (where [:= :name tag])))
+
+(defn sql:rename-tag
+  [tag new-tag]
+  (-> (sql/update :tag)
+      (sql/set {:name new-tag})
+      (where [:= :name tag])))
+
+(defn sql:get-tag
+  [tag]
+  (-> (select :tag)
+      (where [:= :name tag])))
+
+(defn sql:retag-media
+  [tag new-tag]
+  (-> (sql/update :media_tags)
+      (sql/set {:tag new-tag})
+      (where [:= :tag tag])
+      (on-conflict) (do-nothing)))
+
+(defn tag-exists?
+  [executor tag]
+  (let [[status result] (executor/fetch! executor (sql:get-tag tag))]
+    (if (= status :ok)
+      (some? result)
+      (throw result))))
 
 (defn sql:add-media
   [{:keys [::media/id
@@ -165,7 +201,7 @@
             [(sql:insert-media-tags id tags)
              (sql:insert-media-genres id genres)
              (sql:insert-media-channels id channels)
-             (sql:insert-taglines id taglines)])))
+             (sql:insert-media-taglines id taglines)])))
 
 (defn sql:get-media
   []
@@ -200,9 +236,12 @@
   (get-media-by-library-id [_ library-id]
     (sql:fetch! executor (-> (sql:get-media)
                           (where [:= :media.library_id library-id]))))
+  (get-tags [_]
+    (->> (sql:fetch! executor (sql:get-tags))
+         (map ->snake_case_keyword)))
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
-                          (where [:= :media.id media-id]))))
+                             (where [:= :media.id media-id]))))
   (add-media-tags [_ media-id tags]
     (sql:exec-with-tx! executor
                        [(sql:insert-tags tags)
@@ -227,6 +266,15 @@
     (sql:fetch! executor
                 (-> (sql:get-media)
                     (where [:= :media_genres.genre genre]))))
+  (add-media-taglines [_ media-id taglines]
+    (sql:exec! executor (sql:insert-media-taglines media-id taglines)))
+  (delete-tag [_ tag]
+    (sql:exec! executor (sql:delete-tag tag)))
+  (rename-tag [_ tag new-tag]
+    (if (tag-exists? executor new-tag)
+      (sql:exec-with-tx! executor [(sql:retag-media tag new-tag)
+                                   (sql:delete-tag tag)])
+      (sql:exec! executor (sql:rename-tag tag new-tag))))  
   (close-catalog! [_] (executor/close! executor)))
 
 (defmethod catalog/initialize-catalog! :postgresql

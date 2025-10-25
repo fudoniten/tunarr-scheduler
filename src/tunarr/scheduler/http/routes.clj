@@ -6,7 +6,8 @@
             [ring.util.response :refer [response status content-type]]
             [taoensso.timbre :as log]
             [tunarr.scheduler.jobs.runner :as jobs]
-            [tunarr.scheduler.media.sync :as media-sync]))
+            [tunarr.scheduler.media.sync :as media-sync]
+            #_[tunarr.scheduler.curation.core :as curate]))
 
 (defn- read-json [request]
   (when-let [body (:body request)]
@@ -44,6 +45,45 @@
                                                            :report-progress report-progress})))]
       (accepted {:job job}))))
 
+#_(defn- submit-retag-job!
+  [{:keys [job-runner catalog]} {:keys [library]}]
+  (if-not library
+    (bad-request "library not specified for rescan")
+    (let [job (jobs/submit! job-runner
+                            {:type :media/rescan
+                             :metadata {:library library}}
+                            (fn [report-progress]
+                              (curate/retag-library! catalog
+                                                     {:library         library
+                                                      :report-progress report-progress})))]
+      (accepted {:job job}))))
+
+#_(defn- submit-tagline-job!
+  [{:keys [job-runner catalog]} {:keys [library]}]
+  (if-not library
+    (bad-request "library not specified for rescan")
+    (let [job (jobs/submit! job-runner
+                            {:type :media/rescan
+                             :metadata {:library library}}
+                            (fn [report-progress]
+                              (curate/add-library-taglines! catalog
+                                                            {:library         library
+                                                             :report-progress report-progress})))]
+      (accepted {:job job}))))
+
+#_(defn- submit-recategorize-job!
+  [{:keys [job-runner catalog]} {:keys [library]}]
+  (if-not library
+    (bad-request "library not specified for rescan")
+    (let [job (jobs/submit! job-runner
+                            {:type :media/rescan
+                             :metadata {:library library}}
+                            (fn [report-progress]
+                              (curate/recategorize-library! catalog
+                                                            {:library         library
+                                                             :report-progress report-progress})))]
+      (accepted {:job job}))))
+
 (defn handler
   "Create the ring handler for the API."
   [{:keys [job-runner collection catalog]}]
@@ -57,10 +97,25 @@
                                                 :collection collection
                                                 :catalog    catalog}
                                                {:library    library}))}]
+           #_["/media/:library/retag" {:post (fn [{{:keys [library]} :path-params}]
+                                             (submit-retag-job!
+                                              {:job-runner job-runner
+                                               :catalog    catalog}
+                                              {:library    library}))}]
+           #_["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
+                                                    (submit-tagline-job!
+                                                     {:job-runner job-runner
+                                                      :catalog    catalog}
+                                                     {:library    library}))}]
+           #_["/media/:library/recategorize" {:post (fn [{{:keys [library]} :path-params}]
+                                                    (submit-recategorize-job!
+                                                     {:job-runner job-runner
+                                                      :catalog    catalog}
+                                                     {:library    library}))}]
            ["/jobs" {:get (fn [_]
                             (ok {:jobs (jobs/list-jobs job-runner)}))}]
            ["/jobs/:job-id" {:get (fn [{{:keys [job-id]} :path-params}]
-                                     (if-let [job (jobs/job-info job-runner job-id)]
-                                       (ok {:job job})
-                                       (not-found "Job not found")))}]]])]
+                                    (if-let [job (jobs/job-info job-runner job-id)]
+                                      (ok {:job job})
+                                      (not-found "Job not found")))}]]])]
     (ring/ring-handler router (ring/create-default-handler))))

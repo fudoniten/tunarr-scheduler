@@ -69,6 +69,7 @@
                              (add-default :host     (get config :host "postgres"))
                              (add-default :port     (get config :port 5432)))
                          catalog-config)
+        tag-config (get config :tag-config {})
         channel-config (into {}
                              (map (fn [[ch cfg]]
                                     [ch (-> cfg
@@ -94,6 +95,8 @@
      :tunarr/config-sync {:channels channel-config
                           :libraries (get collection-config :libraries)
                           :catalog (ig/ref :tunarr/catalog)}
+     :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
+                             :tag-config tag-config}
      :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
                                     (or (get-in config [:server :port]))
                                     (parse-port))

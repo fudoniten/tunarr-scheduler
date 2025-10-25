@@ -9,14 +9,18 @@
   (get-media [catalog])
   (get-media-by-id [catalog media-id])
   (get-media-by-library-id [catalog library-id])
+  (get-tags [catalog])
   (add-media-tags [catalog media-id tags])
   (update-channels [catalog channels])
   (update-libraries [catalog libraries])
   (add-media-channels [catalog media-id channels])
   (add-media-genres [catalog media-id channels])
+  (add-media-taglines [catalog media-id taglines])
   (get-media-by-channel [catalog channel])
   (get-media-by-tag [catalog tag])
   (get-media-by-genre [catalog genre])
+  (delete-tag [catalog tag])
+  (rename-tag [catalog tag new-tag])
   (close-catalog! [catalog]))
 
 (defmulti initialize-catalog! :type)
@@ -43,6 +47,10 @@
                :library-id ::media/library-id)
   :ret  (s/coll-of ::media/metadata))
 
+(s/fdef get-tags
+  :args (s/cat :catalog ::catalog)
+  :ret  ::media/tags)
+
 (s/fdef add-media-tags
   :args (s/cat :catalog  ::catalog
                :media-id ::media/id
@@ -66,6 +74,11 @@
   :args (s/cat :catalog  ::catalog
                :media-id ::media/id
                :genres   (s/coll-of ::media/genre)))
+
+(s/fdef add-media-taglines
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :taglines (s/coll-of string?)))
 
 (s/fdef get-media-by-channel
   :args (s/cat :catalog ::catalog
@@ -94,6 +107,7 @@
 (instrument 'update-libraries)
 (instrument 'add-media-channels)
 (instrument 'add-media-genres)
+(instrument 'add-media-taglines)
 (instrument 'get-media-by-channel)
 (instrument 'get-media-by-tag)
 (instrument 'get-media-by-genre)

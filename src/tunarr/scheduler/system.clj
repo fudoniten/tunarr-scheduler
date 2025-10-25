@@ -9,6 +9,7 @@
             [tunarr.scheduler.media.sql-catalog]
             [tunarr.scheduler.media.collection :as collection]
             [tunarr.scheduler.media.jellyfin-collection]
+            [tunarr.scheduler.curation.tags :as tag-curator]
             [tunarr.scheduler.scheduling.engine :as engine]
             [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.llm.openai]
@@ -83,6 +84,14 @@
                     (str/join "," (map name (keys libraries)))))
   (catalog/update-libraries catalog libraries)
   channels)
+
+(defmethod ig/init-key :tunarr/normalize-tags
+  [_ {:keys [catalog tag-config]}]
+  (tag-curator/normalize! catalog tag-config))
+
+(defmethod ig/halt-key! :tunarr/normalize-tags
+  [_]
+  nil)
 
 (defmethod ig/halt-key! :tunarr/config-sync [_ _]
   (log/info "shutting down channel sync")
