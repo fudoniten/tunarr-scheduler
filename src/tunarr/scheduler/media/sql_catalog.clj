@@ -92,7 +92,7 @@
 
 (defn sql:get-tags
   []
-  (-> (select :tag) (from :tag)))
+  (-> (select :name) (from :tag)))
 
 (defn sql:insert-media-tags
   [media-id tags]
@@ -227,6 +227,10 @@
       (left-join :media_genres [:= :media.id :media_taglines.media_id])
       (group-by :media.id)))
 
+(defn pthru [msg o]
+  (println (format "%s: %s" msg o))
+  o)
+
 (defrecord SqlCatalog [executor]
   catalog/Catalog
   (add-media [_ media]
@@ -235,10 +239,11 @@
     (sql:fetch! executor (sql:get-media)))
   (get-media-by-library-id [_ library-id]
     (sql:fetch! executor (-> (sql:get-media)
-                          (where [:= :media.library_id library-id]))))
+                             (where [:= :media.library_id library-id]))))
   (get-tags [_]
     (->> (sql:fetch! executor (sql:get-tags))
-         (map ->snake_case_keyword)))
+         (pthru "FETCH RESULTS")
+         (map (comp ->snake_case_keyword first))))
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.id media-id]))))
