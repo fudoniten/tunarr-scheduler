@@ -167,21 +167,22 @@
 
 (defn sql:get-tag
   [tag]
-  (-> (select :tag)
+  (-> (select :name)
+      (from :tag)
       (where [:= :name tag])))
 
 (defn sql:retag-media
   [tag new-tag]
   (-> (sql/update :media_tags)
-      (sql/set {:tag new-tag})
-      (where [:= :tag tag])
+      (sql/set {:name new-tag})
+      (where [:= :name tag])
       (on-conflict) (do-nothing)))
 
 (defn tag-exists?
   [executor tag]
-  (let [[status result] (executor/fetch! executor (sql:get-tag tag))]
+  (let [[status result] (sql:fetch! executor (sql:get-tag tag))]
     (if (= status :ok)
-      (some? result)
+      (= tag (:tag/name result))
       (throw result))))
 
 (defn sql:add-media
@@ -227,10 +228,6 @@
       (left-join :media_genres [:= :media.id :media_taglines.media_id])
       (group-by :media.id)))
 
-(defn pthru [msg o]
-  (println (format "%s: %s" msg o))
-  o)
-
 (defrecord SqlCatalog [executor]
   catalog/Catalog
   (add-media [_ media]
@@ -241,9 +238,10 @@
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.library_id library-id]))))
   (get-tags [_]
-    (->> (sql:fetch! executor (sql:get-tags))
-         (pthru "FETCH RESULTS")
-         (map (comp ->snake_case_keyword first))))
+    (let [[status tags] (sql:fetch! executor (sql:get-tags))]
+      (if-not (= status :ok)
+        (throw tags)
+        (map (comp keyword :tag/name) tags))))
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.id media-id]))))

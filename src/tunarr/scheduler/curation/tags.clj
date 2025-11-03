@@ -22,7 +22,7 @@
 (defn normalize!
   [catalog tag-configs]
   (log/info "beginning tag normalization")
-  (doseq [tag (catalog/get-tags catalog)]
+  (doseq [tag (map name (catalog/get-tags catalog))]
     (let [cleaned (clean-tag tag)]
       (when-not (= tag cleaned)
         (log/info (format "renaming %s -> %s" tag cleaned))
