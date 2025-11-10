@@ -7,7 +7,7 @@
             [taoensso.timbre :as log]
             [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.media.sync :as media-sync]
-            #_[tunarr.scheduler.curation.core :as curate]))
+            [tunarr.scheduler.curation.core :as curate]))
 
 (defn- read-json [request]
   (when-let [body (:body request)]
@@ -45,7 +45,7 @@
                                                            :report-progress report-progress})))]
       (accepted {:job job}))))
 
-#_(defn- submit-retag-job!
+(defn- submit-retag-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
   (if-not library
     (bad-request "library not specified for rescan")
@@ -58,7 +58,7 @@
                                                       :report-progress report-progress})))]
       (accepted {:job job}))))
 
-#_(defn- submit-tagline-job!
+(defn- submit-tagline-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
   (if-not library
     (bad-request "library not specified for rescan")
@@ -66,9 +66,9 @@
                             {:type :media/rescan
                              :metadata {:library library}}
                             (fn [report-progress]
-                              (curate/add-library-taglines! catalog
-                                                            {:library         library
-                                                             :report-progress report-progress})))]
+                              (curate/generate-library-taglines! catalog
+                                                                 {:library         library
+                                                                  :report-progress report-progress})))]
       (accepted {:job job}))))
 
 #_(defn- submit-recategorize-job!
@@ -97,12 +97,12 @@
                                                 :collection collection
                                                 :catalog    catalog}
                                                {:library    library}))}]
-           #_["/media/:library/retag" {:post (fn [{{:keys [library]} :path-params}]
+           ["/media/:library/retag" {:post (fn [{{:keys [library]} :path-params}]
                                              (submit-retag-job!
                                               {:job-runner job-runner
                                                :catalog    catalog}
                                               {:library    library}))}]
-           #_["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
+           ["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
                                                     (submit-tagline-job!
                                                      {:job-runner job-runner
                                                       :catalog    catalog}

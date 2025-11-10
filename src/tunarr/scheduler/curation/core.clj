@@ -33,6 +33,36 @@
                       [(json/generate-string media)]
                       ["" "Existing tags:" "" existing-tags])))
 
+(defn tag-filter-prompt
+  [media existing-tags]
+  (str/join \newline
+            (concat ["Given a media item, with description, and a set of tags, pick out and return any tags that apply to the media."
+                     ""
+                     "For example, tags for Jurassic Park might be: dinosaurs, action, thriller, jungle, scifi, computer_hacker"
+                     ""
+                     "Return the tags in strict JSON, as a list of strings, with each string being an individual tag."
+                     ""
+                     "Media data:"
+                     ""]
+                      [(json/generate-string media)]
+                      ["" "Existing tags:" "" existing-tags])))
+
+(defn tag-generate-prompt
+  [media existing-tags]
+  (str/join \newline
+            (concat ["Given a media item, with description, and a set of applied tags, suggest any tags which should be applied."
+                     ""
+                     "For example, tags for Jurassic Park might be: dinosaurs, action, thriller, jungle, scifi, computer_hacker"
+                     ""
+                     "Tags should be lower-case, using python variable naming conventions (though some existing tags may not match that convention)."
+                     ""
+                     "Return the NEW tags in strict JSON, as a list of strings, with each string being an individual tag."
+                     ""
+                     "Media data:"
+                     ""]
+                      [(json/generate-string media)]
+                      ["" "Existing tags:" "" existing-tags])))
+
 (def system-prompt "You are a media content curator of JSON-formatted content. Respond in strict JSON format only.")
 
 (defn tagline-prompt
@@ -76,9 +106,9 @@
         (json-prompt-with-retry llm prompt (+ (or retry 0) e))))))
 
 (defprotocol ICurator
-  (retag-library! [self library])
+  (retag-library!             [self library])
   (generate-library-taglines! [self library])
-  (recategorize-library! [self library]))
+  (recategorize-library!      [self library]))
 
 (defn llm-retag-library!
   [llm catalog library]
@@ -99,6 +129,38 @@
                              (::media/name media)
                              tags)))))))
 
+(defn llm-retag-media!
+  [llm catalog media]
+  (log/info (format "re-tagging media: %s" (::media/name media)))
+  (let [media-id (::media/id media)
+        tag-batches (map json/generate-string (partition 50 (catalog/get-tags catalog)))
+        current-tags (->> media-id
+                          (catalog/get-media-tags catalog)
+                          (json/generate-string))]
+    (doseq [tag-set tag-batches]
+      (when-let [tags (json-prompt-with-retry
+                       llm
+                       [{:role    "system"
+                         :content system-prompt}
+                        {:role    "user"
+                         :content (tag-filter-prompt media tag-set)}])]
+        (if (s/valid? (s/coll-of string?) tags)
+          (do (log/info (format "Applying filtered tags to %s: %s" (::media/name media) tags))
+              (catalog/add-media-tags catalog media-id tags))
+          (log/error (format "failed to parse tags for media %s: output: %s"
+                             (::media/name media) tags))))
+      (when-let [tags (json-prompt-with-retry
+                       llm
+                       [{:role    "system"
+                         :content system-prompt}
+                        {:role    "user"
+                         :content (tag-generate-prompt media current-tags)}])]
+        (if (s/valid? (s/coll-of string?) tags)
+          (do (log/info (format "Applying new tags to %s: %s" (::media/name media) tags))
+              (catalog/add-media-tags catalog media-id tags))
+          (log/error (format "failed to parse tags for media %s: output: %s"
+                             (::media/name media) tags)))))))
+
 (defn llm-generate-library-taglines!
   [llm catalog library]
   (log/info (format "generating media taglines for library: %s" library))
@@ -117,8 +179,30 @@
                            (::media/name media)
                            taglines))))))
 
+(defn llm-generate-media-taglines!
+  [llm catalog media]
+  (log/info (format "generating media taglines for media: %s" (::media/name media)))
+  (when-let [taglines (json-prompt-with-retry
+                       llm
+                       [{:role "system"
+                         :content system-prompt}
+                        {:role "user"
+                         :content (tagline-prompt media)}])]
+    (if (s/valid? (s/coll-of string?) taglines)
+      (do (log/info (format "Taglines for %s: %s" (::media/name media) taglines))
+          (catalog/add-media-taglines catalog (::media/id media) taglines))
+      (log/error (format "Failed to generate taglines for media %s: output: %s"
+                         (::media/name media)
+                         taglines)))))
+
 (defn llm-categorize-library-media!
   [llm catalog library]
   (log/info (format "recategorizing media for library: %s" library))
   (doseq [media (catalog/get-media-by-library-id catalog library)]
     (log/info (format "recategorizing media: %s" (::media/name media)))))
+
+
+(defrecord LLMCurator [llm catalog]
+  (retag-library! [_ library] (llm-retag-library! llm catalog library))
+  (generate-library-taglines! [_ library] (llm-generate-library-taglines! llm catalog library))
+  (recategorize-library! [_ library] (throw (ex-info "not implemented: recategorize-library!" {}))))

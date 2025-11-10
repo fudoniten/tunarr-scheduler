@@ -171,6 +171,12 @@
       (from :tag)
       (where [:= :name tag])))
 
+(defn sql:get-media-tags
+  [media-id]
+  (-> (select :tag)
+      (from :media_tags)
+      (where [:= :media_id media-id])))
+
 (defn sql:retag-media
   [tag new-tag]
   (-> (sql/update :media_tags)
@@ -249,6 +255,8 @@
     (sql:exec-with-tx! executor
                        [(sql:insert-tags tags)
                         (sql:insert-media-tags media-id tags)]))
+  (get-media-tags [_ media-id]
+    (sql:fetch! executor (sql:get-media-tags media-id)))
   (update-channels [_ channels]
     (sql:exec! executor (sql:insert-channels channels)))
   (update-libraries [_ libraries]

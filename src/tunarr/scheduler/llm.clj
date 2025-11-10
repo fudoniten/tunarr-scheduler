@@ -30,16 +30,8 @@
 
 (defprotocol LLMClient
   "Protocol describing the interactions supported by LLM providers."
-  (classify-media! [client context media-item]
-    "Classify a media entity by delegating to the configured LLM.")
-  (schedule-programming! [client context catalog]
-    "Generate a schedule via the LLM. Placeholder implementation.")
-  (generate-schedule-bumper-script [client schedule]
-    "Generate narration script for bumper based on upcoming schedule.")
-  (generate-preview-bumper-script [client summary]
-    "Generate narration script for bumpers for upcoming 'events'.")
-  (generate-channel-bumper-script [client channel-schedules]
-    "Generate narration script for bumpers for other channels.")
+  (request! [client req]
+    "Send a request to the LLM.")
   (close! [client]
     "Perform any required close or teardown operations."))
 
@@ -47,31 +39,14 @@
 
 (s/def ::llm-client llm-client?)
 
-(s/def ::classify-media-request
-  (s/keys :req [::media/tags
-                ::media/channel-descriptions
-                ::media/media-metadata]))
-
-(s/fdef classify-media!
-  :args (s/cat :client llm-client? :request ::classify-media-request)
-  :ret  ::media/classification)
-
 (defmulti create-client
   "Create an LLM client from configuration."
   (fn [{:keys [provider]}] (keyword provider)))
 
 (defrecord GenericLLMClient [provider close-fn]
   LLMClient
-  (classify-media! [_ context media-item]
-    (throw (ex-info "not implemented: classify-media!" {})))
-  (schedule-programming! [_ context catalog]
-    (throw (ex-info "not implemented: schedule-programming!" {})))
-  (generate-schedule-bumper-script [client schedule]
-    (throw (ex-info "not implemented: generate-schedule-bumper-script" {})))
-  (generate-preview-bumper-script [client summary]
-    (throw (ex-info "not implemented: generate-preview-bumper-script" {})))
-  (generate-channel-bumper-script [client channel-schedules]
-    (throw (ex-info "not implemented: generate-channel-bumper-script" {})))
+  (request! [_ request]
+    (throw (ex-info "not implemented: request!" {})))
   (close! [client]
     (throw (ex-info "not implemented: close!" {}))))
 

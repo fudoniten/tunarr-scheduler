@@ -1666,6 +1666,16 @@
       "hash": "sha256-M0EOuKpz1S2Vez3G4KZfOZisBiPL2BPZDDPm5onEJCk="
     },
     {
+      "mvn-path": "org/clojure/data.csv/1.1.0/data.csv-1.1.0.jar",
+      "mvn-repo": "https://repo1.maven.org/maven2/",
+      "hash": "sha256-QShu1w9+zsoxj/Q+OS6zgIQ8McOEOmuubM1p6kk2CP0="
+    },
+    {
+      "mvn-path": "org/clojure/data.csv/1.1.0/data.csv-1.1.0.pom",
+      "mvn-repo": "https://repo1.maven.org/maven2/",
+      "hash": "sha256-KHfxC8BhxEhppqmDjYAOguiaQu2aNZRvlhC6y11hH+k="
+    },
+    {
       "mvn-path": "org/clojure/data.json/2.4.0/data.json-2.4.0.jar",
       "mvn-repo": "https://repo1.maven.org/maven2/",
       "hash": "sha256-7D8vmU4e7dQgMTxFK6VRjF9cl75RUt/tVlC8ZhFIat8="

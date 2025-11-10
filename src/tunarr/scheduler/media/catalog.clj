@@ -10,6 +10,7 @@
   (get-media-by-id [catalog media-id])
   (get-media-by-library-id [catalog library-id])
   (get-tags [catalog])
+  (get-media-tags [catalog media-id])
   (add-media-tags [catalog media-id tags])
   (update-channels [catalog channels])
   (update-libraries [catalog libraries])
@@ -49,6 +50,11 @@
 
 (s/fdef get-tags
   :args (s/cat :catalog ::catalog)
+  :ret  ::media/tags)
+
+(s/fdef get-media-tags
+  :args (s/cat :catalog ::catalog
+               :id      ::media/id)
   :ret  ::media/tags)
 
 (s/fdef add-media-tags

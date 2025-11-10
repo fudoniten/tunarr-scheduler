@@ -44,10 +44,10 @@
   [{:keys [endpoint api-key model http-opts]} messages {:keys [response-format] :as options}]
   (let [url (str (or (sanitize-url endpoint) "https://api.openai.com/v1") "/chat/completions")
         payload (merge {:model model
-                         :messages messages}
-                        (when response-format
-                          {:response_format response-format})
-                        (dissoc options :response-format))
+                        :messages messages}
+                       (when response-format
+                         {:response_format response-format})
+                       (dissoc options :response-format))
         request-opts (merge {:headers {"Authorization" (str "Bearer " api-key)
                                        "Content-Type" "application/json"}
                              :accept :json
@@ -65,81 +65,19 @@
     (throw (ex-info "OpenAI API key is required" {})))
   api-key)
 
-(defn- openai-json-response [client messages]
+(defn- openai-json-request! [client messages]
   (let [body (request-openai! client messages {:temperature 0.2
                                                :response-format {:type "json_object"}})
         content (some-> body response-content)]
     (or (->json content) {})))
 
-(defn- openai-classify-media [client media channels existing-tags]
-  (let [prompt (str/join \newline
-                         ["Classify the following media item, and respond with strict JSON containing the keys"
-                          "'tags' (array of lowercase string), 'channels' (array of lowercase strings),"
-                          "and 'kid-friendly' (boolean)."
-                          ""
-                          "A media item is 'kid-friendly' if it's suitable for a kid of about 12-14 years old."
-                          "Don't be too conservative."
-                          ""
-                          "Tags should include genre (general and specific), style, period, nation of origin,"
-                          "and so on. Tags will be used to group and select media for scheduling. Prefer tags"
-                          "which already exist, but invent new ones when helpful."
-                          ""
-                          "Existing tags:"
-                          (str/join "," existing-tags)
-                          ""
-                          "Channels must be selected from the following list, and cannot be invented. Every piece"
-                          "of media must be mapped to at least one channel, and can be mapped to more than one."
-                          ""
-                          "Channels:"
-                          (str/join \newline (map (fn [[k v]] (format "* %s - %s" k v)) channels))
-                          ""
-                          "Media item:"
-                          media])
-        response (openai-json-response client
-                                       [{:role "system"
-                                         :content "You are a content scheduler that categorises media for TV channels. Your responses should always be in strict JSON."}
-                                        {:role "user" :content prompt}])
-        tags (->> (:tags response)
-                  (keep #(when (string? %) (str/lower-case %)))
-                  (into #{}))
-        channels (->> (:channels response)
-                      (keep #(when (string? %) (keyword (str/replace % #"\s+" "-"))))
-                      vec)
-        kid-friendly? (boolean (or (:kid_friendly response)
-                                   (:kid-friendly response)))]
-    
-    {:tags (if (seq tags) tags #{"unspecified"})
-     :channels (if (seq channels) channels [:general])
-     :kid-friendly? kid-friendly?}))
-
 (defrecord OpenAIClient [model endpoint api-key http-opts]
   llm/LLMClient
-
-  (classify-media! [client {:keys [channels existing-tags]} media-item]
-    (log/info "Classifying media" {:title (:name media-item) :type :openai})
-    (openai-classify-media client media-item channels existing-tags))
-
-  (schedule-programming! [client context catalog]
-    (log/info "Scheduling programming via LLM" {:context context :type :openai})
-    (let [prompt (str "Create a JSON schedule with a 'slots' array. Each slot should have "
-                      "'start' (ISO8601 timestamp), 'end', 'title', and 'tags' (array). "
-                      "Request context: " (pr-str context))
-          response (openai-json-response client
-                                         [{:role "system"
-                                           :content "You are a TV channel scheduler."}
-                                          {:role "user" :content prompt}])]
-      (if (contains? response :slots)
-        {:slots (:slots response)}
-        {:slots []})))
-
-  (generate-schedule-bumper-script [client schedule]
-    (throw (ex-info "not implemented: generate-schedule-bumper-script" {})))
-  (generate-preview-bumper-script [client summary]
-    (throw (ex-info "not implemented: generate-preview-bumper-script" {})))
-  (generate-channel-bumper-script [client channel-schedules]
-    (throw (ex-info "not implemented: generate-channel-bumper-script" {})))
-  (close! [client]
-    (throw (ex-info "not implemented: close!" {}))))
+  (request! [client req]
+    (openai-json-request! client req))
+  (close! [_]
+    (log/info "closing connection to OpenAI")
+    nil))
 
 (defmethod llm/create-client :openai
   [{:keys [api-key endpoint model http-opts]}]
