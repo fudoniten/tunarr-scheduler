@@ -1,5 +1,5 @@
 (ns tunarr.scheduler.jobs.runner-test
-  (:require [clojure.test :refer [deftest is testing thrown-with-msg?]]
+  (:require [clojure.test :refer [deftest is testing]]
             [tunarr.scheduler.jobs.runner :as runner]))
 
 (defn- await-final-status [job-runner job-id]

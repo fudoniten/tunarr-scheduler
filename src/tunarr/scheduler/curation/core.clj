@@ -203,6 +203,7 @@
 
 
 (defrecord LLMCurator [llm catalog]
+  ICurator
   (retag-library! [_ library] (llm-retag-library! llm catalog library))
   (generate-library-taglines! [_ library] (llm-generate-library-taglines! llm catalog library))
   (recategorize-library! [_ library] (throw (ex-info "not implemented: recategorize-library!" {}))))

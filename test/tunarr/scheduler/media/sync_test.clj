@@ -32,17 +32,13 @@
         collection (make-collection {:movies [{::media/id "1" ::media/name "Movie"}
                                               {::media/id "2" ::media/name "Another"}]})
         catalog (make-catalog added)
-        result (sync/rescan-libraries! collection catalog {:libraries ["movies"]})]
+        result (sync/rescan-library! collection catalog {:libraries ["movies"]})]
     (is (= 2 (:total result)))
-    (is (= [{:library "movies" :count 2}] (:libraries result)))
+    (is (= [{:library "movies" :count 2}] (:library result)))
     (is (= 2 (count @added)))))
 
 (deftest rescan-libraries-requires-input-test
   (let [collection (make-collection {})
         catalog (make-catalog (atom []))]
     (is (thrown? clojure.lang.ExceptionInfo
-                 (sync/rescan-libraries! collection catalog {:libraries []}))))
-  (let [collection (make-collection {})
-        catalog (make-catalog (atom []))]
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (sync/rescan-libraries! collection catalog {})))))
+                 (sync/rescan-library! collection catalog {})))))

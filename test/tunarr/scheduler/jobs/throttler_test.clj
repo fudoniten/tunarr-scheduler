@@ -99,5 +99,5 @@
             (is (>= interval 400.0)))))
       (finally
         (.put queue ::stop)
-        (.join ^Thread worker 2000))))
-    (is (= 500000000 (get-in throttler [:opts :min-interval-ms]))))
+        (.join ^Thread worker 2000)))
+    (is (= 500000000 (get-in throttler [:opts :min-interval-ms])))))
