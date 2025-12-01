@@ -25,7 +25,7 @@
                 total-items (count items)]
             (doseq [[n item] items]
               (log/info (format "adding media item: %s" (::media/name item)))
-              (catalog/add-media catalog item)
+              (catalog/add-media! catalog item)
               (report-progress {:library        library
                                 :total-items    total-items
                                 :complete-items n}))

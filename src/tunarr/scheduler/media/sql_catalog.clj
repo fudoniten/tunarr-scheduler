@@ -40,38 +40,6 @@
   [executor query]
   (deref (executor/fetch! executor query)))
 
-#_(defn sql:exec!
-    "Execute the given SQL statements in a transaction"
-    [store verbose & sqls]
-    (letfn [(log! [sql]
-              (when verbose
-                (log/info (str "executing: " sql)))
-              sql)]
-      (try
-        (jdbc/with-transaction [tx (jdbc/get-connection store)]
-          (doseq [statement (->> sqls
-                                 (mapcat #(if (sequential? %) % [%]))
-                                 (remove nil?))]
-            (jdbc/execute! tx (log! (sql/format statement)))))
-        (catch Exception e
-          (when verbose
-            (println (capture-stack-trace e)))
-          (throw e)))))
-
-#_(defn sql:fetch!
-  "Fetch results for the given SQL query"
-  [store verbose sql]
-  (letfn [(log! [sql]
-            (when verbose
-              (println (str "fetching: " sql)))
-            sql)]
-    (try
-      (jdbc/execute! store (log! (sql/format sql)))
-      (catch Exception e
-        (when verbose
-          (println (capture-stack-trace e)))
-        (throw e)))))
-
 (defn media->row
   "Rename the media map keys to match the SQL schema."
   [media]

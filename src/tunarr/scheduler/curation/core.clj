@@ -6,14 +6,8 @@
 
             [clojure.string :as str]
             [clojure.spec.alpha :as s]
-            [clojure.stacktrace :refer [print-stack-trace]]
-            
-            [cheshire.core :as json]
-
-            [taoensso.timbre :as log])
-  (:import [com.fasterxml.jackson.core JsonProcessingException]
-           [java.time Instant]
-           [java.time.temporal ChronoUnit]))
+            [clojure.stacktrace :refer [print-stack-trace]])
+  (:import [java.time.temporal ChronoUnit]))
 
 (def system-prompt "You are a media content curator of JSON-formatted content. Respond in strict JSON format only.")
 
@@ -131,7 +125,7 @@
       (catch JsonProcessingException e
         (json-prompt-with-retry llm prompt (+ (or retry 0) e))))))
 
-(defprotocol ICurator
+(defprotocol ICuratorBackend
   (retag-library!             [self library])
   (generate-library-taglines! [self library])
   (recategorize-library!      [self library]))
@@ -188,8 +182,10 @@
   (let [threshold-date (days-ago threshold)]
     (doseq [{:keys [::media/name] :as media} (catalog/get-media-by-library-id catalog library)]
       (if (.after (process-timestamp media "tagging") threshold-date)
-        (log/info (format "skipping tag generation on media: %s" name))
-        (llm-retag-media! llm catalog media)))))
+        (throttler/submit! throttler llm-retag-media!
+                           (process-callback catalog media "tagging")
+                           [llm catalog media])
+        (log/info (format "skipping tag generation on media: %s" name))))))
 
 (defn llm-generate-media-taglines!
   [llm catalog media]
@@ -213,7 +209,9 @@
   (let [threshold-date (days-ago threshold)]
     (doseq [media (catalog/get-media-by-library-id catalog library)]
       (if (.after (process-timestamp media "taglines") threshold-date)
-        (llm-generate-media-taglines! llm catalog media)
+        (throttler/submit! throttler llm-generate-media-taglines!
+                           (process-callback catalog media "taglines")
+                           [llm catalog media])
         (log/info "skipping tagline generation on media: %s" name)))))
 
 (defn llm-recategorize-media!
@@ -242,15 +240,9 @@
                            [llm catalog media channels])
         (log/info "skipping tagline generation on media: %s" name)))))
 
-(defrecord LLMCurator
+(defrecord LLMCuratorBackend
     [llm catalog throttler config]
-    #_[llm catalog throttler
-     {{retag-threshold :retag
-       tagline-threshold :tagline
-       recategorize-threshold :recategorize}
-      :thresholds
-      channels :channels}]
-  ICurator
+  ICuratorBackend
   (retag-library!
     [_ library]
     (llm-retag-library! llm catalog library throttler
@@ -265,6 +257,56 @@
                                    :threshold (get-in config [:thresholds :recategorize])
                                    :channels (get-in config [:channels]))))
 
-(defn create
+(defprotocol ICurator
+  (start! [self])
+  (stop! [self]))
+
+(defrecord Curator
+    [running? backend]
+  ICurator
+  (start! [self] (reset! running? true))
+  (stop! [self] (reset! running? false)))
+
+(defn create!
   [{:keys [llm catalog throttler config]}]
-  (->LLMCurator llm catalog throttler config))
+  (let [backend (->LLMCuratorBackend llm catalog throttler config)]
+    (->Curator (atom false) backend)))
+
+(defn start!
+  [{:keys [running? backend] :as curator}
+   {:keys [tagging-delay taglines-delay categorization-delay]}
+   libraries]
+  (let [now (System/currentTimeMillis)
+        min-time (fn [& args]
+                   (let [t (System/currentTimeMillis)]
+                     (apply min (map (fn [n] (- n t)) args))))]
+    (future
+      (loop [next-tag            (+ now tagging-delay)
+             next-tagline        (+ now taglines-delay)
+             next-categorization (+ now categorization-delay)]
+        (when @running?
+          (let [next-delay (min-time next-tag next-tagline next-categorization)]
+            (when (> next-delay 0)
+              (Thread/sleep next-delay))
+            (let [t (System/currentTimeMillis)
+                  do-tag? (>= t next-tag)
+                  do-tagline? (>= t next-tagline)
+                  do-recategorize? (>= t next-categorization)]
+              (when do-tag?
+                (doseq [library libraries]
+                  (retag-library! backend library)))
+              (when do-tagline?
+                (doseq [library libraries]
+                  (generate-library-taglines! backend library)))
+              (when do-recategorize?
+                (doseq [library libraries]
+                  (recategorize-library! backend library)))
+              (recur (if do-tag? (+ t tagging-delay) next-tag)
+                     (if do-tagline? (+ t taglines-delay) next-tagline) 
+                     (if do-recategorize? (+ t categorization-delay) next-categorization)))))))
+    curator))
+
+(defn stop!
+  [{:keys [running?] :as curator}]
+  (compare-and-set! running? true false)
+  curator)

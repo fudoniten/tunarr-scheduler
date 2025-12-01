@@ -10,6 +10,7 @@
             [tunarr.scheduler.media.collection :as collection]
             [tunarr.scheduler.media.jellyfin-collection]
             [tunarr.scheduler.curation.tags :as tag-curator]
+            [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
             [tunarr.scheduler.scheduling.engine :as engine]
             [tunarr.scheduler.llm :as llm]
@@ -83,6 +84,20 @@
   (log/info "closing LLM throttler")
   (job-throttler/stop! throttler))
 
+(defmethod ig/init-key :tunarr/curation
+  [_ {:keys [llm catalog throttler libraries config]}]
+  (log/info "starting curator")
+  (let [curator (curation/create! {:llm       llm
+                                   :catalog   catalog
+                                   :throttler throttler
+                                   :config    config})]
+    (curation/start! curator config libraries)
+    (curator)))
+
+(defmethod ig/halt-key! :tunarr/curation
+  [_ curator]
+  (curation/stop! curator))
+
 (defmethod ig/init-key :tunarr/config-sync [_ {:keys [channels libraries catalog]}]
   (when (not channels)
     (throw (ex-info "missing required key: channels" {})))
@@ -90,10 +105,10 @@
     (throw (ex-info "missing required key: libraries" {})))
   (log/info (format "syncing channels with config: %s"
                     (str/join "," (map name (keys channels)))))
-  (catalog/update-channels catalog channels)
+  (catalog/update-channels! catalog channels)
   (log/info (format "syncing libraries with config: %s"
                     (str/join "," (map name (keys libraries)))))
-  (catalog/update-libraries catalog libraries)
+  (catalog/update-libraries! catalog libraries)
   channels)
 
 (defmethod ig/init-key :tunarr/normalize-tags
