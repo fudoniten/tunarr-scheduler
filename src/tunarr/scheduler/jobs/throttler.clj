@@ -1,90 +1,56 @@
 (ns tunarr.scheduler.jobs.throttler
-  (:require [clj-http.client :as http]
-            [taoensso.timbre :as log])
-  (:import (java.util.concurrent LinkedBlockingQueue)
-           (clojure.lang ExceptionInfo)))
+  (:require [clojure.stacktrace :refer [print-stack-trace]]
+            [clojure.core.async :refer [<!! >!! chan close!]]
+            [taoensso.timbre :as log]))
 
-(defrecord Throttler [rate queue worker stop? opts])
+(defn capture-stack-trace
+  [e]
+  (with-out-str (print-stack-trace e)))
 
-(defn- run-with-retries
-  "run f with retry strategy. Returns {:ok value} or {:err throwable}."
-  [f {:keys [max-retries retry-strategy on-error]
-      :or   {max-retries 3}:as opts}]
-  (loop [attempt 0]
-    (let [result (try {:ok (f)}
-                      (catch Throwable t {:exception t}))]
-      (if-let [t (:exception result)]
-        ;; we had an exception
-        (if (>= attempt max-retries)
-          (do (log/error (format "failed to perform request after %s attempts" attempt))
-              (when on-error (on-error t {:attempt attempt :final? true}))
-              {:err t})
-          (let [{:keys [retry? delay-ms]} (retry-strategy t attempt opts)]
-            (if-not retry?
-              (do (log/error (format "failed to perform request after %s attempts" attempt))
-                  (when on-error (on-error t {:attempt attempt :final? true}))
-                  {:err t})
-              (do (when on-error (on-error t {:attempt attempt :delay-ms delay-ms}))
-                  (Thread/sleep (long delay-ms))
-                  (recur (inc attempt))))))
-        result))))
+(defprotocol IThrottler
+  (submit!
+    [self f]
+    [self f callback]
+    [self f callback args])
+  (start! [self])
+  (stop! [self]))
 
-(defn default-retry-strategy
-  [e attempt {:keys [base-backoff-ms] :or {base-backoff-ms 1000}}]
-  (let [exd     (when (instance? ExceptionInfo e) (ex-data e))
-        status  (:status exd)
-        headers (:headers exd)
-        retry-after (or (get headers "retry-after")
-                        (get headers "Retry-After"))
-        retry-after-ms (when retry-after
-                         (try
-                           (* 1000
-                              (Long/parseLong
-                               (re-find #"\d+" (str retry-after))))
-                           (catch Exception _ nil)))
-        retryable? (contains? #{429 500 502 503 504} status)]
-    (if-not retryable?
-      {:retry? false}
-      (let [base    (* base-backoff-ms (Math/pow 2 attempt))
-            jitter  (* 0.5 (rand))
-            backoff (* base jitter)
-            delay   (long (min 60000 (or retry-after-ms backoff)))]
-        {:retry?   true
-         :delay-ms delay}))))
+(defrecord Throttler [rate runner running? jobs]
+  IThrottler
+  (submit! [self f] (submit! self f nil []))
+  (submit! [self f callback] (submit! self f callback []))
+  (submit! [_ f callback args]
+    (if-not @running?
+      (throw (ex-info "Submitted job to stopped throttler" {}))
+      (>!! jobs {:job f :callback callback :args args})))
+  (start! [_]
+    (reset! runner
+            (future
+              (compare-and-set! running? false true)
+              (let [delay-ms (long (/ 1000.0 rate))]
+                (loop [next-run (+ (System/currentTimeMillis) delay-ms)]
+                  (when @running?
+                    (if-let [{:keys [job args callback]} (<!! jobs)]
+                      (do (try
+                            (let [result (apply job args)]
+                              (when callback
+                                (try (callback {:result result})
+                                     (catch Throwable t
+                                       (log/error (format "Callback threw: %s" t))
+                                       (log/debug (capture-stack-trace t))))))
+                            (catch Throwable t
+                              (log/error (format "Job threw: %s" t))
+                              (when callback (callback {:error t}))))
+                          (let [delay (- next-run (System/currentTimeMillis))]
+                            (when (pos? delay)
+                              (Thread/sleep delay)))
+                          (recur (+ (System/currentTimeMillis) delay-ms)))
+                      (do (reset! running? false)
+                          (close! jobs)))))))))
+  (stop! [_]
+    (reset! running? false)))
 
-(defn start-throttler
-  ([rate] (start-throttler rate {}))
-  ([rate {:keys [max-retries base-backoff-ms retry-strategy on-error]
-          :or {max-retries     3
-               base-backoff-ms 1000
-               retry-strategy  default-retry-strategy}}]
-   (let [queue           (LinkedBlockingQueue.)
-         stop?           (atom false)
-         min-interval-ms (long (/ 1e9 rate))
-         opts            {:max-retries max-retries
-                          :base-backoff-ms base-backoff-ms
-                          :retry-strategy  retry-strategy
-                          :on-error        on-error}
-         worker          (doto
-                             (Thread.
-                              (fn []
-                                (loop [last-ts 0]
-                                  (when-not @stop?
-                                    (let [task (.take queue)]
-                                      (if (= ::stop task)
-                                        (reset! stop? true)
-                                        (let [now (System/nanoTime)
-                                              last-ts (if (zero? last-ts)
-                                                        (- now min-interval-ms)
-                                                        last-ts)
-                                              wait-ms (max 0 (- (+ last-ts min-interval-ms) now))]
-                                          (when (pos? wait-ms)
-                                            (Thread/sleep (long (/ wait-ms 1e6))))
-                                          (let [{:keys [f p]} task]
-                                            (deliver p (run-with-retries f opts))
-                                            (recur (System/nanoTime))))))))))
-                           (.setName (str "throttler-" (random-uuid)))
-                           (.setDaemon true)
-                           (.start))]
-     (->Throttler rate queue worker stop?
-                  (assoc opts :min-interval-ms min-interval-ms)))))
+(defn create [& {:keys [rate queue-size]
+                 :or {rate       2
+                      queue-size 1024}}]
+  (->Throttler rate (atom nil) (atom false) (chan queue-size)))

@@ -10,6 +10,7 @@
             [tunarr.scheduler.media.collection :as collection]
             [tunarr.scheduler.media.jellyfin-collection]
             [tunarr.scheduler.curation.tags :as tag-curator]
+            [tunarr.scheduler.jobs.throttler :as job-throttler]
             [tunarr.scheduler.scheduling.engine :as engine]
             [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.llm.openai]
@@ -71,6 +72,16 @@
 (defmethod ig/halt-key! :tunarr/catalog [_ state]
   (log/info "closing catalog")
   (catalog/close-catalog! state))
+
+(defmethod ig/init-key :tunarr/llm-throttler [_ {:keys [rate queue-size]}]
+  (log/info "initializing LLM throttler")
+  (let [throttler (job-throttler/create :rate rate :queue-size queue-size)]
+    (job-throttler/start! throttler)
+    throttler))
+
+(defmethod ig/halt-key! :tunarr/llm-throttler [_ throttler]
+  (log/info "closing LLM throttler")
+  (job-throttler/stop! throttler))
 
 (defmethod ig/init-key :tunarr/config-sync [_ {:keys [channels libraries catalog]}]
   (when (not channels)

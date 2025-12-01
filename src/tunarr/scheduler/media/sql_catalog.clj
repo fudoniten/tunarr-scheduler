@@ -8,8 +8,7 @@
             [clojure.spec.test.alpha :refer [instrument]]
             
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from] :as sql]
-            [next.jdbc :as jdbc]
-            [camel-snake-kebab.core :refer [->snake_case_keyword]]))
+            [next.jdbc :as jdbc]))
 
 (def field-map
   {::media/name             :name
@@ -191,6 +190,14 @@
       (= tag (:tag/name result))
       (throw result))))
 
+(defn sql:update-process-timestamp
+  [media-id process]
+  (-> (insert-into :media_process_timestamp)
+      (columns :media_id :process :last_run_at)
+      (values [[media-id process :now]])
+      (on-conflict :media_id :process)
+      (do-update-set {:last_run_at [:excluded :last_run_at]})))
+
 (defn sql:add-media
   [{:keys [::media/id
            ::media/tags
@@ -223,20 +230,35 @@
               :media.subtitles
               :media.kid_friendly
               :media.library_id
-              [[:array_agg [:distinct :media_tags.tag]] :tags]
-              [[:array_agg [:distinct :media_channels.channel]] :channels]
-              [[:array_agg [:distinct :media_genres.genre]] :genres]
-              [[:array_agg [:distinct :media_taglines.tagline] :taglines]])
+              [[:array_agg [:distinct :media_tags.tag]]
+               :tags]
+              [[:array_agg [:distinct :media_channels.channel]]
+               :channels]
+              [[:array_agg [:distinct :media_genres.genre]]
+               :genres]
+              [[:array_agg [:distinct :media_taglines.tagline]]
+               :taglines]
+              [[:json_agg [:distinct
+                           [:json_build_object
+                            "process" :media_process_timestamp.process
+                            "last_run_at" :media_process_timestamp.last_run_at]]]
+               :process-timestamps])
       (from :media)
-      (left-join :media_tags [:= :media.id :media_tags.media_id])
-      (left-join :media_channels [:= :media.id :media_channels.media_id])
-      (left-join :media_genres [:= :media.id :media_genres.media_id])
-      (left-join :media_genres [:= :media.id :media_taglines.media_id])
+      (left-join :media_tags
+                 [:= :media.id :media_tags.media_id])
+      (left-join :media_channels
+                 [:= :media.id :media_channels.media_id])
+      (left-join :media_genres
+                 [:= :media.id :media_genres.media_id])
+      (left-join :media_taglines
+                 [:= :media.id :media_taglines.media_id])
+      (left-join :media_process_timestamp
+                 [:= :media.id :media_process_timestamp.media_id])
       (group-by :media.id)))
 
 (defrecord SqlCatalog [executor]
   catalog/Catalog
-  (add-media [_ media]
+  (add-media! [_ media]
     (sql:exec-with-tx! executor (sql:add-media media)))
   (get-media [_]
     (sql:fetch! executor (sql:get-media)))
@@ -251,19 +273,19 @@
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.id media-id]))))
-  (add-media-tags [_ media-id tags]
+  (add-media-tags! [_ media-id tags]
     (sql:exec-with-tx! executor
                        [(sql:insert-tags tags)
                         (sql:insert-media-tags media-id tags)]))
   (get-media-tags [_ media-id]
     (sql:fetch! executor (sql:get-media-tags media-id)))
-  (update-channels [_ channels]
+  (update-channels! [_ channels]
     (sql:exec! executor (sql:insert-channels channels)))
-  (update-libraries [_ libraries]
+  (update-libraries! [_ libraries]
     (sql:exec! executor (sql:insert-libraries libraries)))
-  (add-media-channels [_ media-id channels]
+  (add-media-channels! [_ media-id channels]
     (sql:exec! executor (sql:insert-media-channels media-id channels)))
-  (add-media-genres [_ media-id genres]
+  (add-media-genres! [_ media-id genres]
     (sql:exec! executor (sql:insert-media-genres media-id genres)))
   (get-media-by-channel [_ channel]
     (sql:fetch! executor
@@ -277,15 +299,17 @@
     (sql:fetch! executor
                 (-> (sql:get-media)
                     (where [:= :media_genres.genre genre]))))
-  (add-media-taglines [_ media-id taglines]
+  (add-media-taglines! [_ media-id taglines]
     (sql:exec! executor (sql:insert-media-taglines media-id taglines)))
-  (delete-tag [_ tag]
+  (delete-tag! [_ tag]
     (sql:exec! executor (sql:delete-tag tag)))
-  (rename-tag [_ tag new-tag]
+  (rename-tag! [_ tag new-tag]
     (if (tag-exists? executor new-tag)
       (sql:exec-with-tx! executor [(sql:retag-media tag new-tag)
                                    (sql:delete-tag tag)])
-      (sql:exec! executor (sql:rename-tag tag new-tag))))  
+      (sql:exec! executor (sql:rename-tag tag new-tag))))
+  (update-process-timestamp! [_ media-id process]
+    ((sql:exec! executor (sql:update-process-timestamp media-id process))))
   (close-catalog! [_] (executor/close! executor)))
 
 (defmethod catalog/initialize-catalog! :postgresql

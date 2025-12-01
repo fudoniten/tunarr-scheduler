@@ -1,37 +1,39 @@
 (ns tunarr.scheduler.curation.core
   (:require [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.llm :as llm]
+            [tunarr.scheduler.jobs.throttler :as throttler]
             [tunarr.scheduler.media :as media]
 
             [clojure.string :as str]
             [clojure.spec.alpha :as s]
+            [clojure.stacktrace :refer [print-stack-trace]]
             
             [cheshire.core :as json]
 
-            [camel-snake-kebab.core :refer [->snake_case_keyword]]
-
             [taoensso.timbre :as log])
-  (:import [com.fasterxml.jackson.core JsonProcessingException]))
+  (:import [com.fasterxml.jackson.core JsonProcessingException]
+           [java.time Instant]
+           [java.time.temporal ChronoUnit]))
 
-(defn tag-prompt
-  [media existing-tags]
-  (str/join \newline
-            (concat ["Given a media item, with description, assign tags to the media for use in scheduling and categorizing the media."
-                     ""
-                     "Tags should be lower-case, using python variable naming conventions (though some existing tags may not match that convention)."
-                     ""
-                     "For example, tags for Jurassic Park might be: dinosaurs, action, thriller, jungle, scifi, computer_hacker"
-                     ""
-                     "If the existing tags are sufficient, you do not need to add more."
-                     ""
-                     "Return the tags in strict JSON, as a list of strings, with each string being an individual tag."
-                     ""
-                     "Reuse existing tags where available, but feel free to create new ones where they will be useful."
-                     ""
-                     "Media data:"
-                     ""]
-                      [(json/generate-string media)]
-                      ["" "Existing tags:" "" existing-tags])))
+(def system-prompt "You are a media content curator of JSON-formatted content. Respond in strict JSON format only.")
+
+(defn capture-stack-trace
+  [e]
+  (with-out-str (print-stack-trace e)))
+
+(defn parse-json [resp]
+  (json/parse-string resp true))
+
+(defn encode-json [data]
+  (json/generate-string data))
+
+(defn process-callback [catalog {:keys [id name]} process]
+  (fn [{:keys [error]}]
+    (if error
+      (do (log/error (format "failed to execute %s process on %s: %s"
+                             process name (.getMessage error)))
+          (log/debug (capture-stack-trace error)))
+      (catalog/update-process-timestamp! catalog id process))))
 
 (defn tag-filter-prompt
   [media existing-tags]
@@ -44,26 +46,26 @@
                      ""
                      "Media data:"
                      ""]
-                      [(json/generate-string media)]
-                      ["" "Existing tags:" "" existing-tags])))
+                    [(encode-json media)]
+                    ["" "Existing tags:" "" existing-tags])))
 
 (defn tag-generate-prompt
   [media existing-tags]
   (str/join \newline
-            (concat ["Given a media item, with description, and a set of applied tags, suggest any tags which should be applied."
+            (concat ["Given a media item, with description, and a set of applied tags, suggest any missing tags which should be applied."
                      ""
                      "For example, tags for Jurassic Park might be: dinosaurs, action, thriller, jungle, scifi, computer_hacker"
                      ""
                      "Tags should be lower-case, using python variable naming conventions (though some existing tags may not match that convention)."
                      ""
-                     "Return the NEW tags in strict JSON, as a list of strings, with each string being an individual tag."
+                     "Return the NEW tags in strict JSON, as a list of strings, with each string being an individual tag. For example:"
+                     ""
+                     "[\"adventure\", \"biology\", \"chaos_theory\"]"
                      ""
                      "Media data:"
                      ""]
-                      [(json/generate-string media)]
-                      ["" "Existing tags:" "" existing-tags])))
-
-(def system-prompt "You are a media content curator of JSON-formatted content. Respond in strict JSON format only.")
+                    [(encode-json media)]
+                    ["" "Existing tags:" "" existing-tags])))
 
 (defn tagline-prompt
   [media]
@@ -76,14 +78,38 @@
                      ""
                      "An example might be, for Jurassic Park:"
                      ""
-                     "[\"Life will find a way!\", \"Science opens the gates.\" \"65 Million Years in the Making\"]"
+                     "[\"Life will find a way!\", \"Science opens the gates.\" \"65 Million Years in the Making!\"]"
                      ""
                      "Media data:"
                      ""]
-                    [(json/generate-string media)])))
+                    [(encode-json media)])))
 
-(defn parse-json [resp]
-  (json/parse-string resp true))
+(defn categorize-prompt
+  [media channels]
+  (str/join \newline
+            (concat ["Given a media item with description, and a list of television channels (with description), return the following attributes:"
+                     ""
+                     "* channels : A list of channel names on which this content could appear, from the provided list of channels."
+                     "* kid_friendly : A boolean, true if this content is suitable for a mature 12-year-old kid, who's ready to be challenged a bit."
+                     "* morning : A boolean, true if this is classic 'morning' content: morning cartoons, lightweight comedy, light documentaries, etc. Not M*A*S*H or serious dramas."
+                     "* afternoon : A boolean, true if this is classing 'afternoon' content: drama, detective shows, documentaries, sitcoms. Not, for example, a horror film."
+                     ""
+                     "Return a list of channel names as strings, in strict JSON format."
+                     ""
+                     "An example might be, for Futurama:"
+                     ""
+                     (encode-json {:channels ["toontown" "galaxy"]
+                                   :kid_friendly true
+                                   :morning false
+                                   :afternoon true})
+                     ""
+                     "Available channels:"
+                     ""
+                     (encode-json channels)
+                     ""
+                     "Media data:"
+                     ""]
+                    [(encode-json  media)])))
 
 (defn json-prompt-with-retry
   [llm prompt & [retry err]]
@@ -110,31 +136,26 @@
   (generate-library-taglines! [self library])
   (recategorize-library!      [self library]))
 
-(defn llm-retag-library!
-  [llm catalog library]
-  (log/info (format "re-tagging media for library: %s" library))
-  (let [tag-list (json/generate-string (map str (catalog/get-tags catalog)))]
-    (doseq [media (catalog/get-media-by-library-id catalog library)]
-      (log/info (format "tagging media: %s" (::media/name media)))
-      (when-let [tags (json-prompt-with-retry
-                       llm
-                       [{:role    "system"
-                         :content system-prompt}
-                        {:role    "user"
-                         :content (tag-prompt media tag-list)}])]
-        (if (s/valid? (s/coll-of string?) tags)
-          (do (log/info (format "Tags for %s: %s" (::media/name media) (tags)))
-              (catalog/add-media-tags catalog (::media/id media) (map ->snake_case_keyword tags)))
-          (log/error (format "failed to generate tags for media %s: output: %s"
-                             (::media/name media)
-                             tags)))))))
+(defn process-timestamp
+  [media target]
+  (let [find-proc (partial some (fn [{:keys [process]}] (= process target)))]
+    (some-> media
+            :process-timestamps
+            (find-proc)
+            (get "last_run_at")
+            (.toInstant))))
+
+(defn days-ago
+  [days]
+  (.minus (Instant/now) days ChronoUnit/DAYS))
 
 (defn llm-retag-media!
-  [llm catalog media]
-  (log/info (format "re-tagging media: %s" (::media/name media)))
-  (let [media-id (::media/id media)
-        tag-batches (map json/generate-string (partition 50 (catalog/get-tags catalog)))
-        current-tags (->> media-id
+  [llm catalog {:keys [::media/id ::media/name] :as media}
+   & {:keys [batch-size]
+      :or   {batch-size 50}}]
+  (log/info (format "re-tagging media: %s" name))
+  (let [tag-batches (map json/generate-string (partition batch-size (catalog/get-tags catalog)))
+        current-tags (->> id
                           (catalog/get-media-tags catalog)
                           (json/generate-string))]
     (doseq [tag-set tag-batches]
@@ -145,10 +166,10 @@
                         {:role    "user"
                          :content (tag-filter-prompt media tag-set)}])]
         (if (s/valid? (s/coll-of string?) tags)
-          (do (log/info (format "Applying filtered tags to %s: %s" (::media/name media) tags))
-              (catalog/add-media-tags catalog media-id tags))
+          (do (log/info (format "Applying filtered tags to %s: %s" name tags))
+              (catalog/add-media-tags! catalog id tags))
           (log/error (format "failed to parse tags for media %s: output: %s"
-                             (::media/name media) tags))))
+                             name tags))))
       (when-let [tags (json-prompt-with-retry
                        llm
                        [{:role    "system"
@@ -157,27 +178,18 @@
                          :content (tag-generate-prompt media current-tags)}])]
         (if (s/valid? (s/coll-of string?) tags)
           (do (log/info (format "Applying new tags to %s: %s" (::media/name media) tags))
-              (catalog/add-media-tags catalog media-id tags))
+              (catalog/add-media-tags! catalog id tags))
           (log/error (format "failed to parse tags for media %s: output: %s"
                              (::media/name media) tags)))))))
 
-(defn llm-generate-library-taglines!
-  [llm catalog library]
-  (log/info (format "generating media taglines for library: %s" library))
-  (doseq [media (catalog/get-media-by-library-id catalog library)]
-    (log/info (format "generating taglines for media: %s" (::media/name media)))
-    (when-let [taglines (json-prompt-with-retry
-                         llm
-                         [{:role "system"
-                           :content system-prompt}
-                          {:role "user"
-                           :content (tagline-prompt media)}])]
-      (if (s/valid? (s/coll-of string?) taglines)
-        (do (log/info (format "Taglines for %s: %s" (::media/name media) taglines))
-            (catalog/add-media-taglines catalog (::media/id media) taglines))
-        (log/error (format "Failed to generate taglines for media %s: output: %s"
-                           (::media/name media)
-                           taglines))))))
+(defn llm-retag-library!
+  [llm catalog library throttler & {:keys [threshold]}]
+  (log/info (format "re-tagging media for library: %s" library))
+  (let [threshold-date (days-ago threshold)]
+    (doseq [{:keys [::media/name] :as media} (catalog/get-media-by-library-id catalog library)]
+      (if (.after (process-timestamp media "tagging") threshold-date)
+        (log/info (format "skipping tag generation on media: %s" name))
+        (llm-retag-media! llm catalog media)))))
 
 (defn llm-generate-media-taglines!
   [llm catalog media]
@@ -190,20 +202,69 @@
                          :content (tagline-prompt media)}])]
     (if (s/valid? (s/coll-of string?) taglines)
       (do (log/info (format "Taglines for %s: %s" (::media/name media) taglines))
-          (catalog/add-media-taglines catalog (::media/id media) taglines))
+          (catalog/add-media-taglines! catalog (::media/id media) taglines))
       (log/error (format "Failed to generate taglines for media %s: output: %s"
                          (::media/name media)
                          taglines)))))
 
+(defn llm-generate-library-taglines!
+  [llm catalog library throttler & {:keys [threshold]}]
+  (log/info (format "generating media taglines for library: %s" library))
+  (let [threshold-date (days-ago threshold)]
+    (doseq [media (catalog/get-media-by-library-id catalog library)]
+      (if (.after (process-timestamp media "taglines") threshold-date)
+        (llm-generate-media-taglines! llm catalog media)
+        (log/info "skipping tagline generation on media: %s" name)))))
+
+(defn llm-recategorize-media!
+  [llm catalog {:keys [::media/id ::media/name] :as media} channels]
+  (log/info (format "recategorizing media: %s" name))
+  (when-let [channels (json-prompt-with-retry
+                       llm
+                       [{:role "system"
+                         :content system-prompt}
+                        {:role "user"
+                         :content (categorize-prompt media channels)}])]
+    (if (s/valid? (s/coll-of string?) channels)
+      (do (log/info (format "Channels for %s: %s" name channels))
+          (catalog/add-media-channels! catalog id channels))
+      (log/error (format "Failed to categorize media %s: output: %s"
+                         name channels)))))
+
 (defn llm-categorize-library-media!
-  [llm catalog library]
+  [llm catalog library throttler & {:keys [channels threshold]}]
   (log/info (format "recategorizing media for library: %s" library))
-  (doseq [media (catalog/get-media-by-library-id catalog library)]
-    (log/info (format "recategorizing media: %s" (::media/name media)))))
+  (let [threshold-date (days-ago threshold)]
+    (doseq [media (catalog/get-media-by-library-id catalog library)]
+      (if (.after (process-timestamp media "categorize") threshold-date)
+        (throttler/submit! throttler llm-recategorize-media!
+                           (process-callback catalog media "categorize")
+                           [llm catalog media channels])
+        (log/info "skipping tagline generation on media: %s" name)))))
 
-
-(defrecord LLMCurator [llm catalog]
+(defrecord LLMCurator
+    [llm catalog throttler config]
+    #_[llm catalog throttler
+     {{retag-threshold :retag
+       tagline-threshold :tagline
+       recategorize-threshold :recategorize}
+      :thresholds
+      channels :channels}]
   ICurator
-  (retag-library! [_ library] (llm-retag-library! llm catalog library))
-  (generate-library-taglines! [_ library] (llm-generate-library-taglines! llm catalog library))
-  (recategorize-library! [_ library] (throw (ex-info "not implemented: recategorize-library!" {}))))
+  (retag-library!
+    [_ library]
+    (llm-retag-library! llm catalog library throttler
+                        :threshold (get-in config [:thresholds :retag])))
+  (generate-library-taglines!
+    [_ library]
+    (llm-generate-library-taglines! llm catalog library throttler
+                                    :threshold (get-in config [:thresholds :tagline])))
+  (recategorize-library!
+    [_ library]
+    (llm-categorize-library-media! llm catalog library throttler
+                                   :threshold (get-in config [:thresholds :recategorize])
+                                   :channels (get-in config [:channels]))))
+
+(defn create
+  [{:keys [llm catalog throttler config]}]
+  (->LLMCurator llm catalog throttler config))

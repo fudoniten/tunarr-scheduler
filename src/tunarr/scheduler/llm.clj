@@ -2,7 +2,6 @@
   "Abstraction for Large Language Model providers used by the scheduler."
   (:require
    [taoensso.timbre :as log]
-   [tunarr.scheduler.media :as media]
    [clojure.spec.alpha :as s]))
 
 ;; TODO: Flesh out what these requests should look like.

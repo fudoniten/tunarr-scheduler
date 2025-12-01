@@ -79,6 +79,7 @@
                              (get config :channels {}))]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
+     :tunarr/llm-throttler (get-in config [:llm :throttler])
                                         ;:tunarr/llm (:llm config)
                                         ;:tunarr/tts (:tts config)
                                         ;:tunarr/media-source (:jellyfin config)

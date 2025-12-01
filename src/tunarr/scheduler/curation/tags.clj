@@ -63,7 +63,7 @@
     (let [cleaned (clean-tag tag)]
       (when-not (= tag cleaned)
         (log/info (format "renaming %s -> %s" tag cleaned))
-        (catalog/rename-tag catalog tag cleaned))))
+        (catalog/rename-tag! catalog tag cleaned))))
   (if (not tag-transforms-file)
     (log/warn "skipping tag transforms as no rules were provided")
     (do (log/info "applying normalization rules")
@@ -77,14 +77,14 @@
   (if-not (and tag new-tag)
     (log/error (format "failed to rename tag, need :tag & :new-tag: %s" opts))
     (do (log/info (format "renaming tag: %s -> %s" tag new-tag))
-      (catalog/rename-tag catalog tag new-tag))))
+      (catalog/rename-tag! catalog tag new-tag))))
 
 (defmethod normalize-tag! :drop
   [catalog {:keys [tag] :as opts}]
   (if-not tag
     (log/error (format "failed to delete tag, no :tag provided: %s" opts))
     (do (log/info (format "dropping tag: %s" tag))
-        (catalog/delete-tag catalog tag))))
+        (catalog/delete-tag! catalog tag))))
 
 (defmethod normalize-tag! :no-op
   [_ {:keys [tag]}]
