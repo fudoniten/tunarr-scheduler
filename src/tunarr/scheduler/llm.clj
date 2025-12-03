@@ -38,7 +38,7 @@
 
 (s/def ::llm-client llm-client?)
 
-(defmulti create-client
+(defmulti create!
   "Create an LLM client from configuration."
   (fn [{:keys [provider]}] (keyword provider)))
 
@@ -49,9 +49,9 @@
   (close! [client]
     (throw (ex-info "not implemented: close!" {}))))
 
-(defmethod create-client :default [config]
+(defmethod create! :default [config]
   (log/info "Initialising generic LLM client" {:provider (:provider config)})
   (->GenericLLMClient (:provider config) (:close config)))
 
-(defmethod create-client :mock [_]
+(defmethod create! :mock [_]
   (->GenericLLMClient :mock nil))

@@ -39,7 +39,7 @@
 
 (defrecord MemoryCatalog [state]
   catalog/Catalog
-  (add-media [_ media]
+  (add-media! [_ media]
     (let [media-id (::media/id media)]
       (when-not media-id
         (throw (ex-info "Cannot add media without an id" {:media media})))
@@ -63,13 +63,13 @@
          vals
          (filter #(= library-id (::media/library-id %)))
          vec))
-  (add-media-tags [_ media-id tags]
+  (add-media-tags! [_ media-id tags]
     (update-media! state media-id #(update % ::media/tags conj-distinct tags))
     nil)
-  (add-media-channels [_ media-id channels]
+  (add-media-channels! [_ media-id channels]
     (update-media! state media-id #(update % ::media/channels conj-distinct channels))
     nil)
-  (add-media-genres [_ media-id genres]
+  (add-media-genres! [_ media-id genres]
     (update-media! state media-id #(update % ::media/genres conj-distinct genres))
     nil)
   (get-media-by-channel [_ channel]

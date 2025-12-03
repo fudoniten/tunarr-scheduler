@@ -92,7 +92,7 @@
                                    :throttler throttler
                                    :config    config})]
     (curation/start! curator config libraries)
-    (curator)))
+    curator))
 
 (defmethod ig/halt-key! :tunarr/curation
   [_ curator]
@@ -123,6 +123,14 @@
   (log/info "shutting down channel sync")
   nil)
 
+(defmethod ig/init-key :tunarr/llm
+  [_ config]
+  (llm/create! config))
+
+(defmethod ig/halt-key! :tunarr/llm
+  [_ llm]
+  (llm/close! llm))
+
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
   (log/info "initializing scheduler")
@@ -144,14 +152,13 @@
   (log/info "closing bumpers")
   #_(bumpers/close! svc))
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media llm tts bumpers tunarr catalog logger job-runner collection]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection]}]
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
                 :catalog catalog
                 ;:scheduler scheduler
                 ;:media media
-                ;:llm llm
                 ;:tts tts
                 ;:bumpers bumpers
                 ;:tunarr tunarr

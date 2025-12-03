@@ -41,12 +41,12 @@
         tool)))
 
 (defn- request-openai!
-  [{:keys [endpoint api-key model http-opts]} messages {:keys [response-format] :as options}]
-  (let [url (str (or (sanitize-url endpoint) "https://api.openai.com/v1") "/chat/completions")
+  [{:keys [endpoint api-key model http-opts]} request {:keys [response-format] :as options}]
+  (let [url (str (or (sanitize-url endpoint) "https://api.openai.com/v1") "/responses")
+        text-config (when response-format {:text {:format response-format}})
         payload (merge {:model model
-                        :messages messages}
-                       (when response-format
-                         {:response_format response-format})
+                        :input request}
+                       text-config
                        (dissoc options :response-format))
         request-opts (merge {:headers {"Authorization" (str "Bearer " api-key)
                                        "Content-Type" "application/json"}
@@ -55,10 +55,18 @@
                              :throw-exceptions false
                              :body (json/generate-string payload)}
                             http-opts)
-        response (http/post url request-opts)]
-    (if (<= 200 (:status response) 299)
-      (some-> response :body (json/parse-string true))
-      (throw (->ex "OpenAI request failed" response)))))
+        {:keys [status body] :as resp} (http/post url request-opts)]
+    (if (<= 200 status 299)
+      (let [parsed (json/parse-string body true)
+            raw-text (-> parsed :output first :content first :text)
+            structured? (or (= response-format :json)
+                            (= response-format "json")
+                            (and (map? response-format)
+                                 (= "json_schema" (:type response-format))))]
+        (if structured?
+          (json/parse-string raw-text true)
+          raw-text))
+      (throw (->ex "OpenAI request failed" resp)))))
 
 (defn- ensure-api-key! [api-key]
   (when (str/blank? api-key)
@@ -66,8 +74,9 @@
   api-key)
 
 (defn- openai-json-request! [client messages]
-  (let [body (request-openai! client messages {:temperature 0.2
-                                               :response-format {:type "json_object"}})
+  (let [body (request-openai! client messages
+                              {:temperature 0.2
+                               :response-format {:type "json_object"}})
         content (some-> body response-content)]
     (or (->json content) {})))
 
@@ -79,7 +88,7 @@
     (log/info "closing connection to OpenAI")
     nil))
 
-(defmethod llm/create-client :openai
+(defmethod llm/create! :openai
   [{:keys [api-key endpoint model http-opts]}]
   (ensure-api-key! api-key)
   (let [client (->OpenAIClient (or model "gpt-4o-mini")
@@ -87,4 +96,5 @@
                                api-key
                                (or http-opts {}))]
     (log/info "Initialised OpenAI client" (dissoc (into {} client) :api-key))
+    (log/info "OpenAI says: %s" (openai-json-request! client "Please introduce yourself in one sentence."))
     client))

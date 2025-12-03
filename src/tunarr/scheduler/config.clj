@@ -69,6 +69,7 @@
                              (add-default :host     (get config :host "postgres"))
                              (add-default :port     (get config :port 5432)))
                          catalog-config)
+        curation-config (get config :curation)
         tag-config (get config :tag-config {})
         channel-config (into {}
                              (map (fn [[ch cfg]]
@@ -80,7 +81,7 @@
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
      :tunarr/llm-throttler (get-in config [:llm :throttler])
-                                        ;:tunarr/llm (:llm config)
+     :tunarr/llm (:llm config)
                                         ;:tunarr/tts (:tts config)
                                         ;:tunarr/media-source (:jellyfin config)
                                         ;:tunarr/tunarr-source (:tunarr config)
@@ -93,6 +94,13 @@
                                         ;                 :tts (ig/ref :tunarr/tts)}
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
+     :tunarr/curation {:libraries (keys (get collection-config :libraries))
+                       :llm       (:ig/ref :tunarr/llm)
+                       :catalog   (:ig/ref :tunarr/catalog)
+                       :throttler (:ig/ref :tunarr/llm-throttler)
+                       :config    (merge curation-config
+                                   {:libraries (keys (:libraries collection-config))
+                                    :channels  channel-config})}
      :tunarr/config-sync {:channels channel-config
                           :libraries (get collection-config :libraries)
                           :catalog (ig/ref :tunarr/catalog)}

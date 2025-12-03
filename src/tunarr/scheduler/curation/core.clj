@@ -4,10 +4,15 @@
             [tunarr.scheduler.jobs.throttler :as throttler]
             [tunarr.scheduler.media :as media]
 
+            [cheshire.core :as json]
+            [taoensso.timbre :as log]
+            
             [clojure.string :as str]
             [clojure.spec.alpha :as s]
             [clojure.stacktrace :refer [print-stack-trace]])
-  (:import [java.time.temporal ChronoUnit]))
+  (:import [java.time Instant]
+           [java.time.temporal ChronoUnit]
+           [com.fasterxml.jackson.core JsonProcessingException]))
 
 (def system-prompt "You are a media content curator of JSON-formatted content. Respond in strict JSON format only.")
 
@@ -240,22 +245,26 @@
                            [llm catalog media channels])
         (log/info "skipping tagline generation on media: %s" name)))))
 
+(defn days->millis
+  [d]
+  (* d 24 60 60 1000))
+
 (defrecord LLMCuratorBackend
     [llm catalog throttler config]
-  ICuratorBackend
-  (retag-library!
-    [_ library]
-    (llm-retag-library! llm catalog library throttler
-                        :threshold (get-in config [:thresholds :retag])))
-  (generate-library-taglines!
-    [_ library]
-    (llm-generate-library-taglines! llm catalog library throttler
-                                    :threshold (get-in config [:thresholds :tagline])))
-  (recategorize-library!
-    [_ library]
-    (llm-categorize-library-media! llm catalog library throttler
-                                   :threshold (get-in config [:thresholds :recategorize])
-                                   :channels (get-in config [:channels]))))
+    ICuratorBackend
+    (retag-library!
+      [_ library]
+      (llm-retag-library! llm catalog library throttler
+                          :threshold (days->millis (get-in config [:thresholds :retag]))))
+    (generate-library-taglines!
+      [_ library]
+      (llm-generate-library-taglines! llm catalog library throttler
+                                      :threshold (days->millis (get-in config [:thresholds :tagline]))))
+    (recategorize-library!
+      [_ library]
+      (llm-categorize-library-media! llm catalog library throttler
+                                     :threshold (days->millis (get-in config [:thresholds :recategorize]))
+                                     :channels (get-in config [:channels]))))
 
 (defprotocol ICurator
   (start! [self])
@@ -274,37 +283,19 @@
 
 (defn start!
   [{:keys [running? backend] :as curator}
-   {:keys [tagging-delay taglines-delay categorization-delay]}
+   ;; TODO: thresholds are for when to redo. Interval is how often to check.
+   {:keys [interval]}
    libraries]
-  (let [now (System/currentTimeMillis)
-        min-time (fn [& args]
-                   (let [t (System/currentTimeMillis)]
-                     (apply min (map (fn [n] (- n t)) args))))]
-    (future
-      (loop [next-tag            (+ now tagging-delay)
-             next-tagline        (+ now taglines-delay)
-             next-categorization (+ now categorization-delay)]
-        (when @running?
-          (let [next-delay (min-time next-tag next-tagline next-categorization)]
-            (when (> next-delay 0)
-              (Thread/sleep next-delay))
-            (let [t (System/currentTimeMillis)
-                  do-tag? (>= t next-tag)
-                  do-tagline? (>= t next-tagline)
-                  do-recategorize? (>= t next-categorization)]
-              (when do-tag?
-                (doseq [library libraries]
-                  (retag-library! backend library)))
-              (when do-tagline?
-                (doseq [library libraries]
-                  (generate-library-taglines! backend library)))
-              (when do-recategorize?
-                (doseq [library libraries]
-                  (recategorize-library! backend library)))
-              (recur (if do-tag? (+ t tagging-delay) next-tag)
-                     (if do-tagline? (+ t taglines-delay) next-tagline) 
-                     (if do-recategorize? (+ t categorization-delay) next-categorization)))))))
-    curator))
+  (future
+    (loop []
+      (when @running?
+        (doseq [library libraries]
+          (retag-library! backend library)
+          (generate-library-taglines! backend library)
+          (recategorize-library! backend library))
+        (Thread/sleep (* 1000 60 interval)))
+      (recur)))
+  curator)
 
 (defn stop!
   [{:keys [running?] :as curator}]
