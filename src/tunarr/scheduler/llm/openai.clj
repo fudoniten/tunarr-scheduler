@@ -106,7 +106,8 @@
   ([client instructions]
    (openai-request-arbitrary-json! client instructions {}))
   ([client instructions options]
-   (let [response-format {:type "json_object"}
+   (let [response-format {:type "json_object"
+                          :json_object {:name "response"}}
          body (request-openai! client (ensure-json-instructions instructions)
                                (merge {:temperature 0.2
                                        :response-format response-format}
