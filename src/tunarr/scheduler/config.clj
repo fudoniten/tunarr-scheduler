@@ -7,8 +7,6 @@
             [integrant.core :as ig]
             [tunarr.scheduler.media :as media]))
 
-(def default-config-resource "config.edn")
-
 (defn- parse-port [value]
   (cond
     (int? value) value

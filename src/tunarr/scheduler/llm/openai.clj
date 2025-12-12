@@ -150,9 +150,14 @@
                                api-key
                                (or http-opts {}))
         intro-schema {:type "object"
+                      :name "introduction"
                       :properties {:message {:type "string"}}
                       :required ["message"],
                       :additionalProperties false}]
     (log/info "Initialised OpenAI client" (dissoc (into {} client) :api-key))
-    (log/info "OpenAI says: %s" (openai-request-json! client "Please introduce yourself in one sentence." intro-schema {:schema-name "introduction"}))
+    (log/info "OpenAI says: %s"
+              (openai-request-json! client
+                                    "Please introduce yourself in one sentence."
+                                    intro-schema
+                                    {:schema-name "introduction"}))
     client))

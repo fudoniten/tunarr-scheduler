@@ -290,9 +290,9 @@
     (loop []
       (when @running?
         (doseq [library libraries]
-          (retag-library! backend library)
-          (generate-library-taglines! backend library)
-          (recategorize-library! backend library))
+          #_(retag-library! backend library)
+          #_(generate-library-taglines! backend library)
+          #_(recategorize-library! backend library))
         (Thread/sleep (* 1000 60 interval)))
       (recur)))
   curator)
