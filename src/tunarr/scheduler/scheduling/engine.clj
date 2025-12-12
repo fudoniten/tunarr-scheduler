@@ -3,7 +3,6 @@
   (:require [clojure.string :as str]
             [tick.core :as t]
             [taoensso.timbre :as log]
-            [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.util.time :as time-util]))
 
 (defrecord SchedulerEngine [config state]
@@ -29,6 +28,6 @@
                       instant))
 
 (defn schedule-week!
-  "Produce a weekly schedule for the supplied channel. Placeholder returns skeleton." [engine llm persistence {:keys [channel-id preferences]}]
+  "Produce a weekly schedule for the supplied channel. Placeholder returns skeleton." [engine persistence {:keys [channel-id preferences]}]
   (log/info "Scheduling week" {:channel channel-id})
   (throw (ex-info "schedule-week! not implemented" {})))

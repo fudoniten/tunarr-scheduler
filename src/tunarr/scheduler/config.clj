@@ -78,8 +78,8 @@
                              (get config :channels {}))]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
-     :tunarr/llm-throttler (get-in config [:llm :throttler])
-     :tunarr/llm (:llm config)
+     :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
+     :tunarr/tunabrain (:tunabrain config)
                                         ;:tunarr/tts (:tts config)
                                         ;:tunarr/media-source (:jellyfin config)
                                         ;:tunarr/tunarr-source (:tunarr config)
@@ -88,14 +88,14 @@
                                         ;                   :daytime-hours (get-in config [:scheduler :daytime-hours])
                                         ;                   :seasonal (get-in config [:scheduler :seasonal])
                                         ;                   :preferences (get-in config [:scheduler :preferences])}
-                                        ;:tunarr/bumpers {:llm (ig/ref :tunarr/llm)
+                                        ;:tunarr/bumpers {:tunabrain (ig/ref :tunarr/tunabrain)
                                         ;                 :tts (ig/ref :tunarr/tts)}
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
      :tunarr/curation {:libraries (keys (get collection-config :libraries))
-                       :llm       (:ig/ref :tunarr/llm)
+                       :tunabrain (:ig/ref :tunarr/tunabrain)
                        :catalog   (:ig/ref :tunarr/catalog)
-                       :throttler (:ig/ref :tunarr/llm-throttler)
+                       :throttler (:ig/ref :tunarr/tunabrain-throttler)
                        :config    (merge curation-config
                                    {:libraries (keys (:libraries collection-config))
                                     :channels  channel-config})}
@@ -110,7 +110,7 @@
                           :job-runner (ig/ref :tunarr/job-runner)
                                         ;:scheduler (ig/ref :tunarr/scheduler)
                                         ;:media (ig/ref :tunarr/media-source)
-                                        ;:llm (ig/ref :tunarr/llm)
+                                        ;:tunabrain (ig/ref :tunarr/tunabrain)
                                         ;:tts (ig/ref :tunarr/tts)
                                         ;:bumpers (ig/ref :tunarr/bumpers)
                                         ;:tunarr (ig/ref :tunarr/tunarr-source)
