@@ -155,7 +155,7 @@
                       :required ["message"],
                       :additionalProperties false}]
     (log/info "Initialised OpenAI client" (dissoc (into {} client) :api-key))
-    (log/info "OpenAI says: %s"
+    #_(log/info "OpenAI says: %s"
               (openai-request-json! client
                                     "Please introduce yourself in one sentence."
                                     intro-schema

@@ -292,7 +292,8 @@
         (doseq [library libraries]
           #_(retag-library! backend library)
           #_(generate-library-taglines! backend library)
-          #_(recategorize-library! backend library))
+          #_(recategorize-library! backend library)
+          (log/info (format "processing library: %s" library)))
         (Thread/sleep (* 1000 60 interval)))
       (recur)))
   curator)
