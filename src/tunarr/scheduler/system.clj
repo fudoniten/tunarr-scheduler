@@ -13,8 +13,7 @@
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
             [tunarr.scheduler.scheduling.engine :as engine]
-            [tunarr.scheduler.llm :as llm]
-            [tunarr.scheduler.llm.openai]
+            [tunarr.scheduler.tunabrain :as tunabrain]
             [tunarr.scheduler.tts :as tts]
             [tunarr.scheduler.bumpers :as bumpers]))
 
@@ -26,13 +25,13 @@
 (defmethod ig/halt-key! :tunarr/logger [_ _]
   (log/info "Logger shut down"))
 
-(defmethod ig/init-key :tunarr/llm [_ config]
-  (log/info "initializing llm client")
-  #_(llm/create-client config))
+(defmethod ig/init-key :tunarr/tunabrain [_ config]
+  (log/info "initializing tunabrain client")
+  (tunabrain/create! config))
 
-(defmethod ig/halt-key! :tunarr/llm [_ client]
-  (log/info "closing llm client")
-  #_(llm/close! client))
+(defmethod ig/halt-key! :tunarr/tunabrain [_ client]
+  (log/info "closing tunabrain client")
+  (.close ^java.io.Closeable client))
 
 (defmethod ig/init-key :tunarr/tts [_ config]
   (log/info "initializing tts client")
@@ -74,20 +73,20 @@
   (log/info "closing catalog")
   (catalog/close-catalog! state))
 
-(defmethod ig/init-key :tunarr/llm-throttler [_ {:keys [rate queue-size]}]
-  (log/info "initializing LLM throttler")
+(defmethod ig/init-key :tunarr/tunabrain-throttler [_ {:keys [rate queue-size]}]
+  (log/info "initializing tunabrain throttler")
   (let [throttler (job-throttler/create :rate rate :queue-size queue-size)]
     (job-throttler/start! throttler)
     throttler))
 
-(defmethod ig/halt-key! :tunarr/llm-throttler [_ throttler]
-  (log/info "closing LLM throttler")
+(defmethod ig/halt-key! :tunarr/tunabrain-throttler [_ throttler]
+  (log/info "closing tunabrain throttler")
   (job-throttler/stop! throttler))
 
 (defmethod ig/init-key :tunarr/curation
-  [_ {:keys [llm catalog throttler libraries config]}]
+  [_ {:keys [tunabrain catalog throttler libraries config]}]
   (log/info "starting curator")
-  (let [curator (curation/create! {:llm       llm
+  (let [curator (curation/create! {:tunabrain tunabrain
                                    :catalog   catalog
                                    :throttler throttler
                                    :config    config})]
@@ -123,14 +122,6 @@
   (log/info "shutting down channel sync")
   nil)
 
-(defmethod ig/init-key :tunarr/llm
-  [_ config]
-  (llm/create! config))
-
-(defmethod ig/halt-key! :tunarr/llm
-  [_ llm]
-  (llm/close! llm))
-
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
   (log/info "initializing scheduler")
@@ -144,9 +135,9 @@
   (log/info "closing scheduler")
   #_(engine/stop! engine))
 
-(defmethod ig/init-key :tunarr/bumpers [_ {:keys [llm tts]}]
+(defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain tts]}]
   (log/info "initializing bumpers")
-  #_(bumpers/create-service {:llm llm :tts tts}))
+  #_(bumpers/create-service {:tunabrain tunabrain :tts tts}))
 
 (defmethod ig/halt-key! :tunarr/bumpers [_ svc]
   (log/info "closing bumpers")
