@@ -41,7 +41,7 @@
   [d]
   (* d 24 60 60 1000))
 
-(defn request-tags-from-tunabrain!
+(defn tunabrain-retag-media!
   [brain catalog {:keys [::media/id] :as media}]
   (tunabrain/request-tags!
    brain
@@ -49,18 +49,18 @@
     :catalog-tags (catalog/get-tags catalog)
     :current-tags (catalog/get-media-tags catalog id)}))
 
-(defn request-channel-mapping-from-tunabrain!
-  [brain {:keys [::media/id] :as media} channels]
-  (tunabrain/request-channel-mapping!
+(defn tunabrain-recategorize-media!
+  [brain media channels categories]
+  (tunabrain/request-categorization!
    brain
    {:media media
     :channels channels
-    :media-id id}))
+    :categories categories}))
 
 (defn retag-media!
   [brain catalog {:keys [::media/id ::media/name] :as media}]
   (log/info (format "re-tagging media: %s" name))
-  (when-let [response (request-tags-from-tunabrain! brain catalog media)]
+  (when-let [response (tunabrain-retag-media! brain catalog media)]
     (when-let [tags (or (:tags response) (:filtered-tags response))]
       (when (s/valid? (s/coll-of string?) tags)
         (log/info (format "Applying tags to %s: %s" name tags))
@@ -82,9 +82,9 @@
         (log/info (format "skipping tag generation on media: %s" name))))))
 
 (defn recategorize-media!
-  [brain catalog {:keys [::media/id ::media/name] :as media} channels]
+  [brain catalog {:keys [::media/id ::media/name] :as media} channels categories]
   (log/info (format "recategorizing media: %s" name))
-  (when-let [response (request-channel-mapping-from-tunabrain! brain media channels)]
+  (when-let [response (tunabrain/request-categorization! brain media categories channels)]
     (when-let [channel-list (:channels response)]
       (when (s/valid? (s/coll-of string?) channel-list)
         (log/info (format "Channels for %s: %s" name channel-list))
@@ -116,7 +116,8 @@
       [_ library]
       (categorize-library-media! brain catalog library throttler
                                  :threshold (days->millis (get-in config [:thresholds :recategorize]))
-                                 :channels (get-in config [:channels]))))
+                                 :channels (get config :channels)
+                                 :categories (get config :categories))))
 
 (defprotocol ICurator
   (start! [self])

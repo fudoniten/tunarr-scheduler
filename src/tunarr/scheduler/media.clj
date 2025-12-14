@@ -17,6 +17,9 @@
 (s/def ::kid-friendly? boolean?)
 (s/def ::genre keyword)
 
+(s/def ::category-name keyword?)
+(s/def ::category-value keyword?)
+
 (defn rating? [n] (and (number? n) (<= 0 n 100)))
 
 (defn year? [n] (and (number? n) (<= 0 n 2100)))

@@ -119,7 +119,7 @@
       (columns :media_id :tagline)
       (values (map (fn [tagline] [media-id tagline])
                    taglines))
-      (on-conflict :media_id :tagline (do-nothing))))
+      (on-conflict :media_id :tagline) (do-nothing)))
 
 (defn sql:delete-tag
   [tag]
@@ -150,6 +150,38 @@
       (sql/set {:name new-tag})
       (where [:= :name tag])
       (on-conflict) (do-nothing)))
+
+(defn sql:get-media-category-values
+  [media-id category]
+  (-> (select :category_value)
+      (from :media_categorization)
+      (where [:= :media_id media-id]
+             [:= :category (name category)])))
+
+(defn sql:add-media-category-values!
+  [media-id category values]
+  (-> (insert-into :media_categorization)
+      (columns :media_id :category :category_value)
+      (values (map (fn [value] [media-id category value])
+                   values))
+      (on-conflict :media_id :category :category_value) (do-nothing)))
+
+(defn sql:get-media-categories [media-id]
+  (-> (select :category
+              [[:array_agg [:distinct :media_categorization.category_value]] :values])
+      (from :media_categorization)
+      (where [:= :media_id media-id])))
+
+(defn sql:delete-media-category-value! [media-id category value]
+  (-> (delete-from :media_categorization)
+      (where [:= :media_id media-id]
+             [:= :category category]
+             [:= :category_value value])))
+
+(defn sql:delete-media-category-values! [media-id category]
+  (-> (delete-from :media_categorization)
+      (where [:= :media_id media-id]
+             [:= :category category])))
 
 (defn tag-exists?
   [executor tag]
@@ -228,57 +260,95 @@
   catalog/Catalog
   (add-media! [_ media]
     (sql:exec-with-tx! executor (sql:add-media media)))
+
   (get-media [_]
     (sql:fetch! executor (sql:get-media)))
+
   (get-media-by-library-id [_ library-id]
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.library_id library-id]))))
+
   (get-tags [_]
     (let [[status tags] (sql:fetch! executor (sql:get-tags))]
       (if-not (= status :ok)
         (throw tags)
         (map (comp keyword :tag/name) tags))))
+
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.id media-id]))))
+
   (add-media-tags! [_ media-id tags]
     (sql:exec-with-tx! executor
                        [(sql:insert-tags tags)
                         (sql:insert-media-tags media-id tags)]))
+
   (get-media-tags [_ media-id]
     (sql:fetch! executor (sql:get-media-tags media-id)))
+
   (update-channels! [_ channels]
     (sql:exec! executor (sql:insert-channels channels)))
+
   (update-libraries! [_ libraries]
     (sql:exec! executor (sql:insert-libraries libraries)))
+
   (add-media-channels! [_ media-id channels]
     (sql:exec! executor (sql:insert-media-channels media-id channels)))
+
   (add-media-genres! [_ media-id genres]
     (sql:exec! executor (sql:insert-media-genres media-id genres)))
+
   (get-media-by-channel [_ channel]
     (sql:fetch! executor
                 (-> (sql:get-media)
                     (where [:= :media_channels.channel channel]))))
+
   (get-media-by-tag [_ tag]
     (sql:fetch! executor
                 (-> (sql:get-media)
                     (where [:= :media_tags.tag tag]))))
+
   (get-media-by-genre [_ genre]
     (sql:fetch! executor
                 (-> (sql:get-media)
                     (where [:= :media_genres.genre genre]))))
+
   (add-media-taglines! [_ media-id taglines]
     (sql:exec! executor (sql:insert-media-taglines media-id taglines)))
+
   (delete-tag! [_ tag]
     (sql:exec! executor (sql:delete-tag tag)))
+
   (rename-tag! [_ tag new-tag]
     (if (tag-exists? executor new-tag)
       (sql:exec-with-tx! executor [(sql:retag-media tag new-tag)
                                    (sql:delete-tag tag)])
       (sql:exec! executor (sql:rename-tag tag new-tag))))
+
   (update-process-timestamp! [_ media-id process]
-    ((sql:exec! executor (sql:update-process-timestamp media-id process))))
-  (close-catalog! [_] (executor/close! executor)))
+    (sql:exec! executor (sql:update-process-timestamp media-id process)))
+
+  (close-catalog! [_] (executor/close! executor))
+
+  (get-media-category-values [_ media-id category]
+    (sql:exec! executor (sql:get-media-category-values media-id category)))
+
+  (add-media-category-value! [_ media-id category value]
+    (sql:exec! executor (sql:add-media-category-values! media-id category [value])))
+
+  (add-media-category-values! [_ media-id category values]
+    (sql:exec! executor (sql:add-media-category-values! media-id category values)))
+
+  (get-media-categories [_ media-id]
+    (into {}
+          (map (fn [[cat vals]] [(keyword cat) (map keyword vals)]))
+          (sql:exec! executor (sql:get-media-categories media-id))))
+
+  (delete-media-category-value! [_ media-id category value]
+    (sql:exec! executor (sql:delete-media-category-value! media-id category value)))
+
+  (delete-media-category-values! [_ media-id category]
+    (sql:exec! executor (sql:delete-media-category-values! media-id category))))
 
 (defmethod catalog/initialize-catalog! :postgresql
   [{:keys [host port user password database worker-count queue-size]

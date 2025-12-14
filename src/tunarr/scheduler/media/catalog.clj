@@ -23,7 +23,13 @@
   (delete-tag! [catalog tag])
   (rename-tag! [catalog tag new-tag])
   (update-process-timestamp! [catalog media-id process])
-  (close-catalog! [catalog]))
+  (close-catalog! [catalog])
+  (get-media-category-values [catalog media-id category])
+  (add-media-category-value! [catalog media-id category value])
+  (add-media-category-values! [catalog media-id category values])
+  (get-media-categories [catalog media-id])
+  (delete-media-category-value! [catalog media-id category value])
+  (delete-media-category-values! [catalog media-id category]))
 
 (defmulti initialize-catalog! :type)
 
@@ -105,6 +111,41 @@
 (s/fdef close-catalog!
   :args (s/cat :catalog ::catalog))
 
+(s/fdef get-media-category-values
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :category ::media/category-name)
+  :ret  (s/coll-of ::media/category-value))
+
+(s/fdef add-media-category-value!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :category ::media/category-name
+               :value ::media/category-value))
+
+(s/fdef add-media-category-values!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :category ::media/category-name
+               :values (s/coll-of ::media/category-value)))
+
+(s/fdef get-media-categories
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id)
+  :ret  (s/map-of ::media/category-name
+                  (s/coll-of ::media/category-value)))
+
+(s/fdef delete-media-category-value!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :category ::media/category-name
+               :value    ::media/category-value))
+
+(s/fdef delete-media-category-values!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :category ::media/category-name))
+
 (instrument 'add-media)
 (instrument 'get-media)
 (instrument 'get-media-by-id)
@@ -119,3 +160,9 @@
 (instrument 'get-media-by-tag)
 (instrument 'get-media-by-genre)
 (instrument 'close-catalog!)
+(instrument 'get-media-category-values)
+(instrument 'add-media-category-value!)
+(instrument 'add-media-category-values!)
+(instrument 'get-media-categories)
+(instrument 'delete-media-category-value!)
+(instrument 'delete-media-category-values!)

@@ -5,7 +5,7 @@
             [clojure.string :as str]
             [taoensso.timbre :as log]))
 
-(defrecord TunabrainClient [endpoint api-key http-opts]
+(defrecord TunabrainClient [endpoint http-opts]
   java.io.Closeable
   (close [_]
     (log/info "Closing tunabrain client")))
@@ -18,12 +18,11 @@
   (let [url (str (:endpoint client) path)
         request-opts (merge {:accept :json
                              :as :text
-                             :headers (cond-> {"Content-Type" "application/json"}
-                                         (:api-key client) (assoc "Authorization" (str "Bearer " (:api-key client))))
+                             :headers (cond-> {"Content-Type" "application/json"})
                              :throw-exceptions false
                              :body (json/generate-string payload)}
                             (:http-opts client))
-        {:keys [status body] :as resp} (http/post url request-opts)]
+        {:keys [status body]} (http/post url request-opts)]
     (if (<= 200 status 299)
       (json/parse-string body true)
       (throw (ex-info (format "tunabrain request failed: %s" status)
@@ -35,13 +34,18 @@
 
   Payload should include the media data and any existing tags so the upstream
   service can deduplicate as needed."
-  [client payload]
-  (json-post! client "/tags" payload))
+  [client media existing-tags]
+  (json-post! client "/tags"
+              {:media         media
+               :existing_tags existing-tags}))
 
-(defn request-channel-mapping!
+(defn request-categorization!
   "Fetch channel mapping metadata for a media item from tunabrain."
-  [client payload]
-  (json-post! client "/channel-mapping" payload))
+  [client media categories channels]
+  (json-post! client "/categorize"
+              {:media      media
+               :channels   channels
+               :categories categories}))
 
 (defn create!
   "Create a tunabrain client from configuration.
@@ -49,10 +53,10 @@
   Supported keys:
   * `:endpoint` – base URL of the tunabrain proxy service (default
     `http://localhost:8080`).
-  * `:api-key` – optional bearer token for authentication.
   * `:http-opts` – additional `clj-http` options."
-  [{:keys [endpoint api-key http-opts]}]
+  [{:keys [endpoint http-opts]}]
   (let [endpoint (or (sanitize-endpoint endpoint) "http://localhost:8080")
-        client (->TunabrainClient endpoint api-key (or http-opts {}))]
+        client (->TunabrainClient endpoint
+                                  (or http-opts {}))]
     (log/info "Initialised tunabrain client" {:endpoint endpoint})
     client))
