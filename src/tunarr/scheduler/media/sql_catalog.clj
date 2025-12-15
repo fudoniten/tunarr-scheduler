@@ -339,6 +339,11 @@
   (add-media-category-values! [_ media-id category values]
     (sql:exec! executor (sql:add-media-category-values! media-id category values)))
 
+  (set-media-category-values! [self media-id category values]
+    (sql:exec-with-tx! executor
+                       [(sql:delete-media-category-values! self media-id category)
+                        (sql:add-media-category-values! media-id category values)]))
+
   (get-media-categories [_ media-id]
     (into {}
           (map (fn [[cat vals]] [(keyword cat) (map keyword vals)]))

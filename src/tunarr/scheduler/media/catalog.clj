@@ -27,6 +27,7 @@
   (get-media-category-values [catalog media-id category])
   (add-media-category-value! [catalog media-id category value])
   (add-media-category-values! [catalog media-id category values])
+  (set-media-category-values! [catalog media-id category values])
   (get-media-categories [catalog media-id])
   (delete-media-category-value! [catalog media-id category value])
   (delete-media-category-values! [catalog media-id category]))
@@ -129,6 +130,12 @@
                :category ::media/category-name
                :values (s/coll-of ::media/category-value)))
 
+(s/fdef set-media-category-values!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :category ::media/category-name
+               :values (s/coll-of ::media/category-value)))
+
 (s/fdef get-media-categories
   :args (s/cat :catalog  ::catalog
                :media-id ::media/id)
@@ -163,6 +170,7 @@
 (instrument 'get-media-category-values)
 (instrument 'add-media-category-value!)
 (instrument 'add-media-category-values!)
+(instrument 'set-media-category-values!)
 (instrument 'get-media-categories)
 (instrument 'delete-media-category-value!)
 (instrument 'delete-media-category-values!)

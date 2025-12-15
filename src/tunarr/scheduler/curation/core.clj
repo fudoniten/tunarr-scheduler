@@ -42,20 +42,15 @@
   (* d 24 60 60 1000))
 
 (defn tunabrain-retag-media!
-  [brain catalog {:keys [::media/id] :as media}]
-  (tunabrain/request-tags!
-   brain
-   {:media media
-    :catalog-tags (catalog/get-tags catalog)
-    :current-tags (catalog/get-media-tags catalog id)}))
+  [brain catalog media]
+  (tunabrain/request-tags! brain media
+                           {:catalog-tags (catalog/get-tags catalog)}))
 
 (defn tunabrain-recategorize-media!
   [brain media channels categories]
-  (tunabrain/request-categorization!
-   brain
-   {:media media
-    :channels channels
-    :categories categories}))
+  (tunabrain/request-categorization! brain media
+                                     {:channels channels
+                                      :categories categories}))
 
 (defn retag-media!
   [brain catalog {:keys [::media/id ::media/name] :as media}]
@@ -70,7 +65,7 @@
         (log/info (format "Taglines for %s: %s" name taglines))
         (catalog/add-media-taglines! catalog id taglines)))))
 
-(defn retag-library!
+(defn retag-library-media!
   [brain catalog library throttler & {:keys [threshold]}]
   (log/info (format "re-tagging media for library: %s" library))
   (let [threshold-date (days-ago threshold)]
@@ -81,14 +76,25 @@
                            [brain catalog media])
         (log/info (format "skipping tag generation on media: %s" name))))))
 
+(s/def ::reasons (s/coll-of string?))
+
+(s/def ::channel-mapping (s/keys :req [::media/channel-name ::rationale]))
+(s/def ::channel-mappings (s/coll-of ::channel-mapping))
+
+(s/def ::categorization (s/map-of ::media/category-name (s/coll-of ::media/category-value)))
+
 (defn recategorize-media!
   [brain catalog {:keys [::media/id ::media/name] :as media} channels categories]
   (log/info (format "recategorizing media: %s" name))
   (when-let [response (tunabrain/request-categorization! brain media categories channels)]
-    (when-let [channel-list (:channels response)]
-      (when (s/valid? (s/coll-of string?) channel-list)
-        (log/info (format "Channels for %s: %s" name channel-list))
-        (catalog/add-media-channels! catalog id channel-list)))))
+    (let [{:keys [dimensions mappings]} response]
+      (when (s/valid? ::channel-mappings mappings)
+        (let [channels (map ::media/channel-name mappings)]
+          (log/info (format "Channels for %s: %s" name (map ::media/channel-name channels)))
+          (catalog/add-media-channels! catalog id channels)))
+      (when (s/valid? ::categorization dimensions)
+        (doseq [[category values] dimensions]
+          (catalog/set-media-category-values! catalog id category values))))))
 
 (defn categorize-library-media!
   [brain catalog library throttler & {:keys [channels threshold]}]
@@ -104,14 +110,16 @@
 (defrecord TunabrainCuratorBackend
     [brain catalog throttler config]
     ICuratorBackend
+    
     (retag-library!
       [_ library]
-      (retag-library! brain catalog library throttler
-                      :threshold (days->millis (get-in config [:thresholds :retag]))))
+      (retag-library-media! brain catalog library throttler
+                            :threshold (days->millis (get-in config [:thresholds :retag]))))
     (generate-library-taglines!
       [_ library]
-      (retag-library! brain catalog library throttler
-                      :threshold (days->millis (get-in config [:thresholds :tagline]))))
+      (retag-library-media! brain catalog library throttler
+                            :threshold (days->millis (get-in config [:thresholds :tagline]))))
+    
     (recategorize-library!
       [_ library]
       (categorize-library-media! brain catalog library throttler

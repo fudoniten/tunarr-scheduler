@@ -34,14 +34,15 @@
 
   Payload should include the media data and any existing tags so the upstream
   service can deduplicate as needed."
-  [client media existing-tags]
+  [client media & {:keys [catalog-tags]
+                   :or   {catalog-tags []}}]
   (json-post! client "/tags"
               {:media         media
-               :existing_tags existing-tags}))
+               :existing_tags catalog-tags}))
 
 (defn request-categorization!
   "Fetch channel mapping metadata for a media item from tunabrain."
-  [client media categories channels]
+  [client media & {:keys [categories channels]}]
   (json-post! client "/categorize"
               {:media      media
                :channels   channels
