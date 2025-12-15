@@ -57,6 +57,12 @@
       (values (map (comp vector name) tags))
       (on-conflict :name) (do-nothing)))
 
+(defn sql:delete-media-tags!
+  [media-id tags]
+  (-> (delete-from :tags)
+      (where [:= :media_id media-id]
+             [:in :tag (map name tags)])))
+
 (defn sql:get-tags
   []
   (-> (select :name) (from :tag)))
@@ -283,6 +289,12 @@
                        [(sql:insert-tags tags)
                         (sql:insert-media-tags media-id tags)]))
 
+  (set-media-tags! [_ media-id tags]
+    (sql:exec-with-tx! executor
+                       [(sql:delete-media-tags! media-id tags)
+                        (sql:insert-tags tags)
+                        (sql:insert-media-tags media-id tags)]))
+
   (get-media-tags [_ media-id]
     (sql:fetch! executor (sql:get-media-tags media-id)))
 
@@ -339,9 +351,9 @@
   (add-media-category-values! [_ media-id category values]
     (sql:exec! executor (sql:add-media-category-values! media-id category values)))
 
-  (set-media-category-values! [self media-id category values]
+  (set-media-category-values! [_ media-id category values]
     (sql:exec-with-tx! executor
-                       [(sql:delete-media-category-values! self media-id category)
+                       [(sql:delete-media-category-values! media-id category)
                         (sql:add-media-category-values! media-id category values)]))
 
   (get-media-categories [_ media-id]

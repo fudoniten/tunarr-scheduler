@@ -40,6 +40,7 @@
 (s/def ::taglines (s/coll-of string?))
 (s/def ::library-id string?)
 (s/def ::library-name keyword?)
+(s/def ::rationale string?)
 
 (def media-fields
   [::name

@@ -1,8 +1,12 @@
 (ns tunarr.scheduler.tunabrain
   "HTTP client for interacting with the external tunabrain service."
-  (:require [cheshire.core :as json]
+  (:require [clojure.string :as str]
+            [clojure.spec.alpha :as s]
+
+            [tunarr.scheduler.media :as media]
+            
+            [cheshire.core :as json]
             [clj-http.client :as http]
-            [clojure.string :as str]
             [taoensso.timbre :as log]))
 
 (defrecord TunabrainClient [endpoint http-opts]
@@ -36,17 +40,34 @@
   service can deduplicate as needed."
   [client media & {:keys [catalog-tags]
                    :or   {catalog-tags []}}]
-  (json-post! client "/tags"
-              {:media         media
-               :existing_tags catalog-tags}))
+  (if-let [response (json-post! client "/tags"
+                                  {:media         media
+                                   :existing_tags catalog-tags})]
+    (if (s/valid? (s/coll-of string?) response)
+      (map keyword response)
+      (do (log/error "bad tagging response when categorizing media: %s"
+                     (::media/name media))
+          (log/debug "media: %s" media)
+          (log/debug "response: %s" response)))
+    (log/error "no response when requesting media tags for media %s"
+               (::media/name media))))
 
 (defn request-categorization!
   "Fetch channel mapping metadata for a media item from tunabrain."
   [client media & {:keys [categories channels]}]
-  (json-post! client "/categorize"
-              {:media      media
-               :channels   channels
-               :categories categories}))
+  (if-let [response (json-post! client "/categorize"
+                                {:media      media
+                                 :channels   channels
+                                 :categories categories})]
+    (let [{dimension :dimensions mappings :mappings} response]
+      {
+       :mappings (for [{:keys [channel_name reasons]} mappings]
+                   {::media/channel-name channel_name
+                    ::media/rationale    (str/join "\n" reasons)})
+       :dimensions (into {}
+                         (map (fn [[category {:keys [dimension values]}]]))
+                         dimensions)
+       })))
 
 (defn create!
   "Create a tunabrain client from configuration.

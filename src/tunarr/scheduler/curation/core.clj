@@ -41,25 +41,15 @@
   [d]
   (* d 24 60 60 1000))
 
-(defn tunabrain-retag-media!
-  [brain catalog media]
-  (tunabrain/request-tags! brain media
-                           {:catalog-tags (catalog/get-tags catalog)}))
-
-(defn tunabrain-recategorize-media!
-  [brain media channels categories]
-  (tunabrain/request-categorization! brain media
-                                     {:channels channels
-                                      :categories categories}))
-
 (defn retag-media!
   [brain catalog {:keys [::media/id ::media/name] :as media}]
   (log/info (format "re-tagging media: %s" name))
-  (when-let [response (tunabrain-retag-media! brain catalog media)]
+  (when-let [response (tunabrain/request-tags! brain catalog media
+                                               :catalog-tags (catalog/get-tags catalog))]
     (when-let [tags (or (:tags response) (:filtered-tags response))]
       (when (s/valid? (s/coll-of string?) tags)
         (log/info (format "Applying tags to %s: %s" name tags))
-        (catalog/add-media-tags! catalog id tags)))
+        (catalog/set-media-tags! catalog id tags)))
     (when-let [taglines (:taglines response)]
       (when (s/valid? (s/coll-of string?) taglines)
         (log/info (format "Taglines for %s: %s" name taglines))
@@ -76,17 +66,21 @@
                            [brain catalog media])
         (log/info (format "skipping tag generation on media: %s" name))))))
 
-(s/def ::reasons (s/coll-of string?))
-
-(s/def ::channel-mapping (s/keys :req [::media/channel-name ::rationale]))
+(s/def ::channel-mapping
+  (s/keys :req [::media/channel-name ::media/rationale]))
 (s/def ::channel-mappings (s/coll-of ::channel-mapping))
 
-(s/def ::categorization (s/map-of ::media/category-name (s/coll-of ::media/category-value)))
+(s/def ::categorization
+  (s/map-of ::media/category-name
+            (s/coll-of (s/keys :req [::media/category-value
+                                     ::media/rationale]))))
 
 (defn recategorize-media!
   [brain catalog {:keys [::media/id ::media/name] :as media} channels categories]
   (log/info (format "recategorizing media: %s" name))
-  (when-let [response (tunabrain/request-categorization! brain media categories channels)]
+  (when-let [response (tunabrain/request-categorization! brain media
+                                                         :categories categories
+                                                         :channels   channels)]
     (let [{:keys [dimensions mappings]} response]
       (when (s/valid? ::channel-mappings mappings)
         (let [channels (map ::media/channel-name mappings)]
