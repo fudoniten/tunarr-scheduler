@@ -78,7 +78,9 @@
                                  (for [{:keys [value reasons]} values]
                                    {::media/category-value (keyword value)
                                     ::media/rationale      (str/join "\n" reasons)})]))
-                         dimensions)})))
+                         dimensions)})
+    (log/error "no response when requesting categorization for media %s"
+               (::media/name media))))
 
 (defn create!
   "Create a tunabrain client from configuration.

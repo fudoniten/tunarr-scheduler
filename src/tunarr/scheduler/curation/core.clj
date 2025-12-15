@@ -128,8 +128,8 @@
 (defrecord Curator
     [running? backend]
   ICurator
-  (start! [self] (reset! running? true))
-  (stop! [self] (reset! running? false)))
+  (start! [_] (reset! running? true))
+  (stop! [_] (reset! running? false)))
 
 (defn create!
   [{:keys [tunabrain catalog throttler config]}]
@@ -145,9 +145,9 @@
     (loop []
       (when @running?
         (doseq [library libraries]
-          #_(retag-library! backend library)
-          #_(generate-library-taglines! backend library)
-          #_(recategorize-library! backend library)
+          (retag-library! backend library)
+          (generate-library-taglines! backend library)
+          (recategorize-library! backend library)
           (log/info (format "processing library: %s" library)))
         (Thread/sleep (* 1000 60 interval)))
       (recur)))
