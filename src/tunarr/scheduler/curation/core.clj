@@ -47,7 +47,7 @@
   (when-let [response (tunabrain/request-tags! brain media
                                                :catalog-tags (catalog/get-tags catalog))]
     (when-let [tags (or (:tags response) (:filtered-tags response))]
-      (when (s/valid? (s/coll-of string?) tags)
+      (when (s/valid? ::media/tags tags)
         (log/info (format "Applying tags to %s: %s" name tags))
         (catalog/set-media-tags! catalog id tags)))
     (when-let [taglines (:taglines response)]
@@ -83,9 +83,9 @@
                                                          :channels   channels)]
     (let [{:keys [dimensions mappings]} response]
       (when (s/valid? ::channel-mappings mappings)
-        (let [channels (map ::media/channel-name mappings)]
-          (log/info (format "Channels for %s: %s" name (map ::media/channel-name channels)))
-          (catalog/add-media-channels! catalog id channels)))
+        (let [channel-names (map ::media/channel-name mappings)]
+          (log/info (format "Channels for %s: %s" name channel-names))
+          (catalog/add-media-channels! catalog id channel-names)))
       (when (s/valid? ::categorization dimensions)
         (doseq [[category values] dimensions]
           (catalog/set-media-category-values! catalog id category values))))))

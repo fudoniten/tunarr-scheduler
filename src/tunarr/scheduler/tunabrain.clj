@@ -41,10 +41,19 @@
   [client media & {:keys [catalog-tags]
                    :or   {catalog-tags []}}]
   (if-let [response (json-post! client "/tags"
-                                  {:media         media
-                                   :existing_tags catalog-tags})]
-    (if (s/valid? (s/coll-of string?) response)
-      (map keyword response)
+                                 {:media         media
+                                  :existing_tags catalog-tags})]
+    (cond
+      (s/valid? (s/coll-of string?) response)
+      {:tags (mapv keyword response)}
+
+      (map? response)
+      (let [{:keys [tags filtered_tags taglines]} response]
+        {:tags          (some->> tags (mapv keyword))
+         :filtered-tags (some->> filtered_tags (mapv keyword))
+         :taglines      taglines})
+
+      :else
       (do (log/error "bad tagging response when categorizing media: %s"
                      (::media/name media))
           (log/debug "media: %s" media)
@@ -59,15 +68,17 @@
                                 {:media      media
                                  :channels   channels
                                  :categories categories})]
-    (let [{dimension :dimensions mappings :mappings} response]
-      {
-       :mappings (for [{:keys [channel_name reasons]} mappings]
-                   {::media/channel-name channel_name
+    (let [{:keys [dimensions mappings]} response]
+      {:mappings (for [{:keys [channel_name reasons]} mappings]
+                   {::media/channel-name (keyword channel_name)
                     ::media/rationale    (str/join "\n" reasons)})
        :dimensions (into {}
-                         (map (fn [[category {:keys [dimension values]}]]))
-                         dimensions)
-       })))
+                         (map (fn [[category {:keys [dimension values]}]]
+                                [(keyword (or dimension category))
+                                 (for [{:keys [value reasons]} values]
+                                   {::media/category-value (keyword value)
+                                    ::media/rationale      (str/join "\n" reasons)})]))
+                         dimensions)})))
 
 (defn create!
   "Create a tunabrain client from configuration.
