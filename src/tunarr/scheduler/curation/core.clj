@@ -44,7 +44,7 @@
 (defn retag-media!
   [brain catalog {:keys [::media/id ::media/name] :as media}]
   (log/info (format "re-tagging media: %s" name))
-  (when-let [response (tunabrain/request-tags! brain catalog media
+  (when-let [response (tunabrain/request-tags! brain media
                                                :catalog-tags (catalog/get-tags catalog))]
     (when-let [tags (or (:tags response) (:filtered-tags response))]
       (when (s/valid? (s/coll-of string?) tags)
@@ -91,14 +91,14 @@
           (catalog/set-media-category-values! catalog id category values))))))
 
 (defn categorize-library-media!
-  [brain catalog library throttler & {:keys [channels threshold]}]
+  [brain catalog library throttler & {:keys [channels threshold categories]}]
   (log/info (format "recategorizing media for library: %s" library))
   (let [threshold-date (days-ago threshold)]
     (doseq [media (catalog/get-media-by-library-id catalog library)]
       (if (.after (process-timestamp media "categorize") threshold-date)
         (throttler/submit! throttler recategorize-media!
                            (process-callback catalog media "categorize")
-                           [brain catalog media channels])
+                           [brain catalog media channels categories])
         (log/info "skipping tagline generation on media: %s" name)))))
 
 (defrecord TunabrainCuratorBackend
