@@ -8,7 +8,8 @@
             [clojure.spec.test.alpha :refer [instrument]]
             
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from] :as sql]
-            [next.jdbc :as jdbc]))
+            [next.jdbc :as jdbc]
+            [taoensso.timbre :as log]))
 
 (def field-map
   {::media/name             :name
@@ -28,17 +29,32 @@
   [e]
   (with-out-str (print-stack-trace e)))
 
+(defn unwrap-result
+  [op result]
+  (let [[status payload] result]
+    (case status
+      :ok payload
+      :err (do
+             (log/error payload (format "SQL %s failed" op))
+             (throw payload))
+      (do
+        (log/errorf "SQL %s returned unexpected status: %s" op status)
+        (throw (ex-info "unexpected SQL executor status"
+                        {:op     op
+                         :status status
+                         :result result}))))))
+
 (defn sql:exec-with-tx!
   [executor queries]
-  (deref (executor/exec-with-tx! executor queries)))
+  (unwrap-result "exec-with-tx!" (deref (executor/exec-with-tx! executor queries))))
 
 (defn sql:exec!
   [executor query]
-  (deref (executor/exec! executor query)))
+  (unwrap-result "exec!" (deref (executor/exec! executor query))))
 
 (defn sql:fetch!
   [executor query]
-  (deref (executor/fetch! executor query)))
+  (unwrap-result "fetch!" (deref (executor/fetch! executor query))))
 
 (defn media->row
   "Rename the media map keys to match the SQL schema."
@@ -197,10 +213,8 @@
 
 (defn tag-exists?
   [executor tag]
-  (let [[status result] (sql:fetch! executor (sql:get-tag tag))]
-    (if (= status :ok)
-      (= tag (:tag/name result))
-      (throw result))))
+  (some #(= tag (:name %))
+        (sql:fetch! executor (sql:get-tag tag))))
 
 (defn sql:update-process-timestamp
   [media-id process]
@@ -281,15 +295,14 @@
                              (where [:= :media.library_id library-id]))))
 
   (get-media-by-library [self library]
-    (if-let [library-id (sql:fetch! executor (sql:get-library-id library))]
+    (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library))
+                                first
+                                :id)]
       (catalog/get-media-by-library-id self library-id)
       (throw (ex-info (format "library not found: %s" (name library)) {}))))
 
   (get-tags [_]
-    (let [[status tags] (sql:fetch! executor (sql:get-tags))]
-      (if-not (= status :ok)
-        (throw tags)
-        (map (comp keyword :tag/name) tags))))
+    (map (comp keyword :name) (sql:fetch! executor (sql:get-tags))))
 
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
@@ -307,7 +320,8 @@
                         (sql:insert-media-tags media-id tags)]))
 
   (get-media-tags [_ media-id]
-    (sql:fetch! executor (sql:get-media-tags media-id)))
+    (map (comp keyword :tag)
+         (sql:fetch! executor (sql:get-media-tags media-id))))
 
   (update-channels! [_ channels]
     (sql:exec! executor (sql:insert-channels channels)))
@@ -354,7 +368,8 @@
   (close-catalog! [_] (executor/close! executor))
 
   (get-media-category-values [_ media-id category]
-    (sql:exec! executor (sql:get-media-category-values media-id category)))
+    (map (comp keyword :category_value)
+         (sql:fetch! executor (sql:get-media-category-values media-id category))))
 
   (add-media-category-value! [_ media-id category value]
     (sql:exec! executor (sql:add-media-category-values! media-id category [value])))
@@ -369,8 +384,9 @@
 
   (get-media-categories [_ media-id]
     (into {}
-          (map (fn [[cat vals]] [(keyword cat) (map keyword vals)]))
-          (sql:exec! executor (sql:get-media-categories media-id))))
+          (map (fn [{:keys [category values]}]
+                 [(keyword category) (map keyword values)]))
+          (sql:fetch! executor (sql:get-media-categories media-id))))
 
   (delete-media-category-value! [_ media-id category value]
     (sql:exec! executor (sql:delete-media-category-value! media-id category value)))
