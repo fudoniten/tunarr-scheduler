@@ -281,8 +281,9 @@
                              (where [:= :media.library_id library-id]))))
 
   (get-media-by-library [self library]
-    (when-let [library-id (sql:fetch! executor (sql:get-library-id library))]
-      (catalog/get-media-by-library-id self library-id)))
+    (if-let [library-id (sql:fetch! executor (sql:get-library-id library))]
+      (catalog/get-media-by-library-id self library-id)
+      (throw (ex-info (format "library not found: %s" (name library)) {}))))
 
   (get-tags [_]
     (let [[status tags] (sql:fetch! executor (sql:get-tags))]
