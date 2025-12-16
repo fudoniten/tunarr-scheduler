@@ -9,6 +9,7 @@
   (get-media [catalog])
   (get-media-by-id [catalog media-id])
   (get-media-by-library-id [catalog library-id])
+  (get-media-by-library [catalog library])
   (get-tags [catalog])
   (get-media-tags [catalog media-id])
   (add-media-tags! [catalog media-id tags])
@@ -55,6 +56,11 @@
 (s/fdef get-media-by-library-id
   :args (s/cat :catalog    ::catalog
                :library-id ::media/library-id)
+  :ret  (s/coll-of ::media/metadata))
+
+(s/fdef get-media-by-library
+  :args (s/cat :catalog ::catalog
+               :library ::media/library-name)
   :ret  (s/coll-of ::media/metadata))
 
 (s/fdef get-tags
@@ -163,6 +169,7 @@
 (instrument 'get-media)
 (instrument 'get-media-by-id)
 (instrument 'get-media-by-library-id)
+(instrument 'get-media-by-library)
 (instrument 'add-media-tags)
 (instrument 'set-media-tags)
 (instrument 'update-channels)

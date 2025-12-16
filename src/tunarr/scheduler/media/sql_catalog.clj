@@ -67,6 +67,12 @@
   []
   (-> (select :name) (from :tag)))
 
+(defn sql:get-library-id
+  [library]
+  (-> (select :id)
+      (from :library)
+      (where [:= :name (name library)])))
+
 (defn sql:insert-media-tags
   [media-id tags]
   (-> (insert-into :media_tags)
@@ -273,6 +279,10 @@
   (get-media-by-library-id [_ library-id]
     (sql:fetch! executor (-> (sql:get-media)
                              (where [:= :media.library_id library-id]))))
+
+  (get-media-by-library [self library]
+    (when-let [library-id (sql:fetch! executor (sql:get-library-id library))]
+      (catalog/get-media-by-library-id self library-id)))
 
   (get-tags [_]
     (let [[status tags] (sql:fetch! executor (sql:get-tags))]

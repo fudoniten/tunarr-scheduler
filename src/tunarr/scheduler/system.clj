@@ -90,7 +90,7 @@
                                    :catalog   catalog
                                    :throttler throttler
                                    :config    config})]
-    (curation/start! curator config libraries)
+    (curation/start! curator libraries)
     curator))
 
 (defmethod ig/halt-key! :tunarr/curation

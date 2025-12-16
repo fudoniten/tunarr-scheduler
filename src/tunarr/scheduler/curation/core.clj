@@ -41,6 +41,12 @@
   [d]
   (* d 24 60 60 1000))
 
+(defn overdue? [media process threshold]
+  (let [ts (process-timestamp media process)]
+    (if (nil? ts)
+      true
+      (.isBefore ts threshold))))
+
 (defn retag-media!
   [brain catalog {:keys [::media/id ::media/name] :as media}]
   (log/info (format "re-tagging media: %s" name))
@@ -57,13 +63,14 @@
 
 (defn retag-library-media!
   [brain catalog library throttler & {:keys [threshold]}]
-  (log/info (format "re-tagging media for library: %s" library))
+  (log/info (format (format "re-tagging media for library: %s" (name library))))
   (let [threshold-date (days-ago threshold)]
     (doseq [{:keys [::media/name] :as media} (catalog/get-media-by-library-id catalog library)]
-      (if (.after (process-timestamp media "tagging") threshold-date)
-        (throttler/submit! throttler retag-media!
-                           (process-callback catalog media "tagging")
-                           [brain catalog media])
+      (if (overdue? media "tagging" threshold-date)
+        (do (log/info (format "re-tagging media: %s" (:name media)))
+            (throttler/submit! throttler retag-media!
+                               (process-callback catalog media "tagging")
+                               [brain catalog media]))
         (log/info (format "skipping tag generation on media: %s" name))))))
 
 (s/def ::channel-mapping
@@ -95,7 +102,7 @@
   (log/info (format "recategorizing media for library: %s" library))
   (let [threshold-date (days-ago threshold)]
     (doseq [media (catalog/get-media-by-library-id catalog library)]
-      (if (.after (process-timestamp media "categorize") threshold-date)
+      (if (overdue? media "categorize" threshold-date)
         (throttler/submit! throttler recategorize-media!
                            (process-callback catalog media "categorize")
                            [brain catalog media channels categories])
@@ -122,38 +129,39 @@
                                  :categories (get config :categories))))
 
 (defprotocol ICurator
-  (start! [self])
+  (start! [self libraries])
   (stop! [self]))
 
+(defn start-curation!
+  ;; TODO: thresholds are for when to redo. Interval is how often to check.
+  [running? backend {:keys [interval]} libraries]
+  (future
+    (loop []
+      (log/info "beginning curation step")
+      (if @running?
+        (doseq [library libraries]
+          (log/info (format "retagging library: %s" (name library)))
+          (retag-library! backend library)
+          ;; (log/info "generating taglines for library: %s" (name library))
+          ;; (generate-library-taglines! backend library)
+          (log/info (format "recategorizing library: %s" (name library)))
+          (recategorize-library! backend library))
+        (log/info "skipping curation, not running"))
+      (Thread/sleep (* 1000 60 interval))
+      (recur)))
+  (reset! running? true))
+
 (defrecord Curator
-    [running? backend]
-  ICurator
-  (start! [_] (reset! running? true))
-  (stop! [_] (reset! running? false)))
+    [running? backend config]
+    ICurator
+    (start! [self libraries]
+      (start-curation! running? backend config libraries)
+      self)
+    (stop! [self]
+      (compare-and-set! running? true false)
+      self))
 
 (defn create!
   [{:keys [tunabrain catalog throttler config]}]
   (let [backend (->TunabrainCuratorBackend tunabrain catalog throttler config)]
-    (->Curator (atom false) backend)))
-
-(defn start!
-  [{:keys [running? backend] :as curator}
-   ;; TODO: thresholds are for when to redo. Interval is how often to check.
-   {:keys [interval]}
-   libraries]
-  (future
-    (loop []
-      (when @running?
-        (doseq [library libraries]
-          (retag-library! backend library)
-          (generate-library-taglines! backend library)
-          (recategorize-library! backend library)
-          (log/info (format "processing library: %s" library)))
-        (Thread/sleep (* 1000 60 interval)))
-      (recur)))
-  curator)
-
-(defn stop!
-  [{:keys [running?] :as curator}]
-  (compare-and-set! running? true false)
-  curator)
+    (->Curator (atom false) backend config)))
