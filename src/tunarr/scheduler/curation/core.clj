@@ -65,13 +65,13 @@
   [brain catalog library throttler & {:keys [threshold]}]
   (log/info (format (format "re-tagging media for library: %s" (name library))))
   (let [threshold-date (days-ago threshold)]
-    (doseq [{:keys [::media/name] :as media} (catalog/get-media-by-library catalog library)]
+    (doseq [media (catalog/get-media-by-library catalog library)]
       (if (overdue? media "tagging" threshold-date)
-        (do (log/info (format "re-tagging media: %s" (:name media)))
+        (do (log/info (format "re-tagging media: %s" (::media/name media)))
             (throttler/submit! throttler retag-media!
                                (process-callback catalog media "tagging")
                                [brain catalog media]))
-        (log/info (format "skipping tag generation on media: %s" name))))))
+        (log/info (format "skipping tag generation on media: %s" (::media/name media)))))))
 
 (s/def ::channel-mapping
   (s/keys :req [::media/channel-name ::media/rationale]))
@@ -106,7 +106,7 @@
         (throttler/submit! throttler recategorize-media!
                            (process-callback catalog media "categorize")
                            [brain catalog media channels categories])
-        (log/info "skipping tagline generation on media: %s" name)))))
+        (log/info "skipping tagline generation on media: %s" (::media/name media))))))
 
 (defrecord TunabrainCuratorBackend
     [brain catalog throttler config]
