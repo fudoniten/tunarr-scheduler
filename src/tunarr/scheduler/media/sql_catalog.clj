@@ -6,6 +6,8 @@
             [clojure.stacktrace :refer [print-stack-trace]]
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :refer [instrument]]
+            [clojure.pprint :refer [pprint]]
+
             
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from] :as sql]
             [next.jdbc :as jdbc]
@@ -33,7 +35,7 @@
   [op result]
   (let [[status payload] result]
     (case status
-      :ok payload
+      :ok  payload
       :err (do
              (log/error payload (format "SQL %s failed" op))
              (throw payload))
@@ -174,10 +176,15 @@
 
 (defn sql:retag-media
   [tag new-tag]
-  (-> (sql/update :media_tags)
-      (sql/set {:name new-tag})
-      (where [:= :name tag])
-      (on-conflict) (do-nothing)))
+  (-> (sql/update [:media_tags :mt1])
+      (sql/set {:tag new-tag})
+      (where [:= :tag tag]
+             [:not
+              [:exists (-> (select :1)
+                           (from [:media_tags :mt2])
+                           (where [:and
+                                   [:= :mt2.tag new-tag]
+                                   [:= :mt2.media_id :mt1.media_id]]))]])))
 
 (defn sql:get-media-category-values
   [media-id category]
@@ -213,7 +220,7 @@
 
 (defn tag-exists?
   [executor tag]
-  (some #(= tag (:name %))
+  (some #(= tag (:tag/name %))
         (sql:fetch! executor (sql:get-tag tag))))
 
 (defn sql:update-process-timestamp
@@ -223,6 +230,9 @@
       (values [[media-id process :now]])
       (on-conflict :media_id :process)
       (do-update-set {:last_run_at [:excluded :last_run_at]})))
+
+(defn optional [pred lst]
+  (if pred lst []))
 
 (defn sql:add-media
   [{:keys [::media/id
@@ -234,14 +244,14 @@
   (let [row (-> media
                 (media->row)
                 (update :media_type name))]
-    (concat [(sql:insert-tags tags)
-             (sql:insert-genres genres)]
-            [(-> (insert-into :media)
-                 (values [row]))]
-            [(sql:insert-media-tags id tags)
-             (sql:insert-media-genres id genres)
-             (sql:insert-media-channels id channels)
-             (sql:insert-media-taglines id taglines)])))
+    (concat (optional (seq tags) [(sql:insert-tags tags)])
+            (optional (seq genres) [(sql:insert-genres genres)])
+            [(-> (insert-into :media) (values [row])
+                 (on-conflict :id) (do-nothing))]
+            (optional (seq tags) [(sql:insert-media-tags id tags)])
+            (optional (seq genres) [(sql:insert-media-genres id genres)])
+            (optional (seq channels) [(sql:insert-media-channels id channels)])
+            (optional (seq taglines) [(sql:insert-media-taglines id taglines)]))))
 
 (defn sql:get-media
   []
@@ -292,21 +302,21 @@
 
   (get-media-by-library-id [_ library-id]
     (sql:fetch! executor (-> (sql:get-media)
-                             (where [:= :media.library_id library-id]))))
+                             (where [:= :media/library_id library-id]))))
 
   (get-media-by-library [self library]
     (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library))
                                 first
-                                :id)]
+                                :library/id)]
       (catalog/get-media-by-library-id self library-id)
       (throw (ex-info (format "library not found: %s" (name library)) {}))))
 
   (get-tags [_]
-    (map (comp keyword :name) (sql:fetch! executor (sql:get-tags))))
+    (map (comp keyword :tag/name) (sql:fetch! executor (sql:get-tags))))
 
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
-                             (where [:= :media.id media-id]))))
+                             (where [:= :media/id media-id]))))
 
   (add-media-tags! [_ media-id tags]
     (sql:exec-with-tx! executor
@@ -320,7 +330,7 @@
                         (sql:insert-media-tags media-id tags)]))
 
   (get-media-tags [_ media-id]
-    (map (comp keyword :tag)
+    (map (comp keyword :media_tags/tag)
          (sql:fetch! executor (sql:get-media-tags media-id))))
 
   (update-channels! [_ channels]
@@ -338,17 +348,17 @@
   (get-media-by-channel [_ channel]
     (sql:fetch! executor
                 (-> (sql:get-media)
-                    (where [:= :media_channels.channel channel]))))
+                    (where [:= :media_channels/channel channel]))))
 
   (get-media-by-tag [_ tag]
     (sql:fetch! executor
                 (-> (sql:get-media)
-                    (where [:= :media_tags.tag tag]))))
+                    (where [:= :media_tags/tag tag]))))
 
   (get-media-by-genre [_ genre]
     (sql:fetch! executor
                 (-> (sql:get-media)
-                    (where [:= :media_genres.genre genre]))))
+                    (where [:= :media_genres/genre genre]))))
 
   (add-media-taglines! [_ media-id taglines]
     (sql:exec! executor (sql:insert-media-taglines media-id taglines)))
@@ -358,8 +368,8 @@
 
   (rename-tag! [_ tag new-tag]
     (if (tag-exists? executor new-tag)
-      (sql:exec-with-tx! executor [(sql:retag-media tag new-tag)
-                                   (sql:delete-tag tag)])
+      (do (sql:exec! executor (sql:retag-media tag new-tag))
+          (sql:exec! executor (sql:delete-tag tag)))
       (sql:exec! executor (sql:rename-tag tag new-tag))))
 
   (update-process-timestamp! [_ media-id process]
@@ -368,7 +378,7 @@
   (close-catalog! [_] (executor/close! executor))
 
   (get-media-category-values [_ media-id category]
-    (map (comp keyword :category_value)
+    (map (comp keyword :media_categorization/category_value)
          (sql:fetch! executor (sql:get-media-category-values media-id category))))
 
   (add-media-category-value! [_ media-id category value]

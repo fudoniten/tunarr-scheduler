@@ -22,9 +22,9 @@
         cls (some-> state (subs 0 2))]
     (cond
       (#{ "40001" "40P01" } state)   :retryable
-      (= "08" cls)                   :retryable          ; connection
-      (= "53" cls)                   :retry-later        ; resources
-      (= "57" cls)                   :retry-later        ; canceled/etc.
+      (= "08" cls)                   :retryable   ; connection
+      (= "53" cls)                   :retry-later ; resources
+      (= "57" cls)                   :retry-later ; canceled/etc.
       (= "22" cls)                   :bad-input
       (= "42" cls)                   :bad-input
       (= state "23505")              :constraint

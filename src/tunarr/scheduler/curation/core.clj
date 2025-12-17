@@ -4,7 +4,8 @@
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.tunabrain :as tunabrain]
             [taoensso.timbre :as log]
-            [clojure.spec.alpha :as s])
+            [clojure.spec.alpha :as s]
+            [clojure.pprint :refer [pprint]])
   (:import [java.time Instant]
            [java.time.temporal ChronoUnit]))
 
@@ -61,11 +62,17 @@
         (log/info (format "Taglines for %s: %s" name taglines))
         (catalog/add-media-taglines! catalog id taglines)))))
 
+(defn log-thru
+  [msg o]
+  (log/error msg)
+  (log/error (with-out-str (pprint o)))
+  o)
+
 (defn retag-library-media!
   [brain catalog library throttler & {:keys [threshold]}]
-  (log/info (format (format "re-tagging media for library: %s" (name library))))
+  (log/info (format "re-tagging media for library: %s" (name library)))
   (let [threshold-date (days-ago threshold)]
-    (doseq [media (catalog/get-media-by-library catalog library)]
+    (doseq [media (log-thru "LIBRARY MEDIA" (catalog/get-media-by-library catalog library))]
       (if (overdue? media "tagging" threshold-date)
         (do (log/info (format "re-tagging media: %s" (::media/name media)))
             (throttler/submit! throttler retag-media!
@@ -117,9 +124,8 @@
       (retag-library-media! brain catalog library throttler
                             :threshold (days->millis (get-in config [:thresholds :retag]))))
     (generate-library-taglines!
-      [_ library]
-      (retag-library-media! brain catalog library throttler
-                            :threshold (days->millis (get-in config [:thresholds :tagline]))))
+      [_ _]
+      (throw (ex-info "generate-library-taglines! not implemented" {})))
     
     (recategorize-library!
       [_ library]
