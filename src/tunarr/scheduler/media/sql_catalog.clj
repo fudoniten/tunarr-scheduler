@@ -305,10 +305,12 @@
                              (where [:= :media/library_id library-id]))))
 
   (get-media-by-library [self library]
+    (log/info (format "PERFORMING MEDIA LOOKUP FOR LIBRARY %s" library))
     (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library))
                                 first
                                 :library/id)]
-      (catalog/get-media-by-library-id self library-id)
+      (do (log/info (format "getting media for library id %s" library-id))
+          (catalog/get-media-by-library-id self library-id))
       (throw (ex-info (format "library not found: %s" (name library)) {}))))
 
   (get-tags [_]

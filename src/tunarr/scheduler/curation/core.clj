@@ -38,10 +38,6 @@
   (recategorize-library! [self library]
     "Update channel mapping metadata for the supplied library."))
 
-(defn days->millis
-  [d]
-  (* d 24 60 60 1000))
-
 (defn overdue? [media process threshold]
   (let [ts (process-timestamp media process)]
     (if (nil? ts)
@@ -62,17 +58,13 @@
         (log/info (format "Taglines for %s: %s" name taglines))
         (catalog/add-media-taglines! catalog id taglines)))))
 
-(defn log-thru
-  [msg o]
-  (log/error msg)
-  (log/error (with-out-str (pprint o)))
-  o)
-
 (defn retag-library-media!
   [brain catalog library throttler & {:keys [threshold]}]
   (log/info (format "re-tagging media for library: %s" (name library)))
-  (let [threshold-date (days-ago threshold)]
-    (doseq [media (log-thru "LIBRARY MEDIA" (catalog/get-media-by-library catalog library))]
+  (let [threshold-date (days-ago threshold)
+        library-media (catalog/get-media-by-library catalog library)]
+    (log/info (format "LIBRARY MEDIA: %s" (with-out-str (pprint library-media))))
+    (doseq [media library-media]
       (if (overdue? media "tagging" threshold-date)
         (do (log/info (format "re-tagging media: %s" (::media/name media)))
             (throttler/submit! throttler retag-media!
@@ -122,7 +114,7 @@
     (retag-library!
       [_ library]
       (retag-library-media! brain catalog library throttler
-                            :threshold (days->millis (get-in config [:thresholds :retag]))))
+                            :threshold (get-in config [:thresholds :retag])))
     (generate-library-taglines!
       [_ _]
       (throw (ex-info "generate-library-taglines! not implemented" {})))
@@ -130,7 +122,7 @@
     (recategorize-library!
       [_ library]
       (categorize-library-media! brain catalog library throttler
-                                 :threshold (days->millis (get-in config [:thresholds :recategorize]))
+                                 :threshold (get-in config [:thresholds :recategorize])
                                  :channels (get config :channels)
                                  :categories (get config :categories))))
 
