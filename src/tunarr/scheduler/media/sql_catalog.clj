@@ -6,30 +6,79 @@
             [clojure.stacktrace :refer [print-stack-trace]]
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :refer [instrument]]
-            [clojure.pprint :refer [pprint]]
-
             
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from] :as sql]
             [next.jdbc :as jdbc]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log])
+  (:import java.sql.Array))
 
 (def field-map
-  {::media/name             :name
-   ::media/overview         :overview
-   ::media/community-rating :community_rating
-   ::media/critic-rating    :critic_rating
-   ::media/rating           :rating
-   ::media/id               :id
-   ::media/type             :media_type
-   ::media/production-year  :production_year
-   ::media/subtitles?       :subtitles
-   ::media/premiere         :premiere
-   ::media/library-id       :library_id
-   ::media/kid-friendly?    :kid_friendly})
+  {::media/name             :media/name
+   ::media/overview         :media/overview
+   ::media/community-rating :media/community_rating
+   ::media/critic-rating    :media/critic_rating
+   ::media/rating           :media/rating
+   ::media/id               :media/id
+   ::media/type             :media/media_type
+   ::media/production-year  :media/production_year
+   ::media/subtitles?       :media/subtitles
+   ::media/premiere         :media/premiere
+   ::media/library-id       :media/library_id
+   ::media/kid-friendly?    :media/kid_friendly
+   ::media/tags             :tags
+   ::media/channel-names    :channels
+   ::media/genres           :genres
+   ::media/taglines         :taglines})
+
+(defn pgarray->vec [o]
+  (if (instance? Array o)
+    (let [arr (.getArray ^Array o)]
+      (vec (seq arr)))
+    o))
+
+(defn map-over [f] (fn [o] (map f o)))
+
+(def field-transforms
+  {:media/name              identity
+   :media/overview          identity
+   :media/community_rating  identity
+   :media/critic_rating     identity
+   :media/rating            identity
+   :media/id                identity
+   :media/media_type        keyword
+   :media/production_year   identity
+   :media/subtitles         identity
+   :media/premiere          identity
+   :media/library_id        identity
+   :media/kid_friendly      identity
+   :tags                    (comp (partial map keyword) pgarray->vec)
+   :channels                (comp (partial map keyword) pgarray->vec)
+   :genres                  (comp (partial map keyword) pgarray->vec)
+   :taglines                pgarray->vec})
 
 (defn capture-stack-trace
   [e]
   (with-out-str (print-stack-trace e)))
+
+(defn media->row
+  "Rename the media map keys to match the SQL schema."
+  [media]
+  (reduce (fn [acc [media-key column]]
+            (if (contains? media media-key)
+              (assoc acc (keyword (name column)) (get media media-key))
+              acc))
+          {}
+          field-map))
+
+(defn row->media
+  [row]
+  (reduce (fn [acc [media-key column]]
+            (if (contains? row column)
+              (let [xf (get field-transforms column identity)]
+                (assoc acc media-key (xf (get row column))))
+              acc))
+          {}
+          field-map))
 
 (defn unwrap-result
   [op result]
@@ -57,16 +106,6 @@
 (defn sql:fetch!
   [executor query]
   (unwrap-result "fetch!" (deref (executor/fetch! executor query))))
-
-(defn media->row
-  "Rename the media map keys to match the SQL schema."
-  [media]
-  (reduce (fn [acc [media-key column]]
-            (if (contains? media media-key)
-              (assoc acc column (get media media-key))
-              acc))
-          {}
-          field-map))
 
 (defn sql:insert-tags
   [tags]
@@ -253,6 +292,12 @@
             (optional (seq channels) [(sql:insert-media-channels id channels)])
             (optional (seq taglines) [(sql:insert-media-taglines id taglines)]))))
 
+(defn sql:get-media-processes-by-id
+  [media-id]
+  (-> (select :process :last_run_at)
+      (from :media_process_timestamp)
+      (where [:= :media_id media-id])))
+
 (defn sql:get-media
   []
   (-> (select :media.id
@@ -273,12 +318,7 @@
               [[:array_agg [:distinct :media_genres.genre]]
                :genres]
               [[:array_agg [:distinct :media_taglines.tagline]]
-               :taglines]
-              [[:json_agg [:distinct
-                           [:json_build_object
-                            "process" :media_process_timestamp.process
-                            "last_run_at" :media_process_timestamp.last_run_at]]]
-               :process-timestamps])
+               :taglines])
       (from :media)
       (left-join :media_tags
                  [:= :media.id :media_tags.media_id])
@@ -288,8 +328,6 @@
                  [:= :media.id :media_genres.media_id])
       (left-join :media_taglines
                  [:= :media.id :media_taglines.media_id])
-      (left-join :media_process_timestamp
-                 [:= :media.id :media_process_timestamp.media_id])
       (group-by :media.id)))
 
 (defrecord SqlCatalog [executor]
@@ -301,11 +339,12 @@
     (sql:fetch! executor (sql:get-media)))
 
   (get-media-by-library-id [_ library-id]
-    (sql:fetch! executor (-> (sql:get-media)
-                             (where [:= :media/library_id library-id]))))
+    (->> (sql:fetch! executor
+                     (-> (sql:get-media)
+                         (where [:= :media/library_id library-id])))
+         (map row->media)))
 
   (get-media-by-library [self library]
-    (log/info (format "PERFORMING MEDIA LOOKUP FOR LIBRARY %s" library))
     (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library))
                                 first
                                 :library/id)]
@@ -334,6 +373,13 @@
   (get-media-tags [_ media-id]
     (map (comp keyword :media_tags/tag)
          (sql:fetch! executor (sql:get-media-tags media-id))))
+
+  (get-media-process-timestamps [_ {:keys [::media/id]}]
+    (map (fn [{:keys [media_process_timestamp/process
+                     media_process_timestamp/last_run_at]}]
+           {:media/process-name (keyword "process" process)
+            :media/last-run     (.toInstant last_run_at)})
+         (sql:fetch! executor (sql:get-media-processes-by-id id))))
 
   (update-channels! [_ channels]
     (sql:exec! executor (sql:insert-channels channels)))

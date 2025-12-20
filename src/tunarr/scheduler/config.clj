@@ -93,9 +93,9 @@
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
      :tunarr/curation {:libraries (keys (get collection-config :libraries))
-                       :tunabrain (:ig/ref :tunarr/tunabrain)
-                       :catalog   (:ig/ref :tunarr/catalog)
-                       :throttler (:ig/ref :tunarr/tunabrain-throttler)
+                       :tunabrain (ig/ref :tunarr/tunabrain)
+                       :catalog   (ig/ref :tunarr/catalog)
+                       :throttler (ig/ref :tunarr/tunabrain-throttler)
                        :config    (merge curation-config
                                    {:libraries (keys (:libraries collection-config))
                                     :channels  channel-config})}

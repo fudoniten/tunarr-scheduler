@@ -5,7 +5,8 @@
             [tunarr.scheduler.tunabrain :as tunabrain]
             [taoensso.timbre :as log]
             [clojure.spec.alpha :as s]
-            [clojure.pprint :refer [pprint]])
+            [clojure.pprint :refer [pprint]]
+            [clojure.stacktrace :refer [print-stack-trace]])
   (:import [java.time Instant]
            [java.time.temporal ChronoUnit]))
 
@@ -13,17 +14,21 @@
   [catalog {:keys [id name]} process]
   (fn [{:keys [error]}]
     (if error
-      (log/error (format "failed to execute %s process on %s: %s"
-                         process name (.getMessage error)))
+      (do
+        (log/error (format "failed to execute %s process on %s: %s"
+                           process name (.getMessage error)))
+        (log/error (with-out-str (print-stack-trace error))))
       (catalog/update-process-timestamp! catalog id process))))
 
 (defn process-timestamp
   [media target]
-  (let [find-proc (partial some (fn [{:keys [process]}] (= process target)))]
+  (let [find-proc (partial some
+                           (fn [{:keys [::media/process-name]}]
+                             (= process-name target)))]
     (some-> media
-            :process-timestamps
+            ::media/process-timestamps
             (find-proc)
-            (get "last_run_at")
+            (get ::media/last-run)
             (.toInstant))))
 
 (defn days-ago
@@ -61,16 +66,20 @@
 (defn retag-library-media!
   [brain catalog library throttler & {:keys [threshold]}]
   (log/info (format "re-tagging media for library: %s" (name library)))
-  (let [threshold-date (days-ago threshold)
-        library-media (catalog/get-media-by-library catalog library)]
-    (log/info (format "LIBRARY MEDIA: %s" (with-out-str (pprint library-media))))
-    (doseq [media library-media]
-      (if (overdue? media "tagging" threshold-date)
-        (do (log/info (format "re-tagging media: %s" (::media/name media)))
-            (throttler/submit! throttler retag-media!
-                               (process-callback catalog media "tagging")
-                               [brain catalog media]))
-        (log/info (format "skipping tag generation on media: %s" (::media/name media)))))))
+  (if (nil? threshold)
+    (log/error "no value for retag threshold!")
+    (let [threshold-date (days-ago threshold)
+          library-media  (catalog/get-media-by-library catalog library)]
+      (log/info (format "processing tags for %s media items from %s"
+                        (count library-media) (name library)))
+      (doseq [media library-media]
+        (if (overdue? (catalog/get-media-process-timestamps catalog media)
+                      :process/tagging threshold-date)
+          (do (log/info (format "re-tagging media: %s" (::media/name media)))
+              (throttler/submit! throttler retag-media!
+                                 (process-callback catalog media :process/tagging)
+                                 [brain catalog media]))
+          (log/info (format "skipping tag generation on media: %s" (::media/name media))))))))
 
 (s/def ::channel-mapping
   (s/keys :req [::media/channel-name ::media/rationale]))
@@ -99,11 +108,17 @@
 (defn categorize-library-media!
   [brain catalog library throttler & {:keys [channels threshold categories]}]
   (log/info (format "recategorizing media for library: %s" library))
-  (let [threshold-date (days-ago threshold)]
-    (doseq [media (catalog/get-media-by-library catalog library)]
-      (if (overdue? media "categorize" threshold-date)
+  (let [threshold-date (days-ago threshold)
+        library-media  (->> library
+                            (catalog/get-media-by-library catalog)
+                            (catalog/get-media-process-timestamps catalog))]
+    (log/info (format "processing tags for %s media items from %s"
+                      (count library-media) (name library)))
+    (doseq [media library-media]
+      (if (overdue? (catalog/get-media-process-timestamps catalog media)
+                    :process/categorize threshold-date)
         (throttler/submit! throttler recategorize-media!
-                           (process-callback catalog media "categorize")
+                           (process-callback catalog media :process/categorize)
                            [brain catalog media channels categories])
         (log/info "skipping tagline generation on media: %s" (::media/name media))))))
 
@@ -134,16 +149,19 @@
   ;; TODO: thresholds are for when to redo. Interval is how often to check.
   [running? backend {:keys [interval]} libraries]
   (future
+    (log/info "beginning curation step")
     (loop []
-      (log/info "beginning curation step")
       (if @running?
-        (doseq [library libraries]
-          (log/info (format "retagging library: %s" (name library)))
-          (retag-library! backend library)
-          ;; (log/info "generating taglines for library: %s" (name library))
-          ;; (generate-library-taglines! backend library)
-          (log/info (format "recategorizing library: %s" (name library)))
-          (recategorize-library! backend library))
+        (try
+          (doseq [library libraries]
+            (log/info (format "retagging library: %s" (name library)))
+            (retag-library! backend library)
+            ;; (log/info "generating taglines for library: %s" (name library))
+            ;; (generate-library-taglines! backend library)
+            (log/info (format "recategorizing library: %s" (name library)))
+            (recategorize-library! backend library))
+          (catch Throwable t
+            (log/error (with-out-str (print-stack-trace t)))))
         (log/info "skipping curation, not running"))
       (Thread/sleep (* 1000 60 interval))
       (recur)))

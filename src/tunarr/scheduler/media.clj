@@ -41,31 +41,34 @@
 (s/def ::library-id string?)
 (s/def ::library-name keyword?)
 (s/def ::rationale string?)
-
-(def media-fields
-  [::name
-   ::overview
-   ::genres
-   ::community-rating
-   ::critic-rating
-   ::rating
-   ::id
-   ::type
-   ::media-type
-   ::subtitles
-   ::production-year
-   ::subtitles?
-   ::premiere
-   ::taglines
-   ::tags
-   ::library-id
-   ::kid-friendly?])
-
-(s/def ::metadata
-  (s/keys :req [media-fields]))
-
+(s/def ::timestamp inst?)
+(s/def ::process-name keyword?)
+(s/def ::last-run ::timestamp)
+(s/def ::process-timestamps
+  (s/map-of ::process-name ::last-run))
 (s/def ::classification
   (s/keys :req [::tags
                 ::channel-names
                 ::kid-friendly?]))
+
+(s/def ::metadata
+  (s/keys :req [::name
+                ::overview
+                ::genres
+                ::community-rating
+                ::critic-rating
+                ::rating
+                ::id
+                ::type
+                ::media-type
+                ::subtitles
+                ::production-year
+                ::subtitles?
+                ::premiere
+                ::taglines
+                ::tags
+                ::library-id
+                ::kid-friendly?]
+          :opt [::process-timestamps
+                ::classification]))
 

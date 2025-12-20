@@ -1,6 +1,7 @@
 (ns tunarr.scheduler.jobs.throttler
   (:require [clojure.stacktrace :refer [print-stack-trace]]
             [clojure.core.async :refer [<!! >!! chan close!]]
+            [clojure.pprint :refer [pprint]]
             [taoensso.timbre :as log]))
 
 (defn capture-stack-trace

@@ -2,6 +2,7 @@
   "HTTP client for interacting with the external tunabrain service."
   (:require [clojure.string :as str]
             [clojure.spec.alpha :as s]
+            [clojure.pprint :refer [pprint]]
 
             [tunarr.scheduler.media :as media]
             
@@ -26,6 +27,8 @@
                              :throw-exceptions false
                              :body (json/generate-string payload)}
                             (:http-opts client))
+        _ (log/info (format "connecting to %s, options: %s"
+                            url (with-out-str (pprint request-opts))))
         {:keys [status body]} (http/post url request-opts)]
     (if (<= 200 status 299)
       (json/parse-string body true)

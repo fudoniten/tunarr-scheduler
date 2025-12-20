@@ -22,6 +22,7 @@
   (get-media-by-channel [catalog channel])
   (get-media-by-tag [catalog tag])
   (get-media-by-genre [catalog genre])
+  (get-media-process-timestamps [catalog media-id])
   (delete-tag! [catalog tag])
   (rename-tag! [catalog tag new-tag])
   (update-process-timestamp! [catalog media-id process])
@@ -121,6 +122,11 @@
                :tag     ::media/genre)
   :ret  (s/coll-of ::media/metadata))
 
+(s/fdef get-media-process-timestamps
+  :args (s/cat :catalog ::catalog
+               :tag     ::media/metadata)
+  :ret  (s/coll-of ::media/metadata))
+
 (s/fdef close-catalog!
   :args (s/cat :catalog ::catalog))
 
@@ -180,6 +186,7 @@
 (instrument 'get-media-by-channel)
 (instrument 'get-media-by-tag)
 (instrument 'get-media-by-genre)
+(instrument 'get-media-process-timestamps)
 (instrument 'close-catalog!)
 (instrument 'get-media-category-values)
 (instrument 'add-media-category-value!)
