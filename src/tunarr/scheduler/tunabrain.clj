@@ -85,6 +85,21 @@
     (log/error "no response when requesting categorization for media %s"
                (::media/name media))))
 
+(defn request-tag-triage!
+  "Request governance recommendations for a collection of tags.
+
+  Accepts a list of tag samples (maps with `:tag`, `:usage_count`, and
+  `:example_titles`) and optional target limit and debug flags that mirror the
+  upstream service."
+  [client tag-samples & {:keys [target-limit debug]}]
+  (if-let [response (json-post! client "/tag-governance/triage"
+                                {:tags         tag-samples
+                                 :target_limit target-limit
+                                 :debug        debug})]
+    (let [{:keys [decisions]} response]
+      {:decisions (mapv #(update % :action keyword) decisions)})
+    (log/error "no response when requesting tag triage recommendations")))
+
 (defn create!
   "Create a tunabrain client from configuration.
 

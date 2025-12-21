@@ -7,7 +7,7 @@
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :refer [instrument]]
             
-            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from] :as sql]
+            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from order-by] :as sql]
             [next.jdbc :as jdbc]
             [taoensso.timbre :as log])
   (:import java.sql.Array))
@@ -123,6 +123,16 @@
 (defn sql:get-tags
   []
   (-> (select :name) (from :tag)))
+
+(defn sql:get-tag-samples
+  []
+  (-> (select [[:media_tags.tag :tag]]
+              [[:count [:distinct :media_tags.media_id]] :usage_count]
+              [[:array_agg [:distinct :media.name]] :example_titles])
+      (from :media_tags)
+      (left-join :media [:= :media_tags.media_id :media.id])
+      (group-by :media_tags.tag)
+      (order-by [:usage_count :desc])))
 
 (defn sql:get-library-id
   [library]
@@ -354,6 +364,13 @@
 
   (get-tags [_]
     (map (comp keyword :tag/name) (sql:fetch! executor (sql:get-tags))))
+
+  (get-tag-samples [_]
+    (map (fn [{:keys [tag usage_count example_titles]}]
+           {:tag            tag
+            :usage_count    usage_count
+            :example_titles (pgarray->vec example_titles)})
+         (sql:fetch! executor (sql:get-tag-samples))))
 
   (get-media-by-id [_ media-id]
     (sql:fetch! executor (-> (sql:get-media)
