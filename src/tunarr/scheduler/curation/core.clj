@@ -5,7 +5,6 @@
             [tunarr.scheduler.tunabrain :as tunabrain]
             [taoensso.timbre :as log]
             [clojure.spec.alpha :as s]
-            [clojure.pprint :refer [pprint]]
             [clojure.stacktrace :refer [print-stack-trace]])
   (:import [java.time Instant]
            [java.time.temporal ChronoUnit]))

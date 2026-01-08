@@ -12,10 +12,7 @@
             [tunarr.scheduler.curation.tags :as tag-curator]
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
-            [tunarr.scheduler.scheduling.engine :as engine]
-            [tunarr.scheduler.tunabrain :as tunabrain]
-            [tunarr.scheduler.tts :as tts]
-            [tunarr.scheduler.bumpers :as bumpers]))
+            [tunarr.scheduler.tunabrain :as tunabrain]))
 
 (defmethod ig/init-key :tunarr/logger [_ {:keys [level]}]
   (log/set-level! level)
@@ -86,12 +83,13 @@
 (defmethod ig/init-key :tunarr/curation
   [_ {:keys [tunabrain catalog throttler libraries config]}]
   (log/info "starting curator")
-  (let [curator (curation/create! {:tunabrain tunabrain
-                                   :catalog   catalog
-                                   :throttler throttler
-                                   :config    config})]
-    (curation/start! curator libraries)
-    curator))
+  (log/warn "constant curation not enabled for now")
+  #_(let [curator (curation/create! {:tunabrain tunabrain
+                                     :catalog   catalog
+                                     :throttler throttler
+                                     :config    config})]
+      (curation/start! curator libraries)
+      curator))
 
 (defmethod ig/halt-key! :tunarr/curation
   [_ curator]
