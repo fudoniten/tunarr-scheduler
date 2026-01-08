@@ -6,6 +6,7 @@
 
 (defprotocol Catalog
   (add-media! [catalog media])
+  (add-media-batch! [catalog media-items])
   (get-media [catalog])
   (get-media-by-id [catalog media-id])
   (get-media-by-library-id [catalog library-id])
@@ -45,6 +46,10 @@
 (s/fdef add-media
   :args (s/cat :catalog ::catalog
                :media   ::media/metadata))
+
+(s/fdef add-media-batch
+  :args (s/cat :catalog     ::catalog
+               :media-items (s/coll-of ::media/metadata)))
 
 (s/fdef get-media
   :args (s/cat :catalog ::catalog)
@@ -182,6 +187,7 @@
                :category ::media/category-name))
 
 (instrument 'add-media)
+(instrument 'add-media-batch)
 (instrument 'get-media)
 (instrument 'get-media-by-id)
 (instrument 'get-media-by-library-id)

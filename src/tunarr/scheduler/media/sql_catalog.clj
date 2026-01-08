@@ -302,6 +302,73 @@
             (optional (seq channels) [(sql:insert-media-channels id channels)])
             (optional (seq taglines) [(sql:insert-media-taglines id taglines)]))))
 
+(defn sql:add-media-batch
+  "Generate SQL queries to batch insert multiple media items.
+
+  This is more efficient than calling sql:add-media for each item individually,
+  as it groups inserts by type and reduces the number of transactions."
+  [media-items]
+  (let [;; Convert all media to rows
+        rows (mapv (fn [media]
+                     (-> media
+                         (media->row)
+                         (update :media_type name)))
+                   media-items)
+        ;; Collect all tags, genres, channels, taglines across all media
+        all-tags (distinct (mapcat ::media/tags media-items))
+        all-genres (distinct (mapcat ::media/genres media-items))
+        ;; Build tag/genre/channel/tagline associations per media
+        tag-associations (mapcat (fn [{:keys [::media/id ::media/tags]}]
+                                   (map (fn [tag] [id (name tag)]) tags))
+                                 media-items)
+        genre-associations (mapcat (fn [{:keys [::media/id ::media/genres]}]
+                                     (map (fn [genre] [id (name genre)]) genres))
+                                   media-items)
+        channel-associations (mapcat (fn [{:keys [::media/id ::media/channels]}]
+                                       (map (fn [channel] [id channel]) channels))
+                                     media-items)
+        tagline-associations (mapcat (fn [{:keys [::media/id ::media/taglines]}]
+                                       (map (fn [tagline] [id tagline]) taglines))
+                                     media-items)]
+    (concat
+     ;; Insert all unique tags first
+     (optional (seq all-tags) [(sql:insert-tags all-tags)])
+     ;; Insert all unique genres
+     (optional (seq all-genres) [(sql:insert-genres all-genres)])
+     ;; Batch insert all media rows
+     [(-> (insert-into :media)
+          (values rows)
+          (on-conflict :id)
+          (do-nothing))]
+     ;; Batch insert tag associations
+     (optional (seq tag-associations)
+               [(-> (insert-into :media_tags)
+                    (columns :media_id :tag)
+                    (values tag-associations)
+                    (on-conflict :tag :media_id)
+                    (do-nothing))])
+     ;; Batch insert genre associations
+     (optional (seq genre-associations)
+               [(-> (insert-into :media_genres)
+                    (columns :media_id :genre)
+                    (values genre-associations)
+                    (on-conflict :media_id :genre)
+                    (do-nothing))])
+     ;; Batch insert channel associations
+     (optional (seq channel-associations)
+               [(-> (insert-into :media_channels)
+                    (columns :media_id :channel)
+                    (values channel-associations)
+                    (on-conflict :media_id :channel)
+                    (do-nothing))])
+     ;; Batch insert tagline associations
+     (optional (seq tagline-associations)
+               [(-> (insert-into :media_taglines)
+                    (columns :media_id :tagline)
+                    (values tagline-associations)
+                    (on-conflict :media_id :tagline)
+                    (do-nothing))]))))
+
 (defn sql:get-media-processes-by-id
   [media-id]
   (-> (select :process :last_run_at)
@@ -344,6 +411,9 @@
   catalog/Catalog
   (add-media! [_ media]
     (sql:exec-with-tx! executor (sql:add-media media)))
+
+  (add-media-batch! [_ media-items]
+    (sql:exec-with-tx! executor (sql:add-media-batch media-items)))
 
   (get-media [_]
     (sql:fetch! executor (sql:get-media)))
