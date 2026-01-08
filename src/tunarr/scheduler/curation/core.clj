@@ -109,9 +109,7 @@
   [brain catalog library throttler & {:keys [channels threshold categories]}]
   (log/info (format "recategorizing media for library: %s" library))
   (let [threshold-date (days-ago threshold)
-        library-media  (->> library
-                            (catalog/get-media-by-library catalog)
-                            (catalog/get-media-process-timestamps catalog))]
+        library-media  (catalog/get-media-by-library catalog library)]
     (log/info (format "processing tags for %s media items from %s"
                       (count library-media) (name library)))
     (doseq [media library-media]
@@ -148,6 +146,7 @@
 (defn start-curation!
   ;; TODO: thresholds are for when to redo. Interval is how often to check.
   [running? backend {:keys [interval]} libraries]
+  (reset! running? true)
   (future
     (log/info "beginning curation step")
     (loop []
@@ -156,16 +155,14 @@
           (doseq [library libraries]
             (log/info (format "retagging library: %s" (name library)))
             (retag-library! backend library)
-            ;; (log/info "generating taglines for library: %s" (name library))
-            ;; (generate-library-taglines! backend library)
+            ;; TODO: Implement tagline generation when ready
             (log/info (format "recategorizing library: %s" (name library)))
             (recategorize-library! backend library))
           (catch Throwable t
             (log/error (with-out-str (print-stack-trace t)))))
         (log/info "skipping curation, not running"))
       (Thread/sleep (* 1000 60 interval))
-      (recur)))
-  (reset! running? true))
+      (recur))))
 
 (defrecord Curator
     [running? backend config]

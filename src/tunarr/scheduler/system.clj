@@ -33,13 +33,14 @@
   (log/info "closing tunabrain client")
   (.close ^java.io.Closeable client))
 
+;; TODO: Implement TTS client when text-to-speech functionality is needed
 (defmethod ig/init-key :tunarr/tts [_ config]
-  (log/info "initializing tts client")
-  #_(tts/create-client config))
+  (log/info "tts client initialization disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/halt-key! :tunarr/tts [_ client]
-  (log/info "closing tts client")
-  #_(tts/close! client))
+  (log/info "tts client shutdown disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/init-key :tunarr/job-runner [_ config]
   (log/info "initializing job runner")
@@ -57,13 +58,14 @@
   (log/info "closing media collection")
   (collection/close! collection))
 
+;; TODO: Implement Tunarr source when needed for pulling data from Tunarr API
 (defmethod ig/init-key :tunarr/tunarr-source [_ config]
-  (log/info "initializing media source")
-  #_config)
+  (log/info "tunarr source initialization disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/halt-key! :tunarr/tunarr-source [_ _]
-  (log/info "closing media source")
-  #_(log/info "Releasing Tunarr source resources"))
+  (log/info "tunarr source shutdown disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/init-key :tunarr/catalog [_ config]
   (log/info "initializing catalog")
@@ -122,40 +124,32 @@
   (log/info "shutting down channel sync")
   nil)
 
+;; TODO: Implement scheduler engine for automated channel programming
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
-  (log/info "initializing scheduler")
-  #_(engine/create-engine (assoc config
-                                 :time-zone time-zone
-                                 :daytime-hours daytime-hours
-                                 :seasonal seasonal
-                                 :preferences preferences)))
+  (log/info "scheduler engine initialization disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/halt-key! :tunarr/scheduler [_ engine]
-  (log/info "closing scheduler")
-  #_(engine/stop! engine))
+  (log/info "scheduler engine shutdown disabled (not yet implemented)")
+  nil)
 
+;; TODO: Implement bumpers service for generating inter-program content
 (defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain tts]}]
-  (log/info "initializing bumpers")
-  #_(bumpers/create-service {:tunabrain tunabrain :tts tts}))
+  (log/info "bumpers service initialization disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/halt-key! :tunarr/bumpers [_ svc]
-  (log/info "closing bumpers")
-  #_(bumpers/close! svc))
+  (log/info "bumpers service shutdown disabled (not yet implemented)")
+  nil)
 
 (defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain]}]
+  ;; TODO: Add scheduler, media, tts, bumpers, and tunarr dependencies when implemented
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
                 :catalog catalog
-                :tunabrain tunabrain
-                ;:scheduler scheduler
-                ;:media media
-                ;:tts tts
-                ;:bumpers bumpers
-                ;:tunarr tunarr
-                ;:catalog catalog
-                }))
+                :tunabrain tunabrain}))
 
 (defmethod ig/halt-key! :tunarr/http-server [_ server]
   (http/stop! server))

@@ -1,12 +1,8 @@
 (ns tunarr.scheduler.jobs.throttler
-  (:require [clojure.stacktrace :refer [print-stack-trace]]
-            [clojure.core.async :refer [<!! >!! chan close!]]
+  (:require [clojure.core.async :refer [<!! >!! chan close!]]
             [clojure.pprint :refer [pprint]]
-            [taoensso.timbre :as log]))
-
-(defn capture-stack-trace
-  [e]
-  (with-out-str (print-stack-trace e)))
+            [taoensso.timbre :as log]
+            [tunarr.scheduler.util.error :refer [capture-stack-trace]]))
 
 (defprotocol IThrottler
   (submit!
