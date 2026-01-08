@@ -50,6 +50,12 @@
                        existing (get media-map media-id)]
                    (assoc db :media (assoc media-map media-id (merge existing normalized))))))))
     nil)
+
+  (add-media-batch! [self media-items]
+    (doseq [media media-items]
+      (catalog/add-media! self media))
+    nil)
+
   (get-media [_]
     (->> (get @state :media {})
          vals

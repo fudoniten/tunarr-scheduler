@@ -16,21 +16,26 @@
   "Pull media from the configured collection for the provided libraries and store
   them in the catalog.
 
-  Returns a map detailing how many items were imported per library." 
-  [collection catalog {:keys [library report-progress]}]
+  Returns a map detailing how many items were imported per library."
+  [collection catalog {:keys [library report-progress batch-size]
+                       :or {batch-size 250}}]
   (let [library (normalize-library library)]
-    (log/info "Starting media rescan" {:library library})
-    (let [result
-          (let [items (map-indexed vector (collection/get-library-items collection library))
-                total-items (count items)]
-            (doseq [[n item] items]
-              (log/info (format "adding media item: %s" (::media/name item)))
-              (catalog/add-media! catalog item)
+    (log/info "Starting media rescan" {:library library :batch-size batch-size})
+    (let [items (collection/get-library-items collection library)
+          processed-count (volatile! 0)
+          result
+          (do
+            ;; Process items in batches to reduce database transactions
+            (doseq [batch (partition-all batch-size items)]
+              (log/info (format "Processing batch of %d items (total processed: %d)"
+                                (count batch)
+                                @processed-count))
+              (catalog/add-media-batch! catalog batch)
+              (vswap! processed-count + (count batch))
               (report-progress {:library        library
-                                :total-items    total-items
-                                :complete-items n}))
+                                :complete-items @processed-count}))
             {:library library
-             :count   total-items})]
-      (log/info "Completed media rescan" {:libraries library
-                                          :results   result})
+             :count   @processed-count})]
+      (log/info "Completed media rescan" {:library library
+                                          :results result})
       {:library library :result result})))
