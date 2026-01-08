@@ -35,7 +35,7 @@
   #_(tts/create-client config))
 
 (defmethod ig/halt-key! :tunarr/tts [_ client]
-  (log/info "initializing tts client")
+  (log/info "closing tts client")
   #_(tts/close! client))
 
 (defmethod ig/init-key :tunarr/job-runner [_ config]

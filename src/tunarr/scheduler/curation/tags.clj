@@ -15,7 +15,7 @@
 
 (defmethod load-tag-rule "rename"
   [[tag _ new-tag & _]]
-  {:type :drop :tag tag :new-tag new-tag})
+  {:type :rename :tag tag :new-tag new-tag})
 
 (defmethod load-tag-rule "drop"
   [[tag _ & _]]

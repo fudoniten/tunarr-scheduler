@@ -14,7 +14,7 @@
                           (#'config/parse-port {:not "a-port"})))))
 
 (deftest load-config-default-test
-  (let [cfg (config/load-config)]
+  (let [cfg (config/load-config "resources/config.edn")]
     (is (= 8080 (get-in cfg [:server :port])))))
 
 (deftest load-config-custom-test

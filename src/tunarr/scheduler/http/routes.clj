@@ -50,7 +50,7 @@
 (defn- submit-retag-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
   (if-not library
-    (bad-request "library not specified for rescan")
+    (bad-request "library not specified for retag")
     (let [job (jobs/submit! job-runner
                             {:type :media/rescan
                              :metadata {:library library}}
@@ -63,7 +63,7 @@
 (defn- submit-tagline-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
   (if-not library
-    (bad-request "library not specified for rescan")
+    (bad-request "library not specified for taglines")
     (let [job (jobs/submit! job-runner
                             {:type :media/rescan
                              :metadata {:library library}}
