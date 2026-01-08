@@ -9,6 +9,9 @@
        :api-key #or [#env LLM_API_KEY nil]}
  :tts {:provider #or [#env TTS_PROVIDER :mock]
        :voice #or [#env TTS_VOICE "default"]}
+ :tunabrain {:endpoint #or [#env TUNABRAIN_ENDPOINT "http://localhost:8080"]
+             :http-opts {:socket-timeout 120000
+                         :connection-timeout 10000}}
  :scheduler {:time-zone #or [#env TIME_ZONE "UTC"]
              :daytime-hours {:start 6 :end 20}
              :seasonal {:december [:holiday]
