@@ -143,11 +143,12 @@
   (log/info "closing bumpers")
   #_(bumpers/close! svc))
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain]}]
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
                 :catalog catalog
+                :tunabrain tunabrain
                 ;:scheduler scheduler
                 ;:media media
                 ;:tts tts

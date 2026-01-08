@@ -7,7 +7,9 @@
             [taoensso.timbre :as log]
             [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.media.sync :as media-sync]
-            [tunarr.scheduler.curation.core :as curate]))
+            [tunarr.scheduler.curation.core :as curate]
+            [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.media.catalog :as catalog]))
 
 (defn- read-json [request]
   (when-let [body (:body request)]
@@ -84,9 +86,28 @@
                                                              :report-progress report-progress})))]
       (accepted {:job job}))))
 
+(defn- audit-tags!
+  "Audit all tags with Tunabrain and remove unsuitable ones."
+  [{:keys [tunabrain catalog]}]
+  (try
+    (let [tags (catalog/get-tags catalog)
+          _ (log/info (format "Auditing %d tags" (count tags)))
+          {:keys [recommended-for-removal]} (tunabrain/request-tag-audit! tunabrain tags)
+          removed-count (atom 0)]
+      (doseq [{:keys [tag reason]} recommended-for-removal]
+        (log/info (format "Removing tag '%s': %s" tag reason))
+        (catalog/delete-tag! catalog (keyword tag))
+        (swap! removed-count inc))
+      (ok {:tags-audited (count tags)
+           :tags-removed @removed-count
+           :removed recommended-for-removal}))
+    (catch Exception e
+      (log/error e "Error during tag audit")
+      (json-response {:error (.getMessage e)} 500))))
+
 (defn handler
   "Create the ring handler for the API."
-  [{:keys [job-runner collection catalog]}]
+  [{:keys [job-runner collection catalog tunabrain]}]
   (let [router
         (ring/router
          [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
@@ -112,6 +133,10 @@
                                                      {:job-runner job-runner
                                                       :catalog    catalog}
                                                      {:library    library}))}]
+           ["/media/tags/audit" {:post (fn [_]
+                                         (audit-tags!
+                                          {:tunabrain tunabrain
+                                           :catalog   catalog}))}]
            ["/jobs" {:get (fn [_]
                             (ok {:jobs (jobs/list-jobs job-runner)}))}]
            ["/jobs/:job-id" {:get (fn [{{:keys [job-id]} :path-params}]
