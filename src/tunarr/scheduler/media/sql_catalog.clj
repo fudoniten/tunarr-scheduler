@@ -2,11 +2,11 @@
   (:require [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.sql.executor :as executor]
-            
-            [clojure.stacktrace :refer [print-stack-trace]]
+            [tunarr.scheduler.util.error :refer [capture-stack-trace]]
+
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :refer [instrument]]
-            
+
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from order-by] :as sql]
             [next.jdbc :as jdbc]
             [taoensso.timbre :as log])
@@ -55,10 +55,6 @@
    :channels                (comp (partial map keyword) pgarray->vec)
    :genres                  (comp (partial map keyword) pgarray->vec)
    :taglines                pgarray->vec})
-
-(defn capture-stack-trace
-  [e]
-  (with-out-str (print-stack-trace e)))
 
 (defn media->row
   "Rename the media map keys to match the SQL schema."

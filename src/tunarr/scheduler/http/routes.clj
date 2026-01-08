@@ -33,58 +33,45 @@
 (defn- not-found [message]
   (json-response {:error message} 404))
 
-(defn- submit-rescan-job!
-  [{:keys [job-runner collection catalog]} {:keys [library]}]
+(defn- submit-job!
+  "Generic job submission handler."
+  [job-runner job-type library error-msg job-fn]
   (if-not library
-    (bad-request "library not specified for rescan")
+    (bad-request error-msg)
     (let [job (jobs/submit! job-runner
-                            {:type :media/rescan
+                            {:type job-type
                              :metadata {:library library}}
                             (fn [report-progress]
-                              (media-sync/rescan-library! collection
-                                                          catalog
-                                                          {:library         library
-                                                           :report-progress report-progress})))]
+                              (job-fn {:library         library
+                                       :report-progress report-progress})))]
       (accepted {:job job}))))
+
+(defn- submit-rescan-job!
+  [{:keys [job-runner collection catalog]} {:keys [library]}]
+  (submit-job! job-runner
+               :media/rescan
+               library
+               "library not specified for rescan"
+               (fn [opts] (media-sync/rescan-library! collection catalog opts))))
 
 (defn- submit-retag-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
-  (if-not library
-    (bad-request "library not specified for retag")
-    (let [job (jobs/submit! job-runner
-                            {:type :media/rescan
-                             :metadata {:library library}}
-                            (fn [report-progress]
-                              (curate/retag-library! catalog
-                                                     {:library         library
-                                                      :report-progress report-progress})))]
-      (accepted {:job job}))))
+  (submit-job! job-runner
+               :media/retag
+               library
+               "library not specified for retag"
+               (fn [opts] (curate/retag-library! catalog opts))))
 
 (defn- submit-tagline-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
-  (if-not library
-    (bad-request "library not specified for taglines")
-    (let [job (jobs/submit! job-runner
-                            {:type :media/rescan
-                             :metadata {:library library}}
-                            (fn [report-progress]
-                              (curate/generate-library-taglines! catalog
-                                                                 {:library         library
-                                                                  :report-progress report-progress})))]
-      (accepted {:job job}))))
+  (submit-job! job-runner
+               :media/taglines
+               library
+               "library not specified for taglines"
+               (fn [opts] (curate/generate-library-taglines! catalog opts))))
 
-#_(defn- submit-recategorize-job!
-  [{:keys [job-runner catalog]} {:keys [library]}]
-  (if-not library
-    (bad-request "library not specified for rescan")
-    (let [job (jobs/submit! job-runner
-                            {:type :media/rescan
-                             :metadata {:library library}}
-                            (fn [report-progress]
-                              (curate/recategorize-library! catalog
-                                                            {:library         library
-                                                             :report-progress report-progress})))]
-      (accepted {:job job}))))
+;; TODO: Implement recategorize endpoint when the feature is ready
+;; (defn- submit-recategorize-job! ...)
 
 (defn- audit-tags!
   "Audit all tags with Tunabrain and remove unsuitable ones."
@@ -128,11 +115,7 @@
                                                      {:job-runner job-runner
                                                       :catalog    catalog}
                                                      {:library    library}))}]
-           #_["/media/:library/recategorize" {:post (fn [{{:keys [library]} :path-params}]
-                                                    (submit-recategorize-job!
-                                                     {:job-runner job-runner
-                                                      :catalog    catalog}
-                                                     {:library    library}))}]
+           ;; TODO: Add recategorize endpoint when the feature is ready
            ["/media/tags/audit" {:post (fn [_]
                                          (audit-tags!
                                           {:tunabrain tunabrain

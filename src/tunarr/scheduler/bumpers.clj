@@ -12,10 +12,5 @@
 (defn close! [_]
   (log/info "Closing bumper service"))
 
-#_(defn generate-bumper!
-  "Generate bumper metadata and audio stub."
-  [{:keys [tunabrain tts]} {:keys [channel upcoming]}]
-  (let [script (:script (tunabrain/request-tags! tunabrain {:channel channel :upcoming upcoming}))
-        audio (tts/synthesize tts {:script script})]
-    {:script script
-     :audio audio}))
+;; TODO: Implement generate-bumper! to create bumper metadata and audio
+;; Should request script from tunabrain and synthesize audio via TTS

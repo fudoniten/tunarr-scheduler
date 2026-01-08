@@ -44,14 +44,7 @@
   [i in out f]
   (assoc i out (f (get i in))))
 
-#_(defn iso->pretty
-  [d]
-  (if-not d
-    nil
-    (let [fmt (DateTimeFormatter/ofPattern "MMM d, uuuu" Locale/US)]
-      (.format fmt
-               (-> (Instant/parse d)
-                   (ZonedDateTime/ofInstant (ZoneId/of "America/Los_Angeles")))))))
+;; TODO: Implement iso->pretty if human-readable date formatting is needed
 
 (defn normalize-rating
   "Most ratings are between 1 - 10, but some are between 1 - 100. If it's <10,
