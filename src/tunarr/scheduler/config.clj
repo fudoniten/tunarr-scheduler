@@ -110,7 +110,7 @@
                           :job-runner (ig/ref :tunarr/job-runner)
                                         ;:scheduler (ig/ref :tunarr/scheduler)
                                         ;:media (ig/ref :tunarr/media-source)
-                                        ;:tunabrain (ig/ref :tunarr/tunabrain)
+                          :tunabrain (ig/ref :tunarr/tunabrain)
                                         ;:tts (ig/ref :tunarr/tts)
                                         ;:bumpers (ig/ref :tunarr/bumpers)
                                         ;:tunarr (ig/ref :tunarr/tunarr-source)

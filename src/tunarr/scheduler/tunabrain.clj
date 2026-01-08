@@ -100,6 +100,18 @@
       {:decisions (mapv #(update % :action keyword) decisions)})
     (log/error "no response when requesting tag triage recommendations")))
 
+(defn request-tag-audit!
+  "Audit a list of tags for suitability and get removal recommendations.
+
+  Accepts a list of tags (strings or keywords) and returns a list of tags
+  recommended for removal with explanations."
+  [client tags]
+  (if-let [response (json-post! client "/tags/audit"
+                                {:tags (mapv name tags)})]
+    (let [{:keys [recommended_for_removal]} response]
+      {:recommended-for-removal recommended_for_removal})
+    (log/error "no response when requesting tag audit")))
+
 (defn create!
   "Create a tunabrain client from configuration.
 
