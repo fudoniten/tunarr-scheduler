@@ -48,27 +48,39 @@
 
 (defn- submit-rescan-job!
   [{:keys [job-runner collection catalog]} {:keys [library]}]
-  (submit-job! job-runner
-               :media/rescan
-               library
-               "library not specified for rescan"
-               (fn [opts] (media-sync/rescan-library! collection catalog opts))))
+  (try
+    (submit-job! job-runner
+                 :media/rescan
+                 library
+                 "library not specified for rescan"
+                 (fn [opts] (media-sync/rescan-library! collection catalog opts)))
+    (catch Exception e
+      (log/error e "Error submitting rescan job" {:library library})
+      (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-retag-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
-  (submit-job! job-runner
-               :media/retag
-               library
-               "library not specified for retag"
-               (fn [opts] (curate/retag-library! catalog opts))))
+  (try
+    (submit-job! job-runner
+                 :media/retag
+                 library
+                 "library not specified for retag"
+                 (fn [opts] (curate/retag-library! catalog opts)))
+    (catch Exception e
+      (log/error e "Error submitting retag job" {:library library})
+      (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-tagline-job!
   [{:keys [job-runner catalog]} {:keys [library]}]
-  (submit-job! job-runner
-               :media/taglines
-               library
-               "library not specified for taglines"
-               (fn [opts] (curate/generate-library-taglines! catalog opts))))
+  (try
+    (submit-job! job-runner
+                 :media/taglines
+                 library
+                 "library not specified for taglines"
+                 (fn [opts] (curate/generate-library-taglines! catalog opts)))
+    (catch Exception e
+      (log/error e "Error submitting tagline job" {:library library})
+      (json-response {:error (.getMessage e)} 500))))
 
 ;; TODO: Implement recategorize endpoint when the feature is ready
 ;; (defn- submit-recategorize-job! ...)

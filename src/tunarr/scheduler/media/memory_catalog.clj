@@ -93,6 +93,25 @@
          vals
          (filter #(some #{genre} (::media/genres %)))
          vec))
+  (rename-tag! [self old-tag new-tag]
+    ;; Replace old-tag with new-tag in all media items
+    (doseq [media (catalog/get-media-by-tag self old-tag)]
+      (let [media-id (::media/id media)
+            current-tags (::media/tags media)
+            updated-tags (-> current-tags
+                           (vec)
+                           (conj new-tag)
+                           (distinct)
+                           (vec)
+                           (#(remove #{old-tag} %))
+                           (vec))]
+        (update-media! state media-id assoc ::media/tags updated-tags)))
+    nil)
+  (batch-rename-tags! [self tag-pairs]
+    ;; Perform all tag renames
+    (doseq [[old-tag new-tag] tag-pairs]
+      (catalog/rename-tag! self old-tag new-tag))
+    nil)
   (close-catalog! [_]
     (reset! state {:media {}})
     nil))

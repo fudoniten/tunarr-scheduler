@@ -503,6 +503,16 @@
           (sql:exec! executor (sql:delete-tag tag)))
       (sql:exec! executor (sql:rename-tag tag new-tag))))
 
+  (batch-rename-tags! [_ tag-pairs]
+    ;; Perform all tag renames in a single transaction to avoid N+1 queries
+    (let [queries (mapcat (fn [[tag new-tag]]
+                            (if (tag-exists? executor new-tag)
+                              [(sql:retag-media tag new-tag)
+                               (sql:delete-tag tag)]
+                              [(sql:rename-tag tag new-tag)]))
+                          tag-pairs)]
+      (sql:exec-with-tx! executor queries)))
+
   (update-process-timestamp! [_ media-id process]
     (sql:exec! executor (sql:update-process-timestamp media-id process)))
 

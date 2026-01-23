@@ -59,11 +59,16 @@
 (defn normalize!
   [catalog {:keys [tag-transforms-file]}]
   (log/info "beginning tag normalization")
-  (doseq [tag (map name (catalog/get-tags catalog))]
-    (let [cleaned (clean-tag tag)]
-      (when-not (= tag cleaned)
-        (log/info (format "renaming %s -> %s" tag cleaned))
-        (catalog/rename-tag! catalog tag cleaned))))
+  ;; Collect all tag renames and execute in a single batch to avoid N+1 queries
+  (let [tag-pairs (for [tag (map name (catalog/get-tags catalog))
+                        :let [cleaned (clean-tag tag)]
+                        :when (not= tag cleaned)]
+                    [tag cleaned])]
+    (when (seq tag-pairs)
+      (log/info (format "normalizing %d tags in batch" (count tag-pairs)))
+      (doseq [[tag cleaned] tag-pairs]
+        (log/info (format "renaming %s -> %s" tag cleaned)))
+      (catalog/batch-rename-tags! catalog tag-pairs)))
   (if (not tag-transforms-file)
     (log/warn "skipping tag transforms as no rules were provided")
     (do (log/info "applying normalization rules")

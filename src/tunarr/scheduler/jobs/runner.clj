@@ -102,7 +102,12 @@
   (jobs [_] @jobs)
   (add-job! [_ job-id job]
     (log/info (format "adding job %s with config %s" job-id job))
-    (swap! jobs assoc job-id job))
+    (swap! jobs (fn [m]
+                  (let [m' (assoc m job-id job)]
+                    ;; Keep only the last 100 jobs to prevent unbounded growth
+                    (if (> (count m') 100)
+                      (into {} (take-last 100 (sort-by (comp :created-at val) m')))
+                      m')))))
   (get-job [_ job-id]
     (get @jobs job-id nil))
   (job-info [self job-id]

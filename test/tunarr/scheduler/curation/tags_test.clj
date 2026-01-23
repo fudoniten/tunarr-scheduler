@@ -14,6 +14,9 @@
            (fn [tags]
              (mapv #(if (= (name %) tag) (keyword new-tag) %) tags)))
     (swap! state update :rename-log (fnil conj []) {:tag tag :new-tag new-tag}))
+  (batch-rename-tags! [self tag-pairs]
+    (doseq [[tag new-tag] tag-pairs]
+      (catalog/rename-tag! self tag new-tag)))
   (delete-tag! [_ tag]
     (swap! state update :tags
            (fn [tags] (vec (remove #(= (name %) tag) tags))))

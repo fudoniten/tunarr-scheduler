@@ -27,6 +27,7 @@
   (get-tag-samples [catalog])
   (delete-tag! [catalog tag])
   (rename-tag! [catalog tag new-tag])
+  (batch-rename-tags! [catalog tag-pairs])
   (update-process-timestamp! [catalog media-id process])
   (close-catalog! [catalog])
   (get-media-category-values [catalog media-id category])
