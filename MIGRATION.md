@@ -1184,6 +1184,784 @@ This document serves as the single source of truth for the migration. Updates wi
 
 ---
 
+## Testing Checkpoints & Verification
+
+This section identifies natural stopping points during the migration where manual testing should be performed to verify functionality before proceeding.
+
+### Checkpoint 1: Backend Protocol & Configuration (End of Phase 1.1)
+
+**When:** After completing project restructuring
+
+**What to test:**
+1. **Configuration Loading**
+   - Start the application and verify config loads without errors
+   - Check that backend configuration is properly parsed
+   - Verify environment variable overrides work (ERSATZTV_URL, TUNARR_URL)
+
+2. **Protocol Definition**
+   - Verify the protocol compiles and namespaces are accessible
+   - Check that stub implementations can be created
+   - Test that the system component starts up with mock backends
+
+**How to verify:**
+```bash
+# Start REPL and verify config
+clojure -M:repl
+```
+
+```clojure
+;; In REPL
+(require '[channelflow.config :as config])
+(require '[channelflow.backends.protocol :as proto])
+
+;; Should load without errors
+(def cfg (config/load-config))
+
+;; Check backends config
+(get-in cfg [:backends :ersatztv :base-url])
+;; => "http://localhost:8409" (or your env var)
+
+;; Verify protocol is defined
+(methods proto/ChannelBackend)
+;; Should list all protocol methods
+```
+
+**Success criteria:**
+- ✅ Application starts without errors
+- ✅ Config file loads and environment variables override defaults
+- ✅ Backend protocol defined and accessible
+- ✅ All existing tests still pass
+
+---
+
+### Checkpoint 2: Channel Mapping (End of Phase 1.2)
+
+**When:** After implementing universal channel schema and mappers
+
+**What to test:**
+1. **Channel Spec Creation**
+   - Create a channel spec using the universal schema
+   - Validate specs with spec/valid?
+   - Test that invalid specs are rejected
+
+2. **ErsatzTV Mapping**
+   - Convert channel spec to ErsatzTV format
+   - Convert ErsatzTV channel back to spec
+   - Verify round-trip conversion preserves data
+
+**How to verify:**
+```clojure
+(require '[channelflow.channels :as ch])
+(require '[channelflow.backends.ersatztv.mapping :as ersatz-map])
+
+;; Create a test channel spec
+(def test-channel
+  {::ch/channel-id :test-horror
+   ::ch/channel-name "Horror Night"
+   ::ch/channel-number 100
+   ::ch/streaming-mode :hls-segmenter})
+
+;; Validate spec
+(clojure.spec.alpha/valid? ::ch/channel-spec test-channel)
+;; => true
+
+;; Convert to ErsatzTV format
+(def ersatz-channel (ersatz-map/channel-spec->ersatztv test-channel))
+ersatz-channel
+;; Should show properly formatted ErsatzTV channel
+
+;; Convert back
+(def round-trip (ersatz-map/ersatztv->channel-spec ersatz-channel))
+;; Should match original (minus default values)
+
+;; Test with real ErsatzTV API (if available)
+(def client (ersatz/create-client {:base-url "http://localhost:8409"}))
+(ersatz/list-channels client)
+;; Should return list of existing channels
+```
+
+**Success criteria:**
+- ✅ Channel specs validate correctly
+- ✅ Invalid specs are rejected with clear error messages
+- ✅ Bidirectional mapping preserves all required fields
+- ✅ Can successfully call ErsatzTV API (if instance available)
+- ✅ All tests pass including new mapping tests
+
+---
+
+### Checkpoint 3: Tag Sync to ErsatzTV (End of Phase 2.1)
+
+**When:** After implementing tag-to-collection sync
+
+**What to test:**
+1. **Tag Creation and Sync**
+   - Tag some media items in the internal catalog
+   - Trigger sync to ErsatzTV
+   - Verify Smart Collections created in ErsatzTV
+
+2. **Tag Updates**
+   - Modify tags on media items
+   - Re-sync
+   - Verify ErsatzTV collections updated
+
+**How to verify:**
+```clojure
+(require '[channelflow.curation.tags :as tags])
+(require '[channelflow.backends.ersatztv.client :as ersatz])
+
+;; Tag some media
+(def catalog (:catalog system))
+(tags/tag-media! catalog :media-123 #{:horror :80s})
+(tags/tag-media! catalog :media-456 #{:horror :modern})
+
+;; Get all media with horror tag
+(def horror-items (tags/find-by-tag catalog :horror))
+(count horror-items)
+;; => 2
+
+;; Sync tags to ErsatzTV
+(def ersatz-client (get-in system [:backends :ersatztv :client]))
+(require '[channelflow.backends.ersatztv.collections :as coll])
+(coll/sync-tag-to-collection! ersatz-client catalog :horror)
+
+;; Verify in ErsatzTV
+(def collections (ersatz/list-collections ersatz-client))
+;; Should contain a "horror" Smart Collection
+
+;; Check the collection query
+;; Log into ErsatzTV UI at http://localhost:8409
+;; Navigate to Collections → Find "horror" collection
+;; Verify it contains the correct media items
+```
+
+**Manual verification in ErsatzTV UI:**
+1. Open http://localhost:8409
+2. Navigate to Collections
+3. Find the "horror" Smart Collection
+4. Click to view - should show 2 items (media-123 and media-456)
+5. Check the search query - should reference the tagged media
+
+**Success criteria:**
+- ✅ Tags sync to ErsatzTV as Smart Collections
+- ✅ Collections contain correct media items
+- ✅ Tag updates trigger collection updates
+- ✅ Multiple tags create multiple collections
+- ✅ Can verify collections in ErsatzTV UI
+
+---
+
+### Checkpoint 4: Content Source Assignment (End of Phase 2.2)
+
+**When:** After implementing media assignment to channels
+
+**What to test:**
+1. **Assign Content to Channel**
+   - Create a channel spec
+   - Assign content sources (tags, collections)
+   - Verify assignments stored in catalog
+
+2. **Content Source Retrieval**
+   - Query what media is available for a channel
+   - Test weighted selection
+   - Test different playback orders
+
+**How to verify:**
+```clojure
+(require '[channelflow.media.collection :as coll])
+
+;; Create channel with content sources
+(def horror-channel
+  {::ch/channel-id :horror-night
+   ::ch/channel-name "Horror Night"
+   ::ch/channel-number 100
+   ::ch/content-sources 
+   [{::coll/source-type :tag
+     ::coll/source-ref :horror
+     ::coll/playback-order :shuffle
+     ::coll/weight 0.7}
+    {::coll/source-type :tag
+     ::coll/source-ref :thriller
+     ::coll/playback-order :shuffle
+     ::coll/weight 0.3}]})
+
+;; Store channel
+(ch/save-channel! catalog horror-channel)
+
+;; Retrieve available media for channel
+(def available-media (coll/get-channel-media catalog :horror-night))
+(count available-media)
+;; Should show all horror + thriller tagged items
+
+;; Test weighted selection
+(def selected (coll/select-next-item catalog :horror-night {:strategy :weighted}))
+;; Run multiple times - 70% should be horror, 30% thriller
+```
+
+**Success criteria:**
+- ✅ Can assign multiple content sources to a channel
+- ✅ Content sources stored and retrieved correctly
+- ✅ Can query all available media for a channel
+- ✅ Weighted selection approximately matches weights
+- ✅ Different playback orders work as expected
+
+---
+
+### Checkpoint 5: Basic Schedule Generation (End of Phase 3.1)
+
+**When:** After implementing core scheduling engine
+
+**What to test:**
+1. **Schedule Block Creation**
+   - Create different types of schedule blocks
+   - Validate block specs
+   - Test duration calculations
+
+2. **Schedule Generation**
+   - Generate a simple weekly schedule
+   - Verify blocks appear in correct order
+   - Check time constraints respected
+
+**How to verify:**
+```clojure
+(require '[channelflow.scheduling.engine :as sched])
+
+;; Create schedule blocks
+(def morning-block
+  {::sched/block-type :themed-block
+   ::sched/content-sources [{::coll/source-type :tag
+                             ::coll/source-ref :cartoons}]
+   ::sched/start-time "06:00"
+   ::sched/end-time "12:00"
+   ::sched/days-of-week #{:saturday :sunday}})
+
+(def evening-block
+  {::sched/block-type :movie-block
+   ::sched/content-sources [{::coll/source-type :tag
+                             ::coll/source-ref :horror}]
+   ::sched/start-time "20:00"
+   ::sched/end-time "23:00"})
+
+;; Generate schedule
+(def schedule 
+  (sched/schedule-week! 
+    (:scheduler system)
+    catalog
+    horror-channel
+    [morning-block evening-block]))
+
+;; Inspect schedule
+(count schedule)
+;; Should show scheduled items for the week
+
+;; Check first Saturday morning
+(def saturday-morning 
+  (->> schedule
+       (filter #(and (= :saturday (t/day-of-week (:start %)))
+                     (>= (t/hour (:start %)) 6)
+                     (< (t/hour (:start %)) 12)))))
+
+;; Should only contain cartoon content
+(every? #(contains? (:tags %) :cartoons) saturday-morning)
+;; => true
+```
+
+**Manual verification:**
+1. Print the schedule in human-readable format
+2. Verify blocks appear at correct days/times
+3. Check that filler content fills gaps
+4. Ensure no overlapping content
+
+**Success criteria:**
+- ✅ Can create and validate schedule blocks
+- ✅ Weekly schedule generated successfully
+- ✅ Time constraints respected (morning/evening)
+- ✅ Day constraints respected (weekend only)
+- ✅ Filler content added where needed
+- ✅ No overlapping content
+
+---
+
+### Checkpoint 6: YAML Generation (End of Phase 3.2)
+
+**When:** After implementing ErsatzTV YAML export
+
+**What to test:**
+1. **YAML Structure**
+   - Generate YAML from schedule
+   - Validate YAML syntax
+   - Check content sources formatted correctly
+
+2. **YAML Import to ErsatzTV**
+   - Save YAML to file
+   - Manually import into ErsatzTV
+   - Verify schedule appears correctly
+
+**How to verify:**
+```clojure
+(require '[channelflow.backends.ersatztv.yaml :as yaml])
+
+;; Generate YAML from schedule
+(def yaml-str (yaml/export-yaml schedule horror-channel))
+
+;; Print to see structure
+(println yaml-str)
+
+;; Save to file
+(yaml/save-yaml-schedule schedule horror-channel "/tmp/horror-night.yaml")
+
+;; Validate YAML parses
+(clj-yaml.core/parse-string yaml-str)
+;; Should parse without errors
+```
+
+**Manual verification in ErsatzTV:**
+1. Open the generated YAML file at `/tmp/horror-night.yaml`
+2. Verify structure looks correct:
+   - `content:` section lists all content sources
+   - `playout:` section has schedule blocks
+   - Times and durations are reasonable
+3. In ErsatzTV UI (http://localhost:8409):
+   - Navigate to Schedules
+   - Click "Import Sequential Schedule"
+   - Upload the YAML file
+   - Verify it imports without errors
+4. Assign schedule to the horror channel
+5. Build playout
+6. Check the EPG to see scheduled content
+
+**Success criteria:**
+- ✅ YAML generates without errors
+- ✅ YAML is valid syntax
+- ✅ Content sources properly formatted
+- ✅ Playout instructions include all blocks
+- ✅ YAML imports into ErsatzTV successfully
+- ✅ Schedule appears in ErsatzTV EPG
+- ✅ Playback works in ErsatzTV player
+
+---
+
+### Checkpoint 7: ErsatzTV API Integration (End of Phase 4.1)
+
+**When:** After implementing full ErsatzTV HTTP client
+
+**What to test:**
+1. **Channel CRUD Operations**
+   - Create channel via API
+   - Update channel settings
+   - Delete channel
+   - List all channels
+
+2. **Schedule Operations**
+   - Upload schedule via API
+   - Update existing schedule
+   - Delete schedule
+   - Trigger playout build
+
+**How to verify:**
+```clojure
+(def client (ersatz/create-client {:base-url "http://localhost:8409"}))
+
+;; Test channel creation
+(def created-channel
+  (ersatz/create-channel 
+    client
+    (ersatz-map/channel-spec->ersatztv horror-channel)))
+
+(def channel-id (:id created-channel))
+
+;; Verify channel exists
+(def retrieved (ersatz/get-channel client channel-id))
+(:name retrieved)
+;; => "Horror Night"
+
+;; Update channel
+(ersatz/update-channel client channel-id {:name "Horror Night HD"})
+
+;; List all channels
+(def all-channels (ersatz/list-channels client))
+(map :name all-channels)
+;; Should include "Horror Night HD"
+
+;; Create schedule
+(def schedule-id
+  (ersatz/create-sequential-schedule 
+    client
+    "Horror Night Schedule"
+    yaml-str))
+
+;; Build playout
+(ersatz/build-playout client channel-id {:mode "reset"})
+
+;; Verify playout built
+(def playout (ersatz/get-playout client channel-id))
+(:itemCount playout)
+;; Should show number of scheduled items
+```
+
+**Manual verification:**
+1. Check ErsatzTV UI - channel should exist
+2. Channel settings should match what was sent via API
+3. Schedule should be associated with channel
+4. EPG should show scheduled content
+5. Stream should be playable
+
+**Success criteria:**
+- ✅ Can create channels via API
+- ✅ Can update channel settings
+- ✅ Can upload schedules via API
+- ✅ Can trigger playout builds
+- ✅ Playout builds successfully
+- ✅ EPG shows correct schedule
+- ✅ Stream is playable
+
+---
+
+### Checkpoint 8: Automatic Sync (End of Phase 4.2)
+
+**When:** After implementing auto-sync functionality
+
+**What to test:**
+1. **Manual Sync Trigger**
+   - Call sync endpoint
+   - Verify channel and schedule updated in ErsatzTV
+   - Check sync status returned
+
+2. **Automatic Sync Job**
+   - Enable auto-sync in config
+   - Wait for scheduled run (or trigger manually)
+   - Verify all auto-sync channels updated
+
+**How to verify:**
+```clojure
+(require '[channelflow.backends.ersatztv.sync :as sync])
+
+;; Manual sync
+(def sync-result
+  (sync/sync-channel-to-ersatztv!
+    ersatz-client
+    catalog
+    :horror-night))
+
+sync-result
+;; => {:status :success
+;;     :channel-id :horror-night
+;;     :schedule-id "abc123"
+;;     :timestamp #inst "2026-01-22T..."}
+
+;; Check sync status
+(def status (sync/get-sync-status catalog :horror-night))
+(:last-sync status)
+;; Should show recent timestamp
+
+;; Test auto-sync job
+(sync/auto-sync-enabled-channels! system)
+;; Should sync all channels with :auto-sync true
+```
+
+**Manual verification via API:**
+```bash
+# Trigger manual sync via HTTP API
+curl -X POST http://localhost:3000/api/channels/horror-night/sync?backend=ersatztv
+
+# Should return sync status
+# Check logs for sync activity
+```
+
+**Verification in ErsatzTV:**
+1. Make a change to content or schedule in ChannelFlow
+2. Trigger sync (manual or wait for auto)
+3. Check ErsatzTV UI - changes should be reflected
+4. Check EPG - should show updated schedule
+5. Verify playout was rebuilt automatically
+
+**Success criteria:**
+- ✅ Manual sync endpoint works
+- ✅ Sync creates/updates channel in ErsatzTV
+- ✅ Sync uploads latest schedule
+- ✅ Sync rebuilds playout automatically
+- ✅ Auto-sync job runs on schedule
+- ✅ Sync errors handled gracefully
+- ✅ Sync status tracked and retrievable
+
+---
+
+### Checkpoint 9: Time Constraints (End of Phase 5.1)
+
+**When:** After implementing day/time-specific scheduling
+
+**What to test:**
+1. **Day of Week Constraints**
+   - Create blocks that only run on specific days
+   - Generate schedule
+   - Verify blocks only appear on correct days
+
+2. **Time Range Constraints**
+   - Create blocks with start/end times
+   - Verify blocks don't exceed time ranges
+   - Test blocks that span midnight
+
+3. **Combined Constraints**
+   - Create blocks with both day and time constraints
+   - Test priority resolution when blocks overlap
+
+**How to verify:**
+```clojure
+;; Weekend morning cartoons only
+(def weekend-block
+  {::sched/block-type :themed-block
+   ::sched/content-sources [{::coll/source-type :tag
+                             ::coll/source-ref :cartoons}]
+   ::sched/schedule-constraint
+   {::sched/days-of-week #{:saturday :sunday}
+    ::sched/time-range {:start "06:00" :end "12:00"}
+    ::sched/priority 10}})
+
+;; Halloween horror in October only
+(def halloween-block
+  {::sched/block-type :movie-block
+   ::sched/content-sources [{::coll/source-type :tag
+                             ::coll/source-ref :horror}]
+   ::sched/schedule-constraint
+   {::sched/date-range {:start "2026-10-01" :end "2026-10-31"}
+    ::sched/time-range {:start "20:00" :end "02:00"}
+    ::sched/seasonal-tags [:halloween]
+    ::sched/priority 8}})
+
+;; Generate schedule for October
+(def oct-schedule
+  (sched/schedule-with-constraints
+    [weekend-block halloween-block]
+    (t/instant "2026-10-01T00:00:00Z")
+    (t/new-duration 31 :days)
+    "America/New_York"))
+
+;; Verify weekend block only on Sat/Sun 6am-12pm
+(def weekend-items
+  (filter 
+    (fn [item]
+      (and (#{:saturday :sunday} (t/day-of-week (:start item)))
+           (>= (t/hour (:start item)) 6)
+           (< (t/hour (:start item)) 12)))
+    oct-schedule))
+
+;; All should be cartoons
+(every? #(= (:block-type %) :themed-block) weekend-items)
+;; => true
+
+;; Verify Halloween block appears nightly 8pm-2am in October
+(def halloween-items
+  (filter
+    (fn [item]
+      (and (= (:block-type item) :movie-block)
+           (= (t/month (:start item)) 10)))
+    oct-schedule))
+
+;; Should have ~31 instances (one per night)
+(count halloween-items)
+;; => ~31
+```
+
+**Manual verification:**
+1. Generate schedules for different time periods
+2. Print in calendar format
+3. Visually verify blocks appear at correct times
+4. Check edge cases:
+   - Blocks that span midnight
+   - DST transitions
+   - Leap days
+   - Year boundaries
+
+**Success criteria:**
+- ✅ Day-of-week constraints work correctly
+- ✅ Time-range constraints enforced
+- ✅ Date-range constraints work (seasonal)
+- ✅ Priority system selects correct block when multiple apply
+- ✅ Filler content used when no blocks apply
+- ✅ Midnight-spanning blocks handled correctly
+- ✅ DST transitions don't break scheduling
+
+---
+
+### Checkpoint 10: End-to-End Flow (End of Phase 6.1)
+
+**When:** After completing integration tests, before final release
+
+**What to test:**
+Complete workflow from media ingestion to playback
+
+**Full workflow test:**
+1. **Media Ingestion**
+   - Ingest media from Jellyfin (or other source)
+   - Verify media appears in catalog
+
+2. **LLM Tagging**
+   - Run tunabrain tagging on library
+   - Verify tags assigned appropriately
+   - Check tag quality
+
+3. **Sync Tags to ErsatzTV**
+   - Sync tags as collections
+   - Verify collections in ErsatzTV
+
+4. **Create Channel**
+   - Define channel with content sources
+   - Assign tags/collections to channel
+
+5. **Generate Schedule**
+   - Create schedule blocks
+   - Generate weekly schedule
+   - Verify schedule looks correct
+
+6. **Sync to ErsatzTV**
+   - Trigger sync
+   - Verify channel created
+   - Verify schedule uploaded
+   - Verify playout built
+
+7. **Playback**
+   - Open stream in media player
+   - Verify content plays
+   - Check EPG data
+   - Verify schedule followed
+
+**How to verify:**
+```clojure
+;; Full end-to-end test
+(defn test-full-workflow []
+  (let [system (component/start (system/create-system))]
+    
+    ;; 1. Ingest media
+    (println "Ingesting media...")
+    (media/ingest-jellyfin-library! system "Movies")
+    (Thread/sleep 5000)  ;; Wait for ingestion
+    
+    ;; 2. Tag content
+    (println "Tagging content...")
+    (tunabrain/retag-library! system "Movies")
+    (Thread/sleep 30000)  ;; Wait for LLM tagging
+    
+    ;; 3. Sync tags
+    (println "Syncing tags to ErsatzTV...")
+    (ersatz-coll/sync-all-tags! system)
+    
+    ;; 4. Create channel
+    (println "Creating channel...")
+    (def channel-result
+      (ch/create-channel! 
+        (:catalog system)
+        {::ch/channel-id :test-channel
+         ::ch/channel-name "Test Channel"
+         ::ch/channel-number 999
+         ::ch/content-sources
+         [{::coll/source-type :tag
+           ::coll/source-ref :action}]}))
+    
+    ;; 5. Generate schedule
+    (println "Generating schedule...")
+    (def schedule
+      (sched/schedule-week!
+        (:scheduler system)
+        (:catalog system)
+        channel-result
+        [simple-movie-block]))
+    
+    ;; 6. Sync to ErsatzTV
+    (println "Syncing to ErsatzTV...")
+    (def sync-result
+      (sync/sync-channel-to-ersatztv!
+        (get-in system [:backends :ersatztv :client])
+        (:catalog system)
+        :test-channel))
+    
+    (println "Sync result:" sync-result)
+    (println "✅ End-to-end test complete!")
+    (println "Open ErsatzTV and check channel 999")
+    
+    system))
+```
+
+**Manual verification steps:**
+1. Run the full workflow test
+2. Watch logs for any errors
+3. Check ErsatzTV UI:
+   - Channel 999 should exist
+   - Collections should be synced
+   - Schedule should be active
+   - EPG should show content
+4. Open stream in VLC or browser:
+   ```bash
+   vlc http://localhost:8409/iptv/channel/999.m3u8
+   ```
+5. Verify:
+   - Stream plays without buffering
+   - Content matches schedule
+   - Transitions are smooth
+   - EPG data displays correctly
+
+**Success criteria:**
+- ✅ Complete workflow runs without errors
+- ✅ Media ingested and tagged correctly
+- ✅ Tags synced to ErsatzTV collections
+- ✅ Channel created successfully
+- ✅ Schedule generated and uploaded
+- ✅ Playout built and active
+- ✅ Stream plays correctly
+- ✅ EPG matches schedule
+- ✅ Content follows schedule blocks
+- ✅ No manual intervention required
+
+---
+
+### Quick Verification Commands
+
+Here's a quick reference for common verification tasks:
+
+```bash
+# Check if ErsatzTV is running
+curl http://localhost:8409/api/channels
+
+# Check ChannelFlow health
+curl http://localhost:3000/health
+
+# View recent sync status
+curl http://localhost:3000/api/channels/horror-night/sync-status
+
+# Trigger manual sync
+curl -X POST http://localhost:3000/api/channels/horror-night/sync?backend=ersatztv
+
+# Generate and save YAML (via API)
+curl http://localhost:3000/api/channels/horror-night/export/ersatztv-yaml > /tmp/schedule.yaml
+
+# Test stream playback
+vlc http://localhost:8409/iptv/channel/100.m3u8
+
+# View EPG
+curl http://localhost:8409/iptv/xmltv.xml | grep "Horror Night"
+```
+
+```clojure
+;; Quick REPL checks
+(require '[channelflow.system :as sys])
+(def system (component/start (sys/create-system)))
+
+;; Check catalog
+(count (media/list-all (:catalog system)))
+
+;; Check channels
+(ch/list-channels (:catalog system))
+
+;; Check last sync
+(sync/get-sync-status (:catalog system) :horror-night)
+
+;; Force sync
+(sync/sync-channel-to-ersatztv! 
+  (get-in system [:backends :ersatztv :client])
+  (:catalog system)
+  :horror-night)
+```
+
+---
+
 ## Appendix: References
 
 ### ErsatzTV Resources

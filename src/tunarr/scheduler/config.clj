@@ -40,8 +40,9 @@
                                              (:catalog-type config)
                                              (:dbtype catalog-config)
                                              (:dbtype config)))
+        ;; Remove the string :type from catalog-config before merging
         catalog-config (-> {:type catalog-type}
-                           (merge catalog-config))
+                           (merge (dissoc catalog-config :type)))
         replace-envvar (fn [cfg k envvar]
                          (if-let [val (System/getenv envvar)]
                            (assoc cfg k val)
@@ -56,12 +57,12 @@
                             collection-config)
         catalog-config (if (= :postgresql catalog-type)
                          (-> catalog-config
-                             (replace-envvar :database "CATALOG_DATABASE")
+                             (replace-envvar :dbname "CATALOG_DATABASE")
                              (replace-envvar :user     "CATALOG_USER")
                              (replace-envvar :password "CATALOG_PASSWORD")
                              (replace-envvar :host     "CATALOG_HOST")
                              (replace-envvar :port     "CATALOG_PORT")
-                             (add-default :database "tunarr-scheduler")
+                             (add-default :dbname "tunarr-scheduler")
                              (add-default :user     "tunarr-scheduler")
                              (add-default :host     "postgres")
                              (add-default :port     5432))
@@ -74,11 +75,13 @@
                                             (update-key :id ::media/channel-id identity)
                                             (update-key :description ::media/channel-description identity)
                                             (update-key :name ::media/channel-fullname identity))]))
-                             (get config :channels {}))]
+                             (get config :channels {}))
+        backends-config (get config :backends {})]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
      :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
      :tunarr/tunabrain (:tunabrain config)
+     :tunarr/backends backends-config
      ;; TODO: Add tts, media-source, tunarr-source, scheduler, and bumpers configs when implemented
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
@@ -101,6 +104,7 @@
                           :tunabrain (ig/ref :tunarr/tunabrain)
                           :collection (ig/ref :tunarr/collection)
                           :catalog (ig/ref :tunarr/catalog)
+                          :backends (ig/ref :tunarr/backends)
                           :logger (ig/ref :tunarr/logger)
                           ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
                           }}))

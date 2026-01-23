@@ -12,7 +12,10 @@
             [tunarr.scheduler.curation.tags :as tag-curator]
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
-            [tunarr.scheduler.tunabrain :as tunabrain]))
+            [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.backends.protocol :as backend-protocol]
+            [tunarr.scheduler.backends.ersatztv.client :as ersatztv]
+            [tunarr.scheduler.backends.tunarr.client :as tunarr-backend]))
 
 (defmethod ig/init-key :tunarr/logger [_ {:keys [level]}]
   (log/set-level! level)
@@ -122,6 +125,34 @@
   (log/info "shutting down channel sync")
   nil)
 
+(defmethod ig/init-key :tunarr/backends [_ config]
+  (log/info "initializing backends" {:backends (keys config)})
+  (let [enabled-backends (filter (fn [[k v]] (:enabled v)) config)
+        clients (reduce
+                 (fn [acc [backend-key backend-config]]
+                   (if (:enabled backend-config)
+                     (let [client (case backend-key
+                                    :ersatztv (ersatztv/create backend-config)
+                                    :tunarr (tunarr-backend/create backend-config)
+                                    (do
+                                      (log/warn "Unknown backend type" {:backend backend-key})
+                                      nil))]
+                       (if client
+                         (do
+                           (log/info "Created backend client" {:backend backend-key})
+                           (assoc acc backend-key client))
+                         acc))
+                     acc))
+                 {}
+                 config)]
+    (log/info "backends initialized" {:enabled (keys clients)})
+    {:config config
+     :clients clients}))
+
+(defmethod ig/halt-key! :tunarr/backends [_ backends]
+  (log/info "shutting down backends")
+  nil)
+
 ;; TODO: Implement scheduler engine for automated channel programming
 (defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
                                              :as config}]
@@ -141,13 +172,14 @@
   (log/info "bumpers service shutdown disabled (not yet implemented)")
   nil)
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain backends]}]
   ;; TODO: Add scheduler, media, tts, bumpers, and tunarr dependencies when implemented
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
                 :catalog catalog
-                :tunabrain tunabrain}))
+                :tunabrain tunabrain
+                :backends backends}))
 
 (defmethod ig/halt-key! :tunarr/http-server [_ server]
   (http/stop! server))
