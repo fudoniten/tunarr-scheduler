@@ -19,9 +19,25 @@
              :http-opts {:socket-timeout 120000
                          :connection-timeout 10000}}
  :scheduler {:time-zone #or [#env TIME_ZONE "UTC"]
-             :daytime-hours {:start 6 :end 20}
-             :seasonal {:december [:holiday]
-                        :october [:spooky]}
-             :preferences {}}
+              :daytime-hours {:start 6 :end 20}
+              :seasonal {:december [:holiday]
+                         :october [:spooky]}
+              :preferences {}}
+ :categories {:time-slot {:description "Best time of day to air this content"
+                          :values [:daytime :primetime :late-night]}
+              :audience {:description "Primary target audience"
+                         :values [:kids :family :teen :adult]}
+              :season {:description "Best season or time of year to air"
+                       :values [:any :spring :summer :fall :winter
+                                :holiday :halloween :valentines :independence]}
+              :freshness {:description "Era or vintage of content"
+                          :values [:classic :retro :modern :contemporary]}}
+ ;; Future category expansion possibilities (not yet implemented):
+ ;; :engagement {:description "Required viewer attention and content intensity"
+ ;;              :values [:background :casual :focused :immersive]}
+ ;; :duration-category {:description "Content length for scheduling blocks"
+ ;;                     :values [:short :standard :feature :long]}
+ ;; :day-preference {:description "Preferred day of week"
+ ;;                  :values [:weekday :weekend :any]}
  :persistence {:type :memory
-               :path #or [#env STATE_PATH "data/state.edn"]}}
+                :path #or [#env STATE_PATH "data/state.edn"]}}

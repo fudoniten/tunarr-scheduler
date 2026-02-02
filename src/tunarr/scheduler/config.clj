@@ -67,8 +67,9 @@
                              (add-default :host     "postgres")
                              (add-default :port     5432))
                          catalog-config)
-        curation-config (get config :curation)
+         curation-config (get config :curation)
         tag-config (get config :tag-config {})
+        categories-config (get config :categories {})
         channel-config (into {}
                              (map (fn [[ch cfg]]
                                     [ch (-> cfg
@@ -85,19 +86,20 @@
      ;; TODO: Add tts, media-source, tunarr-source, scheduler, and bumpers configs when implemented
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
-     :tunarr/curation {:libraries (keys (get collection-config :libraries))
-                       :tunabrain (ig/ref :tunarr/tunabrain)
-                       :catalog   (ig/ref :tunarr/catalog)
-                       :throttler (ig/ref :tunarr/tunabrain-throttler)
-                       :config    (merge curation-config
-                                   {:libraries (keys (:libraries collection-config))
-                                    :channels  channel-config})}
+      :tunarr/curation {:libraries (keys (get collection-config :libraries))
+                        :tunabrain (ig/ref :tunarr/tunabrain)
+                        :catalog   (ig/ref :tunarr/catalog)
+                        :throttler (ig/ref :tunarr/tunabrain-throttler)
+                        :config    (merge curation-config
+                                    {:libraries (keys (:libraries collection-config))
+                                     :channels  channel-config
+                                     :categories categories-config})}
      :tunarr/config-sync {:channels channel-config
                           :libraries (get collection-config :libraries)
                           :catalog (ig/ref :tunarr/catalog)}
      :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
                              :tag-config tag-config}
-     :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
+           :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
                                     (or (get-in config [:server :port]))
                                     (parse-port))
                           :job-runner (ig/ref :tunarr/job-runner)
@@ -106,5 +108,8 @@
                           :catalog (ig/ref :tunarr/catalog)
                           :backends (ig/ref :tunarr/backends)
                           :logger (ig/ref :tunarr/logger)
+                          :curation-config (merge curation-config
+                                             {:channels  channel-config
+                                              :categories categories-config})
                           ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
                           }}))

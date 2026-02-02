@@ -82,8 +82,20 @@
       (log/error e "Error submitting tagline job" {:library library})
       (json-response {:error (.getMessage e)} 500))))
 
-;; TODO: Implement recategorize endpoint when the feature is ready
-;; (defn- submit-recategorize-job! ...)
+(defn- submit-recategorize-job!
+  [{:keys [job-runner catalog tunabrain config]} {:keys [library]}]
+  (try
+    (submit-job! job-runner
+                 :media/recategorize
+                 library
+                 "library not specified for recategorize"
+                 (fn [opts] (curate/recategorize-library! 
+                              (curate/->TunabrainCuratorBackend 
+                                tunabrain catalog nil config)
+                              library)))
+    (catch Exception e
+      (log/error e "Error submitting recategorize job" {:library library})
+      (json-response {:error (.getMessage e)} 500))))
 
 (defn- audit-tags!
   "Audit all tags with Tunabrain and remove unsuitable ones."
@@ -112,7 +124,7 @@
 
 (defn handler
   "Create the ring handler for the API."
-  [{:keys [job-runner collection catalog tunabrain]}]
+  [{:keys [job-runner collection catalog tunabrain curation-config]}]
   (let [router
         (ring/router
          [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
@@ -128,12 +140,18 @@
                                               {:job-runner job-runner
                                                :catalog    catalog}
                                               {:library    library}))}]
-           ["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
-                                                    (submit-tagline-job!
-                                                     {:job-runner job-runner
-                                                      :catalog    catalog}
-                                                     {:library    library}))}]
-           ;; TODO: Add recategorize endpoint when the feature is ready
+            ["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
+                                                     (submit-tagline-job!
+                                                      {:job-runner job-runner
+                                                       :catalog    catalog}
+                                                      {:library    library}))}]
+            ["/media/:library/recategorize" {:post (fn [{{:keys [library]} :path-params}]
+                                                     (submit-recategorize-job!
+                                                      {:job-runner job-runner
+                                                       :catalog    catalog
+                                                       :tunabrain  tunabrain
+                                                       :config     curation-config}
+                                                      {:library    library}))}]
            ["/media/tags/audit" {:post (fn [_]
                                          (audit-tags!
                                           {:tunabrain tunabrain
