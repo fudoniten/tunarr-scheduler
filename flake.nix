@@ -16,7 +16,7 @@
     utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages."${system}";
-        helpers = nix-helpers.packages."${system}";
+        helpers = nix-helpers.legacyPackages."${system}";
         cljLibs = { };
       in {
         packages = rec {
