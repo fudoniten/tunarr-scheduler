@@ -62,21 +62,30 @@
                                   :existing_tags catalog-tags})]
     (cond
       (s/valid? (s/coll-of string?) response)
-      {:tags (mapv keyword response)}
+      (do
+        (log/info (format "Tag response: received %d tags" (count response)))
+        {:tags (mapv keyword response)})
 
       (map? response)
       (let [{:keys [tags filtered_tags taglines]} response]
-        {:tags          (some->> tags (mapv keyword))
+        (when (nil? tags)
+          (throw (ex-info "Invalid tagging response: missing 'tags' key"
+                          {:response response
+                           :expected-keys [:tags]
+                           :media-name (::media/name media)})))
+        (log/info (format "Tag response: %d tags, %d filtered"
+                          (count tags) (count filtered_tags)))
+        {:tags          (mapv keyword tags)
          :filtered-tags (some->> filtered_tags (mapv keyword))
          :taglines      taglines})
 
       :else
-      (do (log/error "bad tagging response when categorizing media: %s"
-                     (::media/name media))
-          (log/debug "media: %s" media)
-          (log/debug "response: %s" response)))
-    (log/error "no response when requesting media tags for media %s"
-               (::media/name media))))
+      (throw (ex-info "Unexpected tagging response format"
+                      {:response response
+                       :media-name (::media/name media)})))
+    (throw (ex-info "No response received from tunabrain tagging"
+                    {:endpoint (:endpoint client)
+                     :media-name (::media/name media)}))))
 
 (defn request-categorization!
   "Fetch channel mapping metadata for a media item from tunabrain."
@@ -86,6 +95,13 @@
                                  :channels   channels
                                  :categories categories})]
     (let [{:keys [dimensions mappings]} response]
+      (when (and (nil? dimensions) (nil? mappings))
+        (throw (ex-info "Invalid categorization response: missing 'dimensions' and 'mappings' keys"
+                        {:response response
+                         :expected-keys [:dimensions :mappings]
+                         :media-name (::media/name media)})))
+      (log/info (format "Categorization response: %d dimensions, %d mappings"
+                        (count dimensions) (count mappings)))
       {:mappings (for [{:keys [channel_name reasons]} mappings]
                    {::media/channel-name (keyword channel_name)
                     ::media/rationale    (str/join "\n" reasons)})
@@ -96,8 +112,9 @@
                                    {::media/category-value (keyword value)
                                     ::media/rationale      (str/join "\n" reasons)})]))
                          dimensions)})
-    (log/error "no response when requesting categorization for media %s"
-               (::media/name media))))
+    (throw (ex-info "No response received from tunabrain categorization"
+                    {:endpoint (:endpoint client)
+                     :media-name (::media/name media)}))))
 
 (defn request-tag-triage!
   "Request governance recommendations for a collection of tags.
@@ -111,8 +128,16 @@
                                  :target_limit target-limit
                                  :debug        debug})]
     (let [{:keys [decisions]} response]
+      (when (nil? decisions)
+        (throw (ex-info "Invalid tag triage response: missing 'decisions' key"
+                        {:response response
+                         :expected-keys [:decisions]
+                         :tags-count (count tag-samples)})))
+      (log/info (format "Tag triage response: %d decisions" (count decisions)))
       {:decisions (mapv #(update % :action keyword) decisions)})
-    (log/error "no response when requesting tag triage recommendations")))
+    (throw (ex-info "No response received from tunabrain tag triage"
+                    {:endpoint (:endpoint client)
+                     :tags-count (count tag-samples)}))))
 
 (defn request-tag-audit!
   "Audit a list of tags for suitability and get removal recommendations.
