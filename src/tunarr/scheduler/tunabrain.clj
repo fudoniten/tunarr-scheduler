@@ -26,15 +26,29 @@
                              :headers (cond-> {"Content-Type" "application/json"})
                              :throw-exceptions false
                              :body (json/generate-string payload)}
-                            (:http-opts client))
-        _ (log/info (format "connecting to %s, options: %s"
-                            url (with-out-str (pprint request-opts))))
-        {:keys [status body]} (http/post url request-opts)]
-    (if (<= 200 status 299)
-      (json/parse-string body true)
-      (throw (ex-info (format "tunabrain request failed: %s" status)
-                      (cond-> {:status status}
-                        body (assoc :body body)))))))
+                            (:http-opts client))]
+    (log/info (format "connecting to %s, options: %s"
+                      url (with-out-str (pprint request-opts))))
+    (try
+      (let [{:keys [status body]} (http/post url request-opts)]
+        (if (<= 200 status 299)
+          (json/parse-string body true)
+          (throw (ex-info (format "tunabrain request failed: %s" status)
+                          (cond-> {:status status :url url}
+                            body (assoc :body body))))))
+      (catch java.net.ConnectException e
+        (throw (ex-info (format "connection refused to tunabrain at %s" url)
+                        {:url url :path path :cause :connection-refused}
+                        e)))
+      (catch java.net.UnknownHostException e
+        (throw (ex-info (format "unknown host when connecting to tunabrain at %s" url)
+                        {:url url :path path :cause :unknown-host}
+                        e)))
+      (catch Exception e
+        (throw (ex-info (format "error connecting to tunabrain at %s: %s"
+                                url (.getMessage e))
+                        {:url url :path path}
+                        e))))))
 
 (defn request-tags!
   "Fetch tags for a media item from tunabrain.
