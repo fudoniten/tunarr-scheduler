@@ -199,19 +199,19 @@
 (defn sql:delete-tag
   [tag]
   (-> (delete-from :tag)
-      (where [:= :name tag])))
+      (where [:= :name (name tag)])))
 
 (defn sql:rename-tag
   [tag new-tag]
   (-> (sql/update :tag)
-      (sql/set {:name new-tag})
-      (where [:= :name tag])))
+      (sql/set {:name (name new-tag)})
+      (where [:= :name (name tag)])))
 
 (defn sql:get-tag
   [tag]
   (-> (select :name)
       (from :tag)
-      (where [:= :name tag])))
+      (where [:= :name (name tag)])))
 
 (defn sql:get-media-tags
   [media-id]
@@ -222,13 +222,13 @@
 (defn sql:retag-media
   [tag new-tag]
   (-> (sql/update [:media_tags :mt1])
-      (sql/set {:tag new-tag})
-      (where [:= :tag tag]
+      (sql/set {:tag (name new-tag)})
+      (where [:= :tag (name tag)]
              [:not
               [:exists (-> (select :1)
                            (from [:media_tags :mt2])
                            (where [:and
-                                   [:= :mt2.tag new-tag]
+                                   [:= :mt2.tag (name new-tag)]
                                    [:= :mt2.media_id :mt1.media_id]]))]])))
 
 (defn sql:get-media-category-values
@@ -255,13 +255,13 @@
 (defn sql:delete-media-category-value! [media-id category value]
   (-> (delete-from :media_categorization)
       (where [:= :media_id media-id]
-             [:= :category category]
-             [:= :category_value value])))
+             [:= :category (name category)]
+             [:= :category_value (name value)])))
 
 (defn sql:delete-media-category-values! [media-id category]
   (-> (delete-from :media_categorization)
       (where [:= :media_id media-id]
-             [:= :category category])))
+             [:= :category (name category)])))
 
 (defn tag-exists?
   [executor tag]
