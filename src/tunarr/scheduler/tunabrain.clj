@@ -122,9 +122,17 @@
   [client tags]
   (if-let [response (json-post! client "/tags/audit"
                                 {:tags (mapv name tags)})]
-    (let [{:keys [recommended_for_removal]} response]
-      {:recommended-for-removal recommended_for_removal})
-    (log/error "no response when requesting tag audit")))
+    (let [{:keys [tags_to_delete]} response]
+      (when (nil? tags_to_delete)
+        (throw (ex-info "Invalid tag audit response: missing 'tags_to_delete' key"
+                        {:response response
+                         :expected-keys [:tags_to_delete]})))
+      (log/info (format "Tag audit response: %d tags recommended for deletion"
+                        (count tags_to_delete)))
+      {:recommended-for-removal tags_to_delete})
+    (throw (ex-info "No response received from tunabrain tag audit"
+                    {:endpoint (:endpoint client)
+                     :tags-count (count tags)}))))
 
 (defn create!
   "Create a tunabrain client from configuration.

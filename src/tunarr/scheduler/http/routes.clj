@@ -92,11 +92,17 @@
     (let [tags (catalog/get-tags catalog)
           _ (log/info (format "Auditing %d tags" (count tags)))
           {:keys [recommended-for-removal]} (tunabrain/request-tag-audit! tunabrain tags)
+          removal-count (count recommended-for-removal)
           removed-count (atom 0)]
-      (doseq [{:keys [tag reason]} recommended-for-removal]
-        (log/info (format "Removing tag '%s': %s" tag reason))
-        (catalog/delete-tag! catalog (keyword tag))
-        (swap! removed-count inc))
+      (log/info (format "Tunabrain recommended %d tags for removal" removal-count))
+      (if (pos? removal-count)
+        (doseq [{:keys [tag reason]} recommended-for-removal]
+          (log/info (format "Removing tag '%s': %s" tag reason))
+          (catalog/delete-tag! catalog (keyword tag))
+          (swap! removed-count inc))
+        (log/info "No tags recommended for removal"))
+      (log/info (format "Tag audit complete: %d audited, %d removed"
+                        (count tags) @removed-count))
       (ok {:tags-audited (count tags)
            :tags-removed @removed-count
            :removed recommended-for-removal}))
