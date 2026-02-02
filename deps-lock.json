@@ -411,6 +411,16 @@
       "hash": "sha256-Zl9jWQ3vtj1irdIdNSU2LPk3z2ocBeSwFFuujailf4M="
     },
     {
+      "mvn-path": "com/h2database/h2/2.2.220/h2-2.2.220.jar",
+      "mvn-repo": "https://repo1.maven.org/maven2/",
+      "hash": "sha256-l4q4YwGNP5ZeOIgFccNik+qLEKgIYZQVnE1dILUPClc="
+    },
+    {
+      "mvn-path": "com/h2database/h2/2.2.220/h2-2.2.220.pom",
+      "mvn-repo": "https://repo1.maven.org/maven2/",
+      "hash": "sha256-tbp8XBcINbyupnWMWfo8EOvNepx5LiWzm4a559X72Mo="
+    },
+    {
       "mvn-path": "com/sun/activation/all/1.2.0/all-1.2.0.pom",
       "mvn-repo": "https://repo1.maven.org/maven2/",
       "hash": "sha256-HYUY46x1MqEE5Pe+d97zfJguUwcjxr2z1ncIzOKwwsQ="
