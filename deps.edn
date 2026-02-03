@@ -20,11 +20,9 @@
         com.github.seancorfield/honeysql  {:mvn/version "2.6.1126"}}
  :aliases {:run {:main-opts ["-m" "tunarr.scheduler.main"]}
            :test {:extra-paths ["test"]
-                  :extra-deps {io.github.cognitect-labs/test-runner
-                               {:git/url "https://github.com/cognitect-labs/test-runner"
-                                :git/sha "3f288f1f16d167723ad87cc35b1dfee3c1681e10"}
+                  :extra-deps {eftest/eftest {:mvn/version "0.6.0"}
                                ring/ring-mock {:mvn/version "0.4.0"}
                                com.h2database/h2 {:mvn/version "2.2.220"}}
-                  :main-opts ["-m" "cognitect.test-runner"]}
+                  :main-opts ["-e" "(require '[eftest.runner :refer [find-tests run-tests]]) (run-tests (find-tests \"test\"))"]}
            :migrate {:exec-fn app.migrate/run
                      :exec-args {}}}}
