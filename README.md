@@ -52,13 +52,22 @@ custom bumpers complete with text-to-speech narration.
 ### Running the service locally
 
 ```bash
-clojure -M:run
+clojure -M:run --config my-config.edn
 ```
 
-Override configuration by pointing at a custom EDN file:
+Options:
+- `--config PATH` - Path to configuration EDN file (can be specified multiple times)
+- `--log-level LEVEL` - Set log level (trace, debug, info, warn, error)
+- `--help` - Show usage information
+
+Examples:
 
 ```bash
-clojure -M:run --config my-config.edn
+# Run with default config and debug logging
+clojure -M:run --config resources/config.edn --log-level debug
+
+# Run with multiple config files
+clojure -M:run --config base-config.edn --config prod-overrides.edn
 ```
 
 ### Running the tests

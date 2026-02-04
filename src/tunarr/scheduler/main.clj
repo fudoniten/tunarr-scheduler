@@ -14,6 +14,10 @@
     :update-fn (fnil conj [])
     :missing "at least one config file is required."
     :validate [#(.exists (io/file %)) "config file not found"]]
+   ["-l" "--log-level LEVEL" "Log level (trace, debug, info, warn, error)"
+    :default nil
+    :parse-fn keyword
+    :validate [#{:trace :debug :info :warn :error} "must be one of: trace, debug, info, warn, error"]]
    ["-h" "--help"]])
 
 (defn- usage [options-summary]
@@ -55,7 +59,8 @@
           (System/exit 1))
 
       :else
-      (let [config-map    (merge-configs (:config options))
+      (let [config-map    (cond-> (merge-configs (:config options))
+                            (:log-level options) (assoc :log-level (:log-level options)))
             system-config (config/config->system config-map)
             system        (system/start system-config)]
         (log/info "Tunarr scheduler started" {:port (get-in config-map [:server :port])})
