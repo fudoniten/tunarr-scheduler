@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [cemerick.url :as url]
+            [camel-snake-kebab.core :refer [->PascalCaseString]]
             [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]))
@@ -74,13 +75,7 @@
                      :body (:body response)})
           nil)))))
 
-(defn- tag-keyword->string
-  "Convert a keyword tag to PascalCase string for Jellyfin"
-  [tag]
-  (-> (name tag)
-      (str/split #"[-_]")
-      (->> (map str/capitalize)
-           (str/join ""))))
+(def tag-keyword->string ->PascalCaseString)
 
 (defn update-item-tags!
   "Update tags for a single Jellyfin item"
