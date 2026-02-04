@@ -1,4 +1,5 @@
-{:server {:port #or [#env PORT 8080]}
+{:log-level #or [#env LOG_LEVEL :debug]
+ :server {:port #or [#env PORT 8080]}
  :backends {:ersatztv {:enabled #or [#env ERSATZTV_ENABLED true]
                        :base-url #or [#env ERSATZTV_URL "http://localhost:8409"]
                        :auto-sync #or [#env ERSATZTV_AUTO_SYNC false]

@@ -3,10 +3,9 @@
   (:require [clj-http.client :as http]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [cemerick.url :as url]
-            [camel-snake-kebab.core :refer [->PascalCaseString]]
-            [taoensso.timbre :as log]
             [clojure.pprint :refer [pprint]]
+            [cemerick.url :as url]
+            [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]))
 
@@ -75,7 +74,13 @@
                      :body (:body response)})
           nil)))))
 
-(def tag-keyword->string ->PascalCaseString)
+(defn- tag-keyword->string
+  "Convert a keyword tag to PascalCase string for Jellyfin"
+  [tag]
+  (-> (name tag)
+      (str/split #"[-_]")
+      (->> (map str/capitalize)
+           (str/join ""))))
 
 (defn update-item-tags!
   "Update tags for a single Jellyfin item"
@@ -86,22 +91,28 @@
     ;; First, GET the current item data
     (if-let [current-item (get-item config item-id)]
       (let [;; Update the Tags field with new tags
-            updated-item (assoc current-item :Tags tag-strings)
-            response (jellyfin-authenticated-request config :post url :body updated-item)]
-        (if (= 204 (:status response))
-          (do
-            (log/info "Successfully updated tags for item" {:item-id item-id})
-            {:success true :item-id item-id})
-          (do
-            (log/error "Failed to update tags for item"
-                      {:item-id item-id
-                       :status (:status response)
-                       :body (:body response)})
-            (log/debug (format "Request:\n%s" (with-out-str (pprint updated-item))))
-            {:success false
-             :item-id item-id
-             :error (:body response)
-             :status (:status response)})))
+            updated-item (assoc current-item :Tags tag-strings)]
+        (log/debug "Retrieved item" {:item-id item-id 
+                                      :current-tags (:Tags current-item)
+                                      :item-keys (keys current-item)})
+        (log/debug "Sending update to Jellyfin" {:item-id item-id 
+                                                  :url url
+                                                  :new-tags (:Tags updated-item)})
+        (let [response (jellyfin-authenticated-request config :post url :body updated-item)]
+          (if (= 204 (:status response))
+            (do
+              (log/info "Successfully updated tags for item" {:item-id item-id})
+              {:success true :item-id item-id})
+            (do
+              (log/error "Failed to update tags for item"
+                        {:item-id item-id
+                         :status (:status response)
+                         :body (:body response)})
+              (log/debug (format "Request:\n%s" (with-out-str (pprint updated-item))))
+              {:success false
+               :item-id item-id
+               :error (:body response)
+               :status (:status response)}))))
       (do
         (log/error "Failed to get item from Jellyfin" {:item-id item-id})
         {:success false
