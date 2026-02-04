@@ -42,7 +42,11 @@
 
 (def job-runner? (partial satisfies? IJobRunner))
 
-(s/def ::type #{:media/rescan})
+(s/def ::type #{:media/rescan 
+                :media/retag 
+                :media/taglines 
+                :media/recategorize
+                :media/jellyfin-sync})
 
 (s/def ::config
   (s/keys :req-un [::type]))
