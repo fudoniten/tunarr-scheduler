@@ -22,7 +22,34 @@ ErsatzTV (pulls metadata including tags)
 Scheduled programming
 ```
 
-## API Endpoint
+## API Endpoints
+
+### List Libraries
+
+**Endpoint:** `GET /api/media/libraries`
+
+**Description:** Returns all configured libraries with their IDs.
+
+**Example:**
+```bash
+curl http://localhost:8080/api/media/libraries
+```
+
+**Response:**
+```json
+{
+  "libraries": {
+    "movies": {
+      "name": "movies",
+      "id": "abc123def456"
+    },
+    "tv": {
+      "name": "tv",
+      "id": "def789ghi012"
+    }
+  }
+}
+```
 
 ### Sync Library Tags to Jellyfin
 

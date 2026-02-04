@@ -135,6 +135,23 @@
       (log/error e "Error during tag audit")
       (json-response {:error (.getMessage e)} 500))))
 
+(defn- list-libraries!
+  "List all configured libraries."
+  [{:keys [jellyfin-config]}]
+  (try
+    (let [libraries (:libraries jellyfin-config)]
+      (if libraries
+        (ok {:libraries (into {}
+                             (map (fn [[name id]]
+                                    [(clojure.core/name name)
+                                     {:name (clojure.core/name name)
+                                      :id id}])
+                                  libraries))})
+        (ok {:libraries {}})))
+    (catch Exception e
+      (log/error e "Error listing libraries")
+      (json-response {:error (.getMessage e)} 500))))
+
 (defn handler
   "Create the ring handler for the API."
   [{:keys [job-runner collection catalog tunabrain curation-config jellyfin-config]}]
@@ -142,6 +159,9 @@
         (ring/router
          [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
           ["/api"
+           ["/media/libraries" {:get (fn [_]
+                                       (list-libraries!
+                                        {:jellyfin-config jellyfin-config}))}]
            ["/media/:library/rescan" {:post (fn [{{:keys [library]} :path-params}]
                                               (submit-rescan-job!
                                                {:job-runner job-runner
