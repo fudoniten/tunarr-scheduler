@@ -104,6 +104,7 @@
                                      (parse-port))
                            :job-runner (ig/ref :tunarr/job-runner)
                            :tunabrain (ig/ref :tunarr/tunabrain)
+                           :throttler (ig/ref :tunarr/tunabrain-throttler)
                            :collection (ig/ref :tunarr/collection)
                            :catalog (ig/ref :tunarr/catalog)
                            :backends (ig/ref :tunarr/backends)

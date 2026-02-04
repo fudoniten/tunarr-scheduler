@@ -172,13 +172,14 @@
   (log/info "bumpers service shutdown disabled (not yet implemented)")
   nil)
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain backends curation-config jellyfin-config]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain throttler backends curation-config jellyfin-config]}]
   ;; TODO: Add scheduler, media, tts, bumpers, and tunarr dependencies when implemented
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
                 :catalog catalog
                 :tunabrain tunabrain
+                :throttler throttler
                 :backends backends
                 :curation-config curation-config
                 :jellyfin-config jellyfin-config}))

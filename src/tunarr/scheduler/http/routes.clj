@@ -60,31 +60,37 @@
       (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-retag-job!
-  [{:keys [job-runner catalog]} {:keys [library]}]
+  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library]}]
   (try
     (submit-job! job-runner
                  :media/retag
                  library
                  "library not specified for retag"
-                 (fn [opts] (curate/retag-library! catalog opts)))
+                 (fn [opts] (curate/retag-library! 
+                              (curate/->TunabrainCuratorBackend 
+                                tunabrain catalog throttler config)
+                              library)))
     (catch Exception e
       (log/error e "Error submitting retag job" {:library library})
       (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-tagline-job!
-  [{:keys [job-runner catalog]} {:keys [library]}]
+  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library]}]
   (try
     (submit-job! job-runner
                  :media/taglines
                  library
                  "library not specified for taglines"
-                 (fn [opts] (curate/generate-library-taglines! catalog opts)))
+                 (fn [opts] (curate/generate-library-taglines! 
+                              (curate/->TunabrainCuratorBackend 
+                                tunabrain catalog throttler config)
+                              library)))
     (catch Exception e
       (log/error e "Error submitting tagline job" {:library library})
       (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-recategorize-job!
-  [{:keys [job-runner catalog tunabrain config]} {:keys [library]}]
+  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library]}]
   (try
     (submit-job! job-runner
                  :media/recategorize
@@ -92,7 +98,7 @@
                  "library not specified for recategorize"
                  (fn [opts] (curate/recategorize-library! 
                               (curate/->TunabrainCuratorBackend 
-                                tunabrain catalog nil config)
+                                tunabrain catalog throttler config)
                               library)))
     (catch Exception e
       (log/error e "Error submitting recategorize job" {:library library})
@@ -154,7 +160,7 @@
 
 (defn handler
   "Create the ring handler for the API."
-  [{:keys [job-runner collection catalog tunabrain curation-config jellyfin-config]}]
+  [{:keys [job-runner collection catalog tunabrain throttler curation-config jellyfin-config]}]
   (let [router
         (ring/router
          [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
@@ -171,18 +177,25 @@
            ["/media/:library/retag" {:post (fn [{{:keys [library]} :path-params}]
                                              (submit-retag-job!
                                               {:job-runner job-runner
-                                               :catalog    catalog}
+                                               :catalog    catalog
+                                               :tunabrain  tunabrain
+                                               :throttler  throttler
+                                               :config     curation-config}
                                               {:library    library}))}]
             ["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
                                                      (submit-tagline-job!
                                                       {:job-runner job-runner
-                                                       :catalog    catalog}
+                                                       :catalog    catalog
+                                                       :tunabrain  tunabrain
+                                                       :throttler  throttler
+                                                       :config     curation-config}
                                                       {:library    library}))}]
             ["/media/:library/recategorize" {:post (fn [{{:keys [library]} :path-params}]
                                                      (submit-recategorize-job!
                                                       {:job-runner job-runner
                                                        :catalog    catalog
                                                        :tunabrain  tunabrain
+                                                       :throttler  throttler
                                                        :config     curation-config}
                                                       {:library    library}))}]
             ["/media/:library/sync-jellyfin-tags" {:post (fn [{{:keys [library]} :path-params}]
