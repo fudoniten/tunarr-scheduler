@@ -21,10 +21,24 @@
       :post (http/post url opts)
       (throw (ex-info "Unsupported HTTP method" {:method method})))))
 
+(defn- format-guid
+  "Format a hex string as a UUID with dashes.
+  Jellyfin expects UUIDs in the format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  [id-string]
+  (let [cleaned (str/replace id-string #"-" "")]
+    (if (= 32 (count cleaned))
+      (format "%s-%s-%s-%s-%s"
+              (subs cleaned 0 8)
+              (subs cleaned 8 12)
+              (subs cleaned 12 16)
+              (subs cleaned 16 20)
+              (subs cleaned 20 32))
+      id-string)))
+
 (defn- build-item-update-url
   "Build the URL for updating a Jellyfin item"
   [base-url item-id]
-  (str (url/url base-url "Items" item-id)))
+  (str (url/url base-url "Items" (format-guid item-id))))
 
 (defn- get-item
   "Get the full item data from Jellyfin"
