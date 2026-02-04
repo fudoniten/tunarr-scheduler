@@ -26,6 +26,15 @@
   [base-url item-id]
   (str (url/url base-url "Items" item-id)))
 
+(defn- get-item
+  "Get the full item data from Jellyfin"
+  [config item-id]
+  (let [url (build-item-update-url (:base-url config) item-id)]
+    (log/debug "Getting Jellyfin item" {:item-id item-id})
+    (let [response (jellyfin-authenticated-request config :get url)]
+      (when (= 200 (:status response))
+        (json/parse-string (:body response) true)))))
+
 (defn update-item-tags!
   "Update tags for a single Jellyfin item"
   [config item-id tags]
@@ -36,26 +45,31 @@
                               (str/split #"[-_]")
                               (->> (map str/capitalize)
                                    (str/join ""))))
-                        tags)
-        ;; Jellyfin expects BaseItemDto with just the fields we want to update
-        ;; According to the issue #10724, we need to send LockedFields as well
-        body {:Tags tag-strings
-              :LockData false}]
+                        tags)]
     (log/info "Updating Jellyfin item tags" {:item-id item-id :tags tag-strings})
-    (let [response (jellyfin-authenticated-request config :post url :body body)]
-      (if (= 204 (:status response))
-        (do
-          (log/info "Successfully updated tags for item" {:item-id item-id})
-          {:success true :item-id item-id})
-        (do
-          (log/error "Failed to update tags for item"
-                    {:item-id item-id
-                     :status (:status response)
-                     :body (:body response)})
-          {:success false
-           :item-id item-id
-           :error (:body response)
-           :status (:status response)})))))
+    ;; First, GET the current item data
+    (if-let [current-item (get-item config item-id)]
+      (let [;; Update the Tags field with new tags
+            updated-item (assoc current-item :Tags tag-strings)
+            response (jellyfin-authenticated-request config :post url :body updated-item)]
+        (if (= 204 (:status response))
+          (do
+            (log/info "Successfully updated tags for item" {:item-id item-id})
+            {:success true :item-id item-id})
+          (do
+            (log/error "Failed to update tags for item"
+                      {:item-id item-id
+                       :status (:status response)
+                       :body (:body response)})
+            {:success false
+             :item-id item-id
+             :error (:body response)
+             :status (:status response)})))
+      (do
+        (log/error "Failed to get item from Jellyfin" {:item-id item-id})
+        {:success false
+         :item-id item-id
+         :error "Item not found in Jellyfin"}))))
 
 (defn sync-library-tags!
   "Sync all tags from catalog to Jellyfin for a given library.
