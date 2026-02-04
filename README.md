@@ -17,6 +17,8 @@ custom bumpers complete with text-to-speech narration.
 * **Bumper generation** – stubs for script generation and TTS synthesis.
 * **HTTP API** – basic endpoints to trigger retagging, scheduling, and bumper
   creation.
+* **Jellyfin tag sync** – push curated tags from the catalog to Jellyfin for
+  use with ErsatzTV smart collections (see [JELLYFIN_SYNC.md](JELLYFIN_SYNC.md)).
 * **Nix & Docker ready** – includes a development shell for NixOS and a Docker
   image suitable for Kubernetes deployments.
 

@@ -7,6 +7,7 @@
             [taoensso.timbre :as log]
             [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.media.sync :as media-sync]
+            [tunarr.scheduler.media.jellyfin-sync :as jellyfin-sync]
             [tunarr.scheduler.curation.core :as curate]
             [tunarr.scheduler.tunabrain :as tunabrain]
             [tunarr.scheduler.media.catalog :as catalog]))
@@ -97,6 +98,18 @@
       (log/error e "Error submitting recategorize job" {:library library})
       (json-response {:error (.getMessage e)} 500))))
 
+(defn- submit-jellyfin-sync-job!
+  [{:keys [job-runner catalog jellyfin-config]} {:keys [library]}]
+  (try
+    (submit-job! job-runner
+                 :media/jellyfin-sync
+                 library
+                 "library not specified for jellyfin sync"
+                 (fn [opts] (jellyfin-sync/sync-library-tags! catalog jellyfin-config library opts)))
+    (catch Exception e
+      (log/error e "Error submitting Jellyfin sync job" {:library library})
+      (json-response {:error (.getMessage e)} 500))))
+
 (defn- audit-tags!
   "Audit all tags with Tunabrain and remove unsuitable ones."
   [{:keys [tunabrain catalog]}]
@@ -124,7 +137,7 @@
 
 (defn handler
   "Create the ring handler for the API."
-  [{:keys [job-runner collection catalog tunabrain curation-config]}]
+  [{:keys [job-runner collection catalog tunabrain curation-config jellyfin-config]}]
   (let [router
         (ring/router
          [["/healthz" {:get (fn [_] (ok {:status "ok"}))}]
@@ -152,6 +165,12 @@
                                                        :tunabrain  tunabrain
                                                        :config     curation-config}
                                                       {:library    library}))}]
+            ["/media/:library/sync-jellyfin-tags" {:post (fn [{{:keys [library]} :path-params}]
+                                                            (submit-jellyfin-sync-job!
+                                                             {:job-runner job-runner
+                                                              :catalog    catalog
+                                                              :jellyfin-config jellyfin-config}
+                                                             {:library    library}))}]
            ["/media/tags/audit" {:post (fn [_]
                                          (audit-tags!
                                           {:tunabrain tunabrain
