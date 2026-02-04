@@ -1,23 +1,24 @@
 (ns tunarr.scheduler.media.jellyfin-sync
-  "Sync tags from catalog to Jellyfin"
+  "Sync tags from catalog to Jellyfin using HTTP API"
   (:require [clj-http.client :as http]
             [cheshire.core :as json]
             [clojure.string :as str]
+            [cemerick.url :as url]
             [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
-            [tunarr.scheduler.media.catalog :as catalog]
-            [cemerick.url :as url]))
+            [tunarr.scheduler.media.catalog :as catalog]))
 
 (defn jellyfin-authenticated-request
   "Make an authenticated request to Jellyfin"
-  [{:keys [api-key] :as config} method url & {:keys [body]}]
+  [{:keys [api-key] :as config} method url & {:keys [body query-params]}]
   (when-not api-key
     (log/error "No API key found in config!" {:config-keys (keys config)})
     (throw (ex-info "Jellyfin API key not configured" {:config config})))
   (let [opts (cond-> {:headers {"X-Emby-Token" api-key
                                 "Content-Type" "application/json"}
                       :throw-exceptions false}
-               body (assoc :body (json/generate-string body)))]
+               body (assoc :body (json/generate-string body))
+               query-params (assoc :query-params query-params))]
     (log/debug "Jellyfin request" {:method method :url url :has-api-key (boolean api-key)})
     (case method
       :get (http/get url opts)
@@ -38,8 +39,8 @@
               (subs cleaned 20 32))
       id-string)))
 
-(defn- build-item-update-url
-  "Build the URL for updating a Jellyfin item"
+(defn- build-item-url
+  "Build the URL for a Jellyfin item"
   [base-url item-id]
   (str (url/url base-url "Items" (format-guid item-id))))
 
@@ -61,17 +62,19 @@
                      :body (:body response)})
           nil)))))
 
+(defn- tag-keyword->string
+  "Convert a keyword tag to PascalCase string for Jellyfin"
+  [tag]
+  (-> (name tag)
+      (str/split #"[-_]")
+      (->> (map str/capitalize)
+           (str/join ""))))
+
 (defn update-item-tags!
   "Update tags for a single Jellyfin item"
   [config item-id tags]
-  (let [url (build-item-update-url (:base-url config) item-id)
-        ;; Convert keywords to PascalCase strings for Jellyfin
-        tag-strings (map (fn [tag]
-                          (-> (name tag)
-                              (str/split #"[-_]")
-                              (->> (map str/capitalize)
-                                   (str/join ""))))
-                        tags)]
+  (let [url (build-item-url (:base-url config) item-id)
+        tag-strings (mapv tag-keyword->string tags)]
     (log/info "Updating Jellyfin item tags" {:item-id item-id :tags tag-strings})
     ;; First, GET the current item data
     (if-let [current-item (get-item config item-id)]
