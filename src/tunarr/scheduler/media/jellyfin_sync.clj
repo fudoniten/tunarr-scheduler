@@ -40,23 +40,33 @@
       id-string)))
 
 (defn- build-item-url
-  "Build the URL for a Jellyfin item"
+  "Build the URL for updating a Jellyfin item"
   [base-url item-id]
   (str (url/url base-url "Items" (format-guid item-id))))
 
+(defn- build-search-url
+  "Build URL for searching items"
+  [base-url & {:keys [params]}]
+  (-> (url/url base-url "Items")
+      (assoc :query params)
+      str))
+
 (defn- get-item
-  "Get the full item data from Jellyfin via MetadataEditor endpoint.
-   This endpoint doesn't require userId and returns the data needed for updates."
+  "Get the full item data from Jellyfin by searching for it by ID.
+   Uses the Items search endpoint with the item ID as a filter."
   [config item-id]
-  (let [url (str (url/url (:base-url config) "Items" (format-guid item-id) "MetadataEditor"))]
-    (log/debug "Getting Jellyfin item metadata" {:item-id item-id :url url})
-    (let [response (jellyfin-authenticated-request config :get url)]
+  (let [guid (format-guid item-id)
+        search-url (build-search-url (:base-url config) 
+                                     :params {:Ids guid
+                                             :Fields "Tags"})]
+    (log/debug "Searching for Jellyfin item" {:item-id item-id :url search-url})
+    (let [response (jellyfin-authenticated-request config :get search-url)]
       (if (= 200 (:status response))
-        ;; MetadataEditor returns a wrapper, extract the item
-        (when-let [editor-info (json/parse-string (:body response) true)]
-          (:Item editor-info))
+        (when-let [result (json/parse-string (:body response) true)]
+          (when-let [items (:Items result)]
+            (first items)))
         (do
-          (log/error "Failed to get item from Jellyfin" 
+          (log/error "Failed to search for item in Jellyfin" 
                     {:item-id item-id 
                      :status (:status response)
                      :body (:body response)})
