@@ -53,12 +53,13 @@
 
 (defn- get-item
   "Get the full item data from Jellyfin by searching for it by ID.
-   Uses the Items search endpoint with the item ID as a filter."
+   Uses the Items search endpoint with the item ID as a filter.
+   Gets ALL fields to ensure we have a complete item for updating."
   [config item-id]
   (let [guid (format-guid item-id)
+        ;; Don't specify Fields parameter to get all fields
         search-url (build-search-url (:base-url config) 
-                                     :params {:Ids guid
-                                             :Fields "Tags"})]
+                                     :params {:Ids guid})]
     (log/debug "Searching for Jellyfin item" {:item-id item-id :url search-url})
     (let [response (jellyfin-authenticated-request config :get search-url)]
       (if (= 200 (:status response))
