@@ -10,12 +10,15 @@
 
 (defn jellyfin-authenticated-request
   "Make an authenticated request to Jellyfin"
-  [{:keys [api-key]} method url & {:keys [body]}]
+  [{:keys [api-key] :as config} method url & {:keys [body]}]
+  (when-not api-key
+    (log/error "No API key found in config!" {:config-keys (keys config)})
+    (throw (ex-info "Jellyfin API key not configured" {:config config})))
   (let [opts (cond-> {:headers {"X-Emby-Token" api-key
                                 "Content-Type" "application/json"}
                       :throw-exceptions false}
                body (assoc :body (json/generate-string body)))]
-    (log/debug "Jellyfin request" {:method method :url url})
+    (log/debug "Jellyfin request" {:method method :url url :has-api-key (boolean api-key)})
     (case method
       :get (http/get url opts)
       :post (http/post url opts)
@@ -41,13 +44,22 @@
   (str (url/url base-url "Items" (format-guid item-id))))
 
 (defn- get-item
-  "Get the full item data from Jellyfin"
+  "Get the full item data from Jellyfin via MetadataEditor endpoint.
+   This endpoint doesn't require userId and returns the data needed for updates."
   [config item-id]
-  (let [url (build-item-update-url (:base-url config) item-id)]
-    (log/debug "Getting Jellyfin item" {:item-id item-id})
+  (let [url (str (url/url (:base-url config) "Items" (format-guid item-id) "MetadataEditor"))]
+    (log/debug "Getting Jellyfin item metadata" {:item-id item-id :url url})
     (let [response (jellyfin-authenticated-request config :get url)]
-      (when (= 200 (:status response))
-        (json/parse-string (:body response) true)))))
+      (if (= 200 (:status response))
+        ;; MetadataEditor returns a wrapper, extract the item
+        (when-let [editor-info (json/parse-string (:body response) true)]
+          (:Item editor-info))
+        (do
+          (log/error "Failed to get item from Jellyfin" 
+                    {:item-id item-id 
+                     :status (:status response)
+                     :body (:body response)})
+          nil)))))
 
 (defn update-item-tags!
   "Update tags for a single Jellyfin item"
