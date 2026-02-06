@@ -112,7 +112,7 @@
 
 (defn sql:delete-media-tags!
   [media-id tags]
-  (-> (delete-from :tags)
+  (-> (delete-from :media_tags)
       (where [:= :media_id media-id]
              [:in :tag (map name tags)])))
 
