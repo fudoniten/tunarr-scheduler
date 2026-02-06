@@ -18,6 +18,23 @@
 (defn- sanitize-endpoint [endpoint]
   (some-> endpoint (str/replace #"/+$" "")))
 
+(defn- media-map->tunabrain-format
+  "Transform media map from Clojure namespaced keywords to tunabrain's expected format.
+   Tunabrain expects plain JSON keys like 'id', 'title', 'overview', etc."
+  [media]
+  {:id (::media/id media)
+   :title (::media/name media)
+   :overview (::media/overview media)
+   :genres (::media/genres media)
+   :tags (mapv name (::media/tags media))
+   :production_year (::media/production-year media)
+   :premiere_date (str (::media/premiere media))
+   :community_rating (::media/community-rating media)
+   :critic_rating (::media/critic-rating media)
+   :official_rating (::media/rating media)
+   :type (name (::media/type media))
+   :taglines (::media/taglines media)})
+
 (defn- json-post!
   [^TunabrainClient client path payload]
   (let [url (str (:endpoint client) path)
@@ -71,8 +88,8 @@
   [client media & {:keys [catalog-tags]
                    :or   {catalog-tags []}}]
   (if-let [response (json-post! client "/tags"
-                                 {:media         media
-                                  :existing_tags catalog-tags})]
+                                 {:media         (media-map->tunabrain-format media)
+                                  :existing_tags (mapv name catalog-tags)})]
     (cond
       (s/valid? (s/coll-of string?) response)
       (do
@@ -104,7 +121,7 @@
   "Fetch channel mapping metadata for a media item from tunabrain."
   [client media & {:keys [categories channels]}]
   (if-let [response (json-post! client "/categorize"
-                                {:media      media
+                                {:media      (media-map->tunabrain-format media)
                                  :channels   channels
                                  :categories categories})]
     (let [{:keys [dimensions mappings]} response]
