@@ -2,7 +2,6 @@
   (:require [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.sql.executor :as executor]
-            [tunarr.scheduler.util.error :refer [capture-stack-trace]]
 
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :refer [instrument]]
@@ -272,7 +271,7 @@
   [media-id process]
   (-> (insert-into :media_process_timestamp)
       (columns :media_id :process :last_run_at)
-      (values [[media-id process :now]])
+      (values [[media-id (name process) :now]])
       (on-conflict :media_id :process)
       (do-update-set {:last_run_at [:excluded :last_run_at]})))
 

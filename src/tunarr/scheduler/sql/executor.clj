@@ -45,7 +45,8 @@
       (catch SQLException e
         (deliver result [:err (ex-info (format "failed to run sql query: %s"
                                                (.getMessage e))
-                                       {:error e
+                                       {:query query
+                                        :error e
                                         :cause (classify-sql-exception e)})]))
       (catch Throwable e
         (deliver result [:err e])))))
