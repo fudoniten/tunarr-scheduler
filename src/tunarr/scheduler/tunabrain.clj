@@ -33,9 +33,22 @@
       (let [{:keys [status body]} (http/post url request-opts)]
         (if (<= 200 status 299)
           (json/parse-string body true)
-          (throw (ex-info (format "tunabrain request failed: %s" status)
-                          (cond-> {:status status :url url}
-                            body (assoc :body body))))))
+          (let [error-details (try
+                               (json/parse-string body true)
+                               (catch Exception _
+                                 body))]
+            (log/error "Tunabrain request failed"
+                      {:status status
+                       :url url
+                       :path path
+                       :error-details error-details
+                       :request-payload (json/parse-string (json/generate-string payload) true)})
+            (throw (ex-info (format "tunabrain request failed: %s - %s" status error-details)
+                           {:status status
+                            :url url
+                            :path path
+                            :error-details error-details
+                            :request-payload payload})))))
       (catch java.net.ConnectException e
         (throw (ex-info (format "connection refused to tunabrain at %s" url)
                         {:url url :path path :cause :connection-refused}
