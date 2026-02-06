@@ -52,22 +52,22 @@
                       (if (contains? cfg k) cfg (assoc cfg k default)))
         collection-config (if (= :jellyfin (-> collection-config :type))
                             (-> collection-config
-                                (replace-envvar :api-key "COLLECTION_API_KEY")
+                                (replace-envvar :api-key  "COLLECTION_API_KEY")
                                 (replace-envvar :base-url "COLLECTION_BASE_URL"))
                             collection-config)
         catalog-config (if (= :postgresql catalog-type)
                          (-> catalog-config
-                             (replace-envvar :dbname "CATALOG_DATABASE")
+                             (replace-envvar :dbname   "CATALOG_DATABASE")
                              (replace-envvar :user     "CATALOG_USER")
                              (replace-envvar :password "CATALOG_PASSWORD")
                              (replace-envvar :host     "CATALOG_HOST")
                              (replace-envvar :port     "CATALOG_PORT")
                              (add-default :dbname "tunarr-scheduler")
-                             (add-default :user     "tunarr-scheduler")
-                             (add-default :host     "postgres")
-                             (add-default :port     5432))
+                             (add-default :user   "tunarr-scheduler")
+                             (add-default :host   "postgres")
+                             (add-default :port   5432))
                          catalog-config)
-         curation-config (get config :curation)
+        curation-config (get config :curation)
         tag-config (get config :tag-config {})
         categories-config (get config :categories {})
         channel-config (into {}
@@ -86,32 +86,32 @@
      ;; TODO: Add tts, media-source, tunarr-source, scheduler, and bumpers configs when implemented
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
-      :tunarr/curation {:libraries (keys (get collection-config :libraries))
-                        :tunabrain (ig/ref :tunarr/tunabrain)
-                        :catalog   (ig/ref :tunarr/catalog)
-                        :throttler (ig/ref :tunarr/tunabrain-throttler)
-                        :config    (merge curation-config
-                                    {:libraries (keys (:libraries collection-config))
-                                     :channels  channel-config
-                                     :categories categories-config})}
+     :tunarr/curation {:libraries (keys (get collection-config :libraries))
+                       :tunabrain (ig/ref :tunarr/tunabrain)
+                       :catalog   (ig/ref :tunarr/catalog)
+                       :throttler (ig/ref :tunarr/tunabrain-throttler)
+                       :config    (merge curation-config
+                                         {:libraries (keys (:libraries collection-config))
+                                          :channels  channel-config
+                                          :categories categories-config})}
      :tunarr/config-sync {:channels channel-config
                           :libraries (get collection-config :libraries)
                           :catalog (ig/ref :tunarr/catalog)}
      :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
                              :tag-config tag-config}
-           :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
-                                     (or (get-in config [:server :port]))
-                                     (parse-port))
-                           :job-runner (ig/ref :tunarr/job-runner)
-                           :tunabrain (ig/ref :tunarr/tunabrain)
-                           :throttler (ig/ref :tunarr/tunabrain-throttler)
-                           :collection (ig/ref :tunarr/collection)
-                           :catalog (ig/ref :tunarr/catalog)
-                           :backends (ig/ref :tunarr/backends)
-                           :logger (ig/ref :tunarr/logger)
-                           :curation-config (merge curation-config
-                                              {:channels  channel-config
-                                               :categories categories-config})
-                           :jellyfin-config collection-config
-                           ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
-                           }}))
+     :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
+                                    (or (get-in config [:server :port]))
+                                    (parse-port))
+                          :job-runner (ig/ref :tunarr/job-runner)
+                          :tunabrain (ig/ref :tunarr/tunabrain)
+                          :throttler (ig/ref :tunarr/tunabrain-throttler)
+                          :collection (ig/ref :tunarr/collection)
+                          :catalog (ig/ref :tunarr/catalog)
+                          :backends (ig/ref :tunarr/backends)
+                          :logger (ig/ref :tunarr/logger)
+                          :curation-config (merge curation-config
+                                                  {:channels  channel-config
+                                                   :categories categories-config})
+                          :jellyfin-config collection-config
+                          ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
+                          }}))
