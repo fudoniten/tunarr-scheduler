@@ -271,7 +271,7 @@
   [media-id process]
   (-> (insert-into :media_process_timestamp)
       (columns :media_id :process :last_run_at)
-      (values [[media-id (name process) [:fn :now]]])
+      (values [[media-id (name process) [:now]]])
       (on-conflict :media_id :process)
       (do-update-set {:last_run_at [:excluded :last_run_at]})))
 
