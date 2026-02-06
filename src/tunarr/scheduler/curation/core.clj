@@ -10,13 +10,13 @@
            [java.time.temporal ChronoUnit]))
 
 (defn process-callback
-  [catalog {:keys [id name]} process]
+  [catalog {:keys [::media/id ::media/name]} process]
   (fn [{:keys [error]}]
     (if error
       (do
         (log/error (format "failed to execute %s process on %s: %s"
                            process name (.getMessage error)))
-        (log/error (with-out-str (print-stack-trace error))))
+        (log/debug (with-out-str (print-stack-trace error))))
       (catalog/update-process-timestamp! catalog id process))))
 
 (defn process-timestamp
