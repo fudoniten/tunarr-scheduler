@@ -273,7 +273,7 @@
       (columns :media_id :process :last_run_at)
       (values [[media-id (name process) [:now]]])
       (on-conflict :media_id :process)
-      (do-update-set {:last_run_at [:excluded :last_run_at]})))
+      (do-update-set {:last_run_at (keyword "excluded" "last_run_at")})))
 
 (defn optional [pred lst]
   (if pred lst []))
