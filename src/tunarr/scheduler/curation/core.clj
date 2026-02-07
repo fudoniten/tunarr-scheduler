@@ -35,11 +35,11 @@
   (.minus (Instant/now) days ChronoUnit/DAYS))
 
 (defprotocol ICuratorBackend
-  (retag-library! [self library]
+  (retag-library! [self library] [self library opts]
     "Regenerate and apply tags for the supplied library.")
-  (generate-library-taglines! [self library]
+  (generate-library-taglines! [self library] [self library opts]
     "Generate taglines for media in the supplied library.")
-  (recategorize-library! [self library]
+  (recategorize-library! [self library] [self library opts]
     "Update channel mapping metadata for the supplied library."))
 
 (defn overdue? [media process threshold]
@@ -63,17 +63,18 @@
         (catalog/add-media-taglines! catalog id taglines)))))
 
 (defn retag-library-media!
-  [brain catalog library throttler & {:keys [threshold]}]
-  (log/info (format "re-tagging media for library: %s" (name library)))
-  (if (nil? threshold)
+  [brain catalog library throttler & {:keys [threshold force]}]
+  (log/info (format "re-tagging media for library: %s (force=%s)" (name library) (boolean force)))
+  (if (and (nil? threshold) (not force))
     (log/error "no value for retag threshold!")
-    (let [threshold-date (days-ago threshold)
+    (let [threshold-date (when threshold (days-ago threshold))
           library-media  (catalog/get-media-by-library catalog library)]
       (log/info (format "processing tags for %s media items from %s"
                         (count library-media) (name library)))
       (doseq [media library-media]
-        (if (overdue? (catalog/get-media-process-timestamps catalog media)
-                      :process/tagging threshold-date)
+        (if (or force
+                (overdue? (catalog/get-media-process-timestamps catalog media)
+                          :process/tagging threshold-date))
           (do (log/info (format "re-tagging media: %s" (::media/name media)))
               (throttler/submit! throttler retag-media!
                                  (process-callback catalog media :process/tagging)
@@ -105,15 +106,16 @@
           (catalog/set-media-category-values! catalog id category values))))))
 
 (defn categorize-library-media!
-  [brain catalog library throttler & {:keys [channels threshold categories]}]
-  (log/info (format "recategorizing media for library: %s" library))
-  (let [threshold-date (days-ago threshold)
+  [brain catalog library throttler & {:keys [channels threshold categories force]}]
+  (log/info (format "recategorizing media for library: %s (force=%s)" library (boolean force)))
+  (let [threshold-date (when threshold (days-ago threshold))
         library-media  (catalog/get-media-by-library catalog library)]
     (log/info (format "processing tags for %s media items from %s"
                       (count library-media) (name library)))
     (doseq [media library-media]
-      (if (overdue? (catalog/get-media-process-timestamps catalog media)
-                    :process/categorize threshold-date)
+      (if (or force
+              (overdue? (catalog/get-media-process-timestamps catalog media)
+                        :process/categorize threshold-date))
         (throttler/submit! throttler recategorize-media!
                            (process-callback catalog media :process/categorize)
                            [brain catalog media channels categories])
@@ -122,21 +124,33 @@
 (defrecord TunabrainCuratorBackend
     [brain catalog throttler config]
     ICuratorBackend
-    
+
     (retag-library!
-      [_ library]
+      [self library]
+      (retag-library! self library {}))
+    (retag-library!
+      [_ library {:keys [force]}]
       (retag-library-media! brain catalog library throttler
-                            :threshold (get-in config [:thresholds :retag])))
+                            :threshold (get-in config [:thresholds :retag])
+                            :force force))
+
     (generate-library-taglines!
-      [_ _]
+      [self library]
+      (generate-library-taglines! self library {}))
+    (generate-library-taglines!
+      [_ _ _opts]
       (throw (ex-info "generate-library-taglines! not implemented" {})))
-    
+
     (recategorize-library!
-      [_ library]
+      [self library]
+      (recategorize-library! self library {}))
+    (recategorize-library!
+      [_ library {:keys [force]}]
       (categorize-library-media! brain catalog library throttler
                                  :threshold (get-in config [:thresholds :recategorize])
                                  :channels (get config :channels)
-                                 :categories (get config :categories))))
+                                 :categories (get config :categories)
+                                 :force force)))
 
 (defprotocol ICurator
   (start! [self libraries])
