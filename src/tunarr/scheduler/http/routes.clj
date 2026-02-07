@@ -60,16 +60,17 @@
       (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-retag-job!
-  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library]}]
+  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library force]}]
   (try
     (submit-job! job-runner
                  :media/retag
                  library
                  "library not specified for retag"
-                 (fn [opts] (curate/retag-library! 
-                              (curate/->TunabrainCuratorBackend 
+                 (fn [opts] (curate/retag-library!
+                              (curate/->TunabrainCuratorBackend
                                 tunabrain catalog throttler config)
-                              library)))
+                              library
+                              {:force force})))
     (catch Exception e
       (log/error e "Error submitting retag job" {:library library})
       (json-response {:error (.getMessage e)} 500))))
@@ -90,16 +91,17 @@
       (json-response {:error (.getMessage e)} 500))))
 
 (defn- submit-recategorize-job!
-  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library]}]
+  [{:keys [job-runner catalog tunabrain throttler config]} {:keys [library force]}]
   (try
     (submit-job! job-runner
                  :media/recategorize
                  library
                  "library not specified for recategorize"
-                 (fn [opts] (curate/recategorize-library! 
-                              (curate/->TunabrainCuratorBackend 
+                 (fn [opts] (curate/recategorize-library!
+                              (curate/->TunabrainCuratorBackend
                                 tunabrain catalog throttler config)
-                              library)))
+                              library
+                              {:force force})))
     (catch Exception e
       (log/error e "Error submitting recategorize job" {:library library})
       (json-response {:error (.getMessage e)} 500))))
@@ -174,14 +176,16 @@
                                                 :collection collection
                                                 :catalog    catalog}
                                                {:library    library}))}]
-           ["/media/:library/retag" {:post (fn [{{:keys [library]} :path-params}]
+           ["/media/:library/retag" {:post (fn [{{:keys [library]} :path-params
+                                              :keys [query-params]}]
                                              (submit-retag-job!
                                               {:job-runner job-runner
                                                :catalog    catalog
                                                :tunabrain  tunabrain
                                                :throttler  throttler
                                                :config     curation-config}
-                                              {:library    library}))}]
+                                              {:library    library
+                                               :force      (= "true" (get query-params "force"))}))}]
             ["/media/:library/add-taglines" {:post (fn [{{:keys [library]} :path-params}]
                                                      (submit-tagline-job!
                                                       {:job-runner job-runner
@@ -190,14 +194,16 @@
                                                        :throttler  throttler
                                                        :config     curation-config}
                                                       {:library    library}))}]
-            ["/media/:library/recategorize" {:post (fn [{{:keys [library]} :path-params}]
+            ["/media/:library/recategorize" {:post (fn [{{:keys [library]} :path-params
+                                                      :keys [query-params]}]
                                                      (submit-recategorize-job!
                                                       {:job-runner job-runner
                                                        :catalog    catalog
                                                        :tunabrain  tunabrain
                                                        :throttler  throttler
                                                        :config     curation-config}
-                                                      {:library    library}))}]
+                                                      {:library    library
+                                                       :force      (= "true" (get query-params "force"))}))}]
             ["/media/:library/sync-jellyfin-tags" {:post (fn [{{:keys [library]} :path-params}]
                                                             (submit-jellyfin-sync-job!
                                                              {:job-runner job-runner
