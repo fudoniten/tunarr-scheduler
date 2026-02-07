@@ -26,7 +26,7 @@
    :title (::media/name media)
    :overview (::media/overview media)
    :genres (::media/genres media)
-   :tags (mapv name (::media/tags media))
+   :tags (mapv name (remove nil? (::media/tags media)))
    :production_year (::media/production-year media)
    :premiere_date (str (::media/premiere media))
    :community_rating (::media/community-rating media)
