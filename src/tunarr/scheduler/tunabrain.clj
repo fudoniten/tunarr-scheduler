@@ -89,8 +89,8 @@
                    :or   {catalog-tags []}}]
   (log/debug (format "===== RETAGGING MEDIA:\n%s\n" (with-out-str (pprint media))))
   (if-let [response (json-post! client "/tags"
-                                {:media         (media-map->tunabrain-format (remove nil? media))
-                                 :existing_tags (mapv name catalog-tags)})]
+                                {:media         (media-map->tunabrain-format media)
+                                 :existing_tags (mapv name (remove nil? catalog-tags))})]
     (cond
       (s/valid? (s/coll-of string?) response)
       (do
