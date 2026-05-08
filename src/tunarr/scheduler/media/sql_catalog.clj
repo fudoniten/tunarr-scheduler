@@ -155,7 +155,7 @@
   [library]
   (-> (select :id)
       (from :library)
-      (where [:= [:lower :name] [:lower (name library)]])))
+      (where [:= [:lower :name] [:lower (name library)]])
 
 (defn sql:insert-media-tags
   [media-id tags]

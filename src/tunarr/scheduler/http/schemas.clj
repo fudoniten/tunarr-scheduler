@@ -111,10 +111,10 @@
 
 (def MediaMetadata
   [:map {:closed false}
-   [:id MediaId]
-   [:name {:optional true} :string]
-   [:type {:optional true} MediaType]
-   [:process-timestamps {:optional true} ProcessTimestamps]])
+   [:tunarr.scheduler.media/id {:optional true} :string]
+   [:tunarr.scheduler.media/name {:optional true} :string]
+   [:tunarr.scheduler.media/type {:optional true} MediaType]
+   [:tunarr.scheduler.media/process-timestamps {:optional true} :any]])
 
 (def Library
   [:map
