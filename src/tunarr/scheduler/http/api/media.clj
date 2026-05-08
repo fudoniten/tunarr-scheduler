@@ -1,6 +1,7 @@
 (ns tunarr.scheduler.http.api.media
   "HTTP handlers for media library operations."
   (:require [taoensso.timbre :as log]
+            [clojure.walk :as walk]
             [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.media.sync :as media-sync]
             [tunarr.scheduler.media.pseudovision-sync :as pv-sync]
@@ -9,11 +10,25 @@
             [tunarr.scheduler.backends.pseudovision.client :as pv-client]
             [tunarr.scheduler.curation.core :as curate]
             [tunarr.scheduler.tunabrain :as tunabrain]
-            [tunarr.scheduler.media.catalog :as catalog]))
+            [tunarr.scheduler.media.catalog :as catalog])
+  (:import [java.time LocalDate Instant]))
 
 ;; ---------------------------------------------------------------------------
 ;; Helper functions
 ;; ---------------------------------------------------------------------------
+
+(defn- serialize-time-fields
+  "Recursively converts java.time.LocalDate and java.time.Instant values to
+   ISO-8601 strings so Malli response coercion (which runs before Muuntaja JSON
+   encoding) does not encounter raw Java time objects."
+  [data]
+  (walk/postwalk
+   (fn [v]
+     (cond
+       (instance? LocalDate v) (str v)
+       (instance? Instant v)   (str v)
+       :else v))
+   data))
 
 (defn- submit-job!
   "Generic job submission helper for async operations."
@@ -299,7 +314,7 @@
             library-id (catalog/get-library-id catalog library-kw)]
         (if library-id
           (let [media (catalog/get-media-by-library-id catalog library-id)]
-            {:status 200 :body {:media media}})
+            {:status 200 :body {:media (mapv serialize-time-fields media)}})
           {:status 404 :body {:error (str "Library not found: " library)}}))
       (catch Exception e
         (log/error e "Error fetching library media")
@@ -312,7 +327,7 @@
     (try
       (let [media-id (get-in req [:parameters :path :media-id])]
         (if-let [media (catalog/get-media-by-id catalog media-id)]
-          {:status 200 :body media}
+          {:status 200 :body (serialize-time-fields media)}
           {:status 404 :body {:error (str "Media not found: " media-id)}}))
       (catch Exception e
         (log/error e "Error fetching media by ID")
