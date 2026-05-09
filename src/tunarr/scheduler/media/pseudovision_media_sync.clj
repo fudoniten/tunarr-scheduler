@@ -125,16 +125,9 @@
                 (throw (ex-info "Library not found in catalog "
                                 {:library library})))
 
-            ;; Find matching Pseudovision library by kind  
-            pv-library-id (if (integer? library)
-                            library
-                            (let [all-libs (pv/list-all-libraries pv-config)
-                                  lib-kind (name library)
-                                  matched  (first (filter #(= (:kind %) lib-kind) all-libs))]
-                              (when-not matched
-                                (throw (ex-info "No matching Pseudovision library found"
-                                                {:library library :available (map :kind all-libs)})))
-                              (:id matched)))]
+            ;; Use catalog-lib-id as Pseudovision library ID
+            ;; (they're synchronized during library sync from Pseudovision)
+            pv-library-id catalog-lib-id]
 
         (log/info "Fetching items from Pseudovision library"
                   {:pv-library-id pv-library-id :catalog-lib-id catalog-lib-id})
