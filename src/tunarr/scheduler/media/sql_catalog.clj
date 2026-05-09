@@ -155,7 +155,7 @@
   [library]
   (-> (select :id)
       (from :library)
-      (where [:= [:lower :name] [:lower (name library)]])
+      (where [:= [:lower :name] [:lower (name library)]])))
 
 (defn sql:insert-media-tags
   [media-id tags]
@@ -539,7 +539,7 @@
 
   (get-media-by-id [this media-id]
     (when-let [media (first (sql:fetch! executor (-> (sql:get-media)
-                                                      (where [:= :media/id media-id]))))]
+                                                     (where [:= :media/id media-id]))))]
       (first (catalog/enrich-media-with-timestamps this [media]))))
 
   (add-media-tags! [_ media-id tags]
