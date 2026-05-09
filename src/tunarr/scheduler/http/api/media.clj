@@ -231,15 +231,14 @@
         (when-not library
           (throw (ex-info "library parameter required" {:status 400})))
         
-        (let [pv-config  (pv-client/get-config pseudovision)
-              library-kw (keyword library)]
+        (let [pv-config  (pv-client/get-config pseudovision)]
           
           (log/info "Syncing from Pseudovision" {:library library})
           
           (let [result (pv-media-sync/sync-library-from-pseudovision! 
                          catalog 
                          pv-config 
-                         library-kw 
+                         library 
                          {})]
             {:status 200 :body (assoc result :message "Pseudovision sync complete")})))
       (catch clojure.lang.ExceptionInfo e

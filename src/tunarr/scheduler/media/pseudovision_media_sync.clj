@@ -18,6 +18,7 @@
   (:require [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media :as media]
+            [clojure.string]
             [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
@@ -103,7 +104,7 @@
    Args:
      catalog - Catalog instance to update
      pv-config - Pseudovision client config
-     library - Library name (keyword like :movies) or integer library ID
+     library - Library name (string like \"youtube-filler\" or \"YouTube Filler\") or integer library ID
      opts - Options with :report-progress
 
    Returns:
@@ -112,18 +113,25 @@
    Note: Existing tags in catalog are PRESERVED - we only update media
    metadata, not categorization data."
   [catalog pv-config library opts]
-  (let [report-progress (get opts :report-progress (constantly nil))]
+  (let [report-progress (get opts :report-progress (constantly nil))
+        ;; Normalize library name for lookup:
+        ;; - Convert hyphens to spaces: "youtube-filler" -> "youtube filler"
+        ;; - Then try both as-is and with proper casing
+        normalized-lib (if (string? library)
+                        (clojure.string/replace library #"-" " ")
+                        library)]
 
-    (log/info "Syncing media FROM Pseudovision" {:library library})
+    (log/info "Syncing media FROM Pseudovision" {:library library :normalized normalized-lib})
 
     (try
       ;; Get catalog library-id by querying the database
-      (let [catalog-lib-id (catalog/get-library-id catalog library)
+      (let [catalog-lib-id (or (catalog/get-library-id catalog normalized-lib)
+                               (catalog/get-library-id catalog library))  ; Try original if normalized fails
             _ (log/info "Retrieved catalog library ID"
-                        {:library library :catalog-lib-id catalog-lib-id})
+                        {:library library :normalized normalized-lib :catalog-lib-id catalog-lib-id})
             _ (when-not catalog-lib-id
                 (throw (ex-info "Library not found in catalog "
-                                {:library library})))
+                                {:library library :normalized normalized-lib})))
 
             ;; Use catalog-lib-id as Pseudovision library ID
             ;; (they're synchronized during library sync from Pseudovision)
