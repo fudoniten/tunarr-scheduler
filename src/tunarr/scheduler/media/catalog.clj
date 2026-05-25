@@ -11,6 +11,9 @@
   (get-media-by-id [catalog media-id])
   (get-media-by-library-id [catalog library-id])
   (get-media-by-library [catalog library])
+  (get-media-by-kind [catalog library-name kind])  ; NEW: Filter by item_kind
+  (get-filler-items [catalog library-name])        ; NEW: Convenience for filler
+  (count-media-by-kind [catalog library-name])     ; NEW: Count by kind
   (get-tags [catalog])
   (get-media-tags [catalog media-id])
   (add-media-tags! [catalog media-id tags])

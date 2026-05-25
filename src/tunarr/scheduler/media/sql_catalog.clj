@@ -22,6 +22,7 @@
    ::media/rating           :media/rating
    ::media/id               :media/id
    ::media/type             :media/media_type
+   ::media/item-kind        :media/item_kind          ; NEW: item_kind field
    ::media/production-year  :media/production_year
    ::media/subtitles?       :media/subtitles
    ::media/premiere         :media/premiere
@@ -64,6 +65,7 @@
    :media/rating            identity
    :media/id                identity
    :media/media_type        keyword
+   :media/item_kind         keyword  ; NEW: Convert string back to keyword
    :media/production_year   identity
    :media/subtitles         identity
    :media/premiere          ->local-date
@@ -316,7 +318,7 @@
   because the join-table inserts use `on-conflict do-nothing`, which
   merges new associations in without touching existing ones."
   [:name :overview :community_rating :critic_rating :rating :media_type
-   :production_year :subtitles :premiere :library_id :kid_friendly
+   :item_kind :production_year :subtitles :premiere :library_id :kid_friendly
    :parent_id :season_number :episode_number])
 
 (defn sql:add-media
@@ -334,7 +336,8 @@
     :as media}]
   (let [row (-> media
                 (media->row)
-                (update :media_type name))
+                (update :media_type name)
+                (update :item_kind name))  ; NEW: Convert item_kind keyword to string
         update-cols (filterv #(contains? row %) media-upsert-columns)
         base (-> (insert-into :media) (values [row]) (on-conflict :id))]
     (concat (optional (seq tags) [(sql:insert-tags tags)])
@@ -366,7 +369,8 @@
         rows (mapv (fn [media]
                      (-> media
                          (media->row)
-                         (update :media_type name)))
+                         (update :media_type name)
+                         (update :item_kind name)))  ; NEW: Convert item_kind keyword to string
                    sorted-items)
         ;; Collect all tags, genres, channels, taglines across all media
         all-tags (distinct (mapcat ::media/tags sorted-items))
@@ -526,6 +530,41 @@
       (do (log/info (format "getting media for library id %s" library-id))
           (catalog/get-media-by-library-id self library-id))
       (throw (ex-info (format "library not found: %s" (name library)) {}))))
+
+  ;; NEW: Filter by item_kind
+  (get-media-by-kind [this library-name kind]
+    (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library-name))
+                                first
+                                :library/id)]
+      (do (log/info (format "getting %s items for library %s (id: %s)" (name kind) library-name library-id))
+          (->> (sql:fetch! executor
+                           (-> (sql:get-top-level-media)
+                               (where [:and 
+                                      [:= :media/library_id library-id]
+                                      [:= :media/item_kind (name kind)]])))
+               (map row->media)
+               (catalog/enrich-media-with-timestamps this)))
+      (throw (ex-info (format "library not found: %s" library-name) {}))))
+
+  ;; NEW: Convenience function for filler items  
+  (get-filler-items [this library-name]
+    (catalog/get-media-by-kind this library-name :filler))
+
+  ;; NEW: Count media by kind
+  (count-media-by-kind [_ library-name]
+    (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library-name))
+                                first
+                                :library/id)]
+      (let [counts (sql:fetch! executor
+                              (-> (select :media/item_kind (:%count.* :count))
+                                  (from :media)
+                                  (where [:= :media/library_id library-id])
+                                  (group-by :media/item_kind)))]
+        (reduce (fn [acc {:keys [media/item_kind count]}]
+                  (assoc acc (keyword item_kind) count))
+                {}
+                counts))
+      (throw (ex-info (format "library not found: %s" library-name) {}))))
 
   (get-tags [_]
     (map (comp keyword :tag/name) (sql:fetch! executor (sql:get-tags))))

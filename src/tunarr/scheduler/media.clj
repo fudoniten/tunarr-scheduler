@@ -34,6 +34,7 @@
 (s/def ::rating (s/nilable string?))
 (s/def ::id string?)
 (s/def ::media-type #{:movie :series :episode})
+(s/def ::item-kind #{:episode :series :movie :filler})
 (s/def ::production-year year?)
 (s/def ::subtitles boolean?)
 (s/def ::premiere date?)
@@ -65,6 +66,7 @@
                 ::id
                 ::type
                 ::media-type
+                ::item-kind
                 ::subtitles
                 ::production-year
                 ::subtitles?

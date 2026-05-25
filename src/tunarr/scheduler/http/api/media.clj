@@ -304,20 +304,30 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn get-library-media-handler
-  "Get all media items in a library with process timestamps."
+  "Get all media items in a library with process timestamps.
+   
+   Supports optional ?kind=filler query parameter to filter by item_kind."
   [{:keys [catalog]}]
   (fn [req]
     (try
       (let [library (get-in req [:parameters :path :library])
             library-kw (keyword library)
-            library-id (catalog/get-library-id catalog library-kw)]
+            library-id (catalog/get-library-id catalog library-kw)
+            kind-param (get-in req [:parameters :query :kind])
+            kind (when kind-param (keyword kind-param))]
         (if library-id
-          (let [media (catalog/get-media-by-library-id catalog library-id)]
-            {:status 200 :body {:media (mapv serialize-time-fields media)}})
+          (let [media (if kind
+                       (catalog/get-media-by-kind catalog library-kw kind)
+                       (catalog/get-media-by-library-id catalog library-id))
+                counts (when-not kind (catalog/count-media-by-kind catalog library-kw))]
+            {:status 200 
+             :body (cond-> {:media (mapv serialize-time-fields media)}
+                     counts (assoc :counts counts)
+                     kind (assoc :kind kind))})
           {:status 404 :body {:error (str "Library not found: " library)}}))
       (catch Exception e
         (log/error e "Error fetching library media")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (.getMessage e)})))))
 
 (defn get-media-by-id-handler
   "Get a specific media item by ID with process timestamps."
@@ -331,3 +341,31 @@
       (catch Exception e
         (log/error e "Error fetching media by ID")
         {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn get-library-filler-handler
+  "Get all filler items in a library - convenience endpoint for scheduling."
+  [{:keys [catalog]}]
+  (fn [req]
+    (try
+      (let [library (get-in req [:parameters :path :library])
+            library-kw (keyword library)]
+        (let [filler-items (catalog/get-filler-items catalog library-kw)]
+          {:status 200
+           :body {:filler (mapv serialize-time-fields filler-items)
+                  :count (count filler-items)
+                  :library library}}))
+      (catch Exception e
+        (log/error e "Error fetching library filler items")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn retag-filler-handler
+  "Retag all filler items in a library using Tunabrain."
+  [{:keys [catalog tunabrain job-runner]}]
+  (fn [req]
+    (let [library (get-in req [:parameters :form :library])]
+      (submit-job! job-runner
+                   :retag-filler
+                   library
+                   "Library parameter is required"
+                   (fn [{:keys [library report-progress]}]
+                     (curate/retag-filler-items! tunabrain catalog (keyword library) report-progress))))))

@@ -87,6 +87,26 @@
                               404 {:body s/APIError}
                               500 {:body s/APIError}}
                   :handler   (media/get-media-by-id-handler ctx)}}]
+   ["/api/library/:library/filler"
+    {:tags       ["media"]
+     :parameters {:path [:map [:library s/LibraryName]]}
+     :get        {:summary   "Get all filler items in a library"
+                  :responses {200 {:body [:map 
+                                         [:filler [:sequential s/MediaItem]]
+                                         [:count :int]
+                                         [:library :string]]}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/get-library-filler-handler ctx)}}]
+
+   ["/api/media/filler/retag"
+    {:tags       ["media"]
+     :parameters {:form [:map [:library s/LibraryName]]}
+     :post       {:summary   "Trigger async filler retagging job"
+                  :responses {202 {:body s/JobSubmitResponse}
+                              400 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/retag-filler-handler ctx)}}]
 
    ["/api/media/:library/rescan"
     {:tags       ["media"]
