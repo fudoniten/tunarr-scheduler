@@ -22,15 +22,52 @@
             [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
+;; Media Item Classification
+;; ---------------------------------------------------------------------------
+
+(defn- classify-item-kind
+  \"Determine item_kind based on Pseudovision metadata structure.
+  
+   This replaces the strict episode number requirement with intelligent
+   classification that allows YouTube/orphaned content to be treated as filler.\"
+  [pv-item]
+  (let [parent-id (:parent-id pv-item)
+        season-number (:season-number pv-item)
+        episode-number (or (:position pv-item) 
+                          (:episode-number pv-item) 
+                          (:index-number pv-item))
+        kind (:kind pv-item)
+        is-episode (= kind :episode)]
+    
+    (cond
+      ;; Has parent relationship AND proper episode structure → episode
+      (and parent-id is-episode season-number episode-number) :episode
+      
+      ;; Has season/episode structure but no parent → likely series entry
+      (and season-number episode-number (not parent-id)) :series
+      
+      ;; Explicitly marked as show/series and no parent → series
+      (and (#{:show :series} kind) (not parent-id)) :series
+      
+      ;; Movie type → movie
+      (= kind :movie) :movie
+      
+      ;; Everything else → filler (YouTube, orphaned content, etc.)
+      :else :filler)))
+
+;; ---------------------------------------------------------------------------
 ;; Media Item Mapping
 ;; ---------------------------------------------------------------------------
 
 (defn- pseudovision-item->catalog-item
-  "Convert a Pseudovision media_item to tunarr-scheduler catalog format.
+  \"Convert a Pseudovision media_item to tunarr-scheduler catalog format.
 
-   Preserves Jellyfin ID mapping for tag sync."
+   Uses intelligent classification to determine item_kind, allowing filler
+   content to bypass episode structure requirements. Preserves Jellyfin ID 
+   mapping for tag sync.\"
   [pv-item catalog-library-id]
-  (let [item-type (case (:kind pv-item)
+  (let [item-kind (classify-item-kind pv-item)
+        item-type (case (:kind pv-item)
                     :show   :series      ; Map PV \"show\" to TS \"series\"
                     :episode :episode    ; Keep as-is
                     :season  :season     ; Keep as-is
@@ -47,16 +84,18 @@
         premiere (if (= 4 (count premiere-date-str))
                    (java.time.LocalDate/of year 1 1)  ; Construct date from year
                    (java.time.LocalDate/parse premiere-date-str))
-        ;; Episode numbers are required for episodes - get from position or index
-        season-number (when (= item-type :episode)
+        ;; Episode numbers - only required for :episode kind, optional for filler
+        season-number (when (= item-kind :episode)
                         (:season-number pv-item))
-        episode-number (when (= item-type :episode)
+        episode-number (when (= item-kind :episode)
                          (or (:position pv-item)
                              (:episode-number pv-item)
                              (:index-number pv-item)))]
-    (log/debug "Mapping PV item to catalog"
+    (log/debug \"Mapping PV item to catalog\"
                {:pv-id (:id pv-item)
                 :name (:name pv-item)
+                :item-kind item-kind
+                :item-type item-type
                 :year year
                 :release-date (:release-date pv-item)
                 :premiere premiere
@@ -71,6 +110,7 @@
      {::media/id           (:remote-key pv-item)  ; Use Jellyfin ID as catalog ID
       ::media/name         (:name pv-item)
       ::media/type         item-type
+      ::media/item-kind    item-kind              ; NEW: Add item_kind classification
       ::media/library-id   catalog-library-id    ; TS catalog library ID
       ::media/parent-id    (:parent-id pv-item)
       ::media/production-year year
@@ -171,13 +211,29 @@
                                     :item-keys (keys item)
                                     :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
                     catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
-                    episode-missing-numbers? (and (= :episode (::media/type catalog-item))
-                                                  (or (nil? (::media/season-number catalog-item))
-                                                      (nil? (::media/episode-number catalog-item))))
-                    _ (when episode-missing-numbers?
-                        (log/warn "Skipping episode missing season/episode numbers"
-                                  {:item-id (:id stub) :name (:name item)}))
-                    err  (when-not episode-missing-numbers?
+                    item-kind (::media/item-kind catalog-item)
+                    
+                    ;; Only skip if it's an episode that's missing required structure
+                    ;; Filler items are always allowed through
+                    should-skip? (and (= :episode item-kind)
+                                     (or (nil? (::media/season-number catalog-item))
+                                         (nil? (::media/episode-number catalog-item))))
+                    
+                    _ (when should-skip?
+                        (log/warn "Skipping malformed episode missing season/episode numbers"
+                                  {:item-id (:id stub) 
+                                   :name (:name item)
+                                   :item-kind item-kind
+                                   :season (::media/season-number catalog-item)
+                                   :episode (::media/episode-number catalog-item)}))
+                    
+                    _ (when (and (= :filler item-kind) (< idx 3))
+                        (log/info "Ingesting filler content"
+                                  {:item-id (:id stub)
+                                   :name (:name item)
+                                   :item-kind item-kind}))
+                                   
+                    err  (when-not should-skip?
                            (try
                              (catalog/add-media! catalog catalog-item)
                              (catch Exception e
@@ -188,9 +244,9 @@
                 (report-progress {:phase "syncing" :current (inc idx) :total total})
                 (recur (rest remaining)
                        (inc idx)
-                       (if (or err episode-missing-numbers?) synced (inc synced))
-                       (if episode-missing-numbers? (inc skipped) skipped)
-                       (if (and err (not episode-missing-numbers?)) (conj errors err) errors)))))))
+                       (if (or err should-skip?) synced (inc synced))
+                       (if should-skip? (inc skipped) skipped)
+                       (if (and err (not should-skip?)) (conj errors err) errors)))))))
 
       (catch Exception e
         (log/error e "Failed to sync from Pseudovision")

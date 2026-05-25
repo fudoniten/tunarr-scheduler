@@ -99,7 +99,30 @@
               (throttler/submit! throttler retag-media!
                                  (process-callback catalog media :process/tagging)
                                  [brain catalog media]))
-          (log/info (format "skipping tag generation on media: %s" (::media/name media))))))))
+          (log/info (format "skipping tag generation on media: %s" (::media/name media)))))))
+
+(defn retag-filler-items!
+  "Simplified tagging pipeline for filler items - no episode hierarchy constraints.
+   
+   Filler items (YouTube, orphaned content) are tagged as standalone content
+   without series/season context, enabling flexible scheduling."
+  [brain catalog library throttler & {:keys [threshold force]}]
+  (log/info (format "re-tagging filler items for library: %s (force=%s)" (name library) (boolean force)))
+  (if (and (nil? threshold) (not force))
+    (log/error "no value for retag threshold!")
+    (let [threshold-date (when threshold (days-ago threshold))
+          filler-items   (catalog/get-media-by-kind catalog library :filler)]
+      (log/info (format "processing tags for %s filler items from %s"
+                        (count filler-items) (name library)))
+      (doseq [media filler-items]
+        (if (or force
+                (overdue? (catalog/get-media-process-timestamps catalog media)
+                          :process/filler-retag threshold-date))
+          (do (log/info (format "re-tagging filler: %s" (::media/name media)))
+              (throttler/submit! throttler retag-media!
+                                 (process-callback catalog media :process/filler-retag)
+                                 [brain catalog media]))
+          (log/info (format "skipping filler tag generation: %s" (::media/name media))))))))
 
 (defn retag-series-episodes!
   "Tag episodes for a single series. Tier 1 (deterministic) tags are applied to
