@@ -99,7 +99,7 @@
               (throttler/submit! throttler retag-media!
                                  (process-callback catalog media :process/tagging)
                                  [brain catalog media]))
-          (log/info (format "skipping tag generation on media: %s" (::media/name media)))))))
+          (log/info (format "skipping tag generation on media: %s" (::media/name media))))))))
 
 (defn retag-filler-items!
   "Simplified tagging pipeline for filler items - no episode hierarchy constraints.
