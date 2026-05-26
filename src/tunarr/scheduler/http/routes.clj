@@ -92,7 +92,7 @@
      :parameters {:path [:map [:library s/LibraryName]]}
      :get        {:summary   "Get all filler items in a library"
                   :responses {200 {:body [:map 
-                                         [:filler [:sequential s/MediaItem]]
+                                         [:filler [:sequential s/MediaMetadata]]
                                          [:count :int]
                                          [:library :string]]}
                               404 {:body s/APIError}
