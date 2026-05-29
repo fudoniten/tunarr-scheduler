@@ -31,7 +31,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn routes [ctx]
-  [""
+  ["" 
    ;; ── OpenAPI spec ────────────────────────────────────────────────────────
    ["/openapi.json"
     {:get {:no-doc  true
@@ -72,8 +72,9 @@
 
    ["/api/library/:library/media"
     {:tags       ["media"]
-     :parameters {:path [:map [:library s/LibraryName]]}
-     :get        {:summary   "Get all media items in a library with process timestamps"
+     :parameters {:path [:map [:library s/LibraryName]]
+                  :query s/KindQuery}
+     :get        {:summary   "Get all media items in a library with process timestamps. Supports optional ?kind parameter to filter by media kind (e.g., filler)."
                   :responses {200 {:body s/MediaListResponse}
                               404 {:body s/APIError}
                               500 {:body s/APIError}}
@@ -87,26 +88,6 @@
                               404 {:body s/APIError}
                               500 {:body s/APIError}}
                   :handler   (media/get-media-by-id-handler ctx)}}]
-   ["/api/library/:library/filler"
-    {:tags       ["media"]
-     :parameters {:path [:map [:library s/LibraryName]]}
-     :get        {:summary   "Get all filler items in a library"
-                  :responses {200 {:body [:map 
-                                         [:filler [:sequential s/MediaItem]]
-                                         [:count :int]
-                                         [:library :string]]}
-                              404 {:body s/APIError}
-                              500 {:body s/APIError}}
-                  :handler   (media/get-library-filler-handler ctx)}}]
-
-   ["/api/media/filler/retag"
-    {:tags       ["media"]
-     :parameters {:form [:map [:library s/LibraryName]]}
-     :post       {:summary   "Trigger async filler retagging job"
-                  :responses {202 {:body s/JobSubmitResponse}
-                              400 {:body s/APIError}
-                              500 {:body s/APIError}}
-                  :handler   (media/retag-filler-handler ctx)}}]
 
    ["/api/media/:library/rescan"
     {:tags       ["media"]
@@ -120,8 +101,10 @@
    ["/api/media/:library/retag"
     {:tags       ["media"]
      :parameters {:path  [:map [:library s/LibraryName]]
-                  :query s/ForceQuery}
-     :post       {:summary   "Trigger async LLM retagging job"
+                  :query [:map 
+                          [:force {:optional true} [:enum "true" "false"]]
+                          [:kind {:optional true} :string]]}
+     :post       {:summary   "Trigger async LLM retagging job. Supports optional ?force=true and ?kind=<type> parameters."
                   :responses {202 {:body s/JobSubmitResponse}
                               400 {:body s/APIError}
                               500 {:body s/APIError}}
@@ -257,7 +240,7 @@
                                          muuntaja-mw/format-response-middleware
                                          mw/exception-middleware
                                          rrc/coerce-request-middleware
-                                         rrc/coerce-response-middleware]}})
+                                         rrc/coerce-response-middleware]}}))
                   (ring/routes
                    (swagger-ui/create-swagger-ui-handler
                     {:path "/swagger-ui"
