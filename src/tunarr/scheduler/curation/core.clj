@@ -101,7 +101,7 @@
               (throttler/submit! throttler retag-media!
                                  (process-callback catalog media :process/tagging)
                                  [brain catalog media]))
-          (log/info (format "skipping tag generation on media: %s" (::media/name media))))))
+          (log/info (format "skipping tag generation on media: %s" (::media/name media))))))))
 
 (defn retag-series-episodes!
   "Tag episodes for a single series. Tier 1 (deterministic) tags are applied to

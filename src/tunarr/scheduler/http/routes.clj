@@ -219,35 +219,47 @@
 
 (defn handler
   "Create the ring handler with OpenAPI support.
-   
+
    Route data supplies the canonical Reitit middleware chain - parameters,
    Muuntaja (JSON request decoding), the application exception handler, and
    malli coercion for :parameters / :responses. Routes without schemas still
    traverse the chain as a pass-through.
-   
+
    Outer wraps - error handling, request logging, JSON response encoding -
    cover the entire dispatch tree so that unmatched routes (404/405) and
    the Swagger UI handler also go through them."
   [ctx]
-  (let [dispatch (ring/ring-handler
-                  (ring/router
-                   (routes ctx)
-                    {:data {:muuntaja   mw/muuntaja
-                            :coercion   malli-coercion/coercion
-                            :middleware [parameters/parameters-middleware
-                                         muuntaja-mw/format-negotiate-middleware
-                                         muuntaja-mw/format-request-middleware
-                                         muuntaja-mw/format-response-middleware
-                                         mw/exception-middleware
-                                         rrc/coerce-request-middleware
-                                         rrc/coerce-response-middleware]}}))
-                  (ring/routes
-                   (swagger-ui/create-swagger-ui-handler
-                    {:path "/swagger-ui"
-                     :url  "/openapi.json"})
-                   (ring/create-default-handler
-                    {:not-found          (fn [_] {:status 404 :body {:error "Not found"}})
-                     :method-not-allowed (fn [_] {:status 405 :body {:error "Method not allowed"}})})))]
+  (let [router
+        (ring/router
+         (routes ctx)
+         {:data {:muuntaja   mw/muuntaja
+                 :coercion   malli-coercion/coercion
+                 :middleware [parameters/parameters-middleware
+                              muuntaja-mw/format-negotiate-middleware
+                              muuntaja-mw/format-request-middleware
+                              muuntaja-mw/format-response-middleware
+                              mw/exception-middleware
+                              rrc/coerce-request-middleware
+                              rrc/coerce-response-middleware]}})
+
+        fallback-handler
+        (ring/routes
+         (swagger-ui/create-swagger-ui-handler
+          {:path "/swagger-ui"
+           :url  "/openapi.json"})
+         (ring/create-default-handler
+          {:not-found
+           (fn [_]
+             {:status 404
+              :body   {:error "Not found"}})
+
+           :method-not-allowed
+           (fn [_]
+             {:status 405
+              :body   {:error "Method not allowed"}})}))
+
+        dispatch
+        (ring/ring-handler router fallback-handler)]
     (-> dispatch
         mw/wrap-json-response
         mw/wrap-request-logging
