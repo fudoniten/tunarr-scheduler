@@ -194,3 +194,7 @@
 (def ForceQuery
   [:map
    [:force {:optional true} [:enum "true" "false"]]])
+
+(def KindQuery
+  [:map
+   [:kind {:optional true} :string]])

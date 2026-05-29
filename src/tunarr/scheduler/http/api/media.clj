@@ -94,12 +94,16 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn retag-handler
-  "Trigger async LLM retagging job."
+  "Trigger async LLM retagging job.
+   
+   Supports optional ?kind=<type> parameter to filter by media kind (e.g., filler).
+   When kind is provided, only media of that kind are retagged."
   [{:keys [job-runner catalog tunabrain throttler curation-config]}]
   (fn [req]
     (try
       (let [library (get-in req [:parameters :path :library])
-            force   (= "true" (get-in req [:parameters :query :force]))]
+            force   (= "true" (get-in req [:parameters :query :force]))
+            kind    (get-in req [:parameters :query :kind])]
         (submit-job! job-runner
                      :media/retag
                      library
@@ -108,7 +112,7 @@
                                  (curate/->TunabrainCuratorBackend
                                   tunabrain catalog throttler curation-config)
                                  library
-                                 {:force force}))))
+                                 {:force force :kind (when kind (keyword kind))}))))
       (catch Exception e
         (log/error e "Error submitting retag job")
         {:status 500 :body {:error (.getMessage e)}}))))
@@ -306,7 +310,7 @@
 (defn get-library-media-handler
   "Get all media items in a library with process timestamps.
    
-   Supports optional ?kind=filler query parameter to filter by item_kind."
+   Supports optional ?kind=<type> query parameter to filter by item_kind."
   [{:keys [catalog]}]
   (fn [req]
     (try
@@ -341,31 +345,3 @@
       (catch Exception e
         (log/error e "Error fetching media by ID")
         {:status 500 :body {:error (.getMessage e)}}))))
-
-(defn get-library-filler-handler
-  "Get all filler items in a library - convenience endpoint for scheduling."
-  [{:keys [catalog]}]
-  (fn [req]
-    (try
-      (let [library      (get-in req [:parameters :path :library])
-            library-kw   (keyword library)
-            filler-items (catalog/get-filler-items catalog library-kw)]
-        {:status 200
-         :body {:filler (mapv serialize-time-fields filler-items)
-                :count (count filler-items)
-                :library library}})
-      (catch Exception e
-        (log/error e "Error fetching library filler items")
-        {:status 500 :body {:error (.getMessage e)}}))))
-
-(defn retag-filler-handler
-  "Retag all filler items in a library using Tunabrain."
-  [{:keys [catalog tunabrain job-runner]}]
-  (fn [req]
-    (let [library (get-in req [:parameters :form :library])]
-      (submit-job! job-runner
-                   :retag-filler
-                   library
-                   "Library parameter is required"
-                   (fn [{:keys [library report-progress]}]
-                     (curate/retag-filler-items! tunabrain catalog (keyword library) report-progress))))))
