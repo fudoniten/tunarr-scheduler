@@ -26,32 +26,32 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- classify-item-kind
-  \"Determine item_kind based on Pseudovision metadata structure.
+  "Determine item_kind based on Pseudovision metadata structure.
   
    This replaces the strict episode number requirement with intelligent
-   classification that allows YouTube/orphaned content to be treated as filler.\"
+   classification that allows YouTube/orphaned content to be treated as filler."
   [pv-item]
   (let [parent-id (:parent-id pv-item)
         season-number (:season-number pv-item)
-        episode-number (or (:position pv-item) 
-                          (:episode-number pv-item) 
-                          (:index-number pv-item))
+        episode-number (or (:position pv-item)
+                           (:episode-number pv-item)
+                           (:index-number pv-item))
         kind (:kind pv-item)
         is-episode (= kind :episode)]
-    
+
     (cond
       ;; Has parent relationship AND proper episode structure → episode
       (and parent-id is-episode season-number episode-number) :episode
-      
+
       ;; Has season/episode structure but no parent → likely series entry
       (and season-number episode-number (not parent-id)) :series
-      
+
       ;; Explicitly marked as show/series and no parent → series
       (and (#{:show :series} kind) (not parent-id)) :series
-      
+
       ;; Movie type → movie
       (= kind :movie) :movie
-      
+
       ;; Everything else → filler (YouTube, orphaned content, etc.)
       :else :filler)))
 
@@ -60,25 +60,25 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- pseudovision-item->catalog-item
-  \"Convert a Pseudovision media_item to tunarr-scheduler catalog format.
+  "Convert a Pseudovision media_item to tunarr-scheduler catalog format.
 
    Uses intelligent classification to determine item_kind, allowing filler
    content to bypass episode structure requirements. Preserves Jellyfin ID 
-   mapping for tag sync.\"
+   mapping for tag sync."
   [pv-item catalog-library-id]
   (let [item-kind (classify-item-kind pv-item)
         item-type (case (:kind pv-item)
-                    :show   :series      ; Map PV \"show\" to TS \"series\"
+                    :show   :series      ; Map PV "show" to TS "series"
                     :episode :episode    ; Keep as-is
                     :season  :season     ; Keep as-is
                     :movie   :movie      ; Keep as-is
                     :song    :song       ; Keep as-is
-                    :music_video :music-video  ; Map PV \"music_video\" to TS \"music-video\"
+                    :music_video :music-video  ; Map PV "music_video" to TS "music-video"
                     :image   :image      ; Keep as-is
                     (keyword (:kind pv-item :movie)))  ; Default to :movie if kind missing
         year (or (:year pv-item) 1970)  ; Default to 1970 if year is missing
         ;; Premiere is required - use release-date if available, else construct from year
-        ;; Convert to LocalDate for proper SQL DATE type (needs format: \"YYYY-MM-DD\")
+        ;; Convert to LocalDate for proper SQL DATE type (needs format: "YYYY-MM-DD")
         premiere-date-str (or (:release-date pv-item)
                               (str year))
         premiere (if (= 4 (count premiere-date-str))
@@ -91,7 +91,7 @@
                          (or (:position pv-item)
                              (:episode-number pv-item)
                              (:index-number pv-item)))]
-    (log/debug \"Mapping PV item to catalog\"
+    (log/debug "Mapping PV item to catalog"
                {:pv-id (:id pv-item)
                 :name (:name pv-item)
                 :item-kind item-kind
@@ -144,7 +144,7 @@
    Args:
      catalog - Catalog instance to update
      pv-config - Pseudovision client config
-     library - Library name (string like \"youtube-filler\" or \"YouTube Filler\") or integer library ID
+     library - Library name (string like \"youtubel-filler\" or \"YouTube Filler\") or integer library ID) 
      opts - Options with :report-progress
 
    Returns:
@@ -158,8 +158,8 @@
         ;; - Convert hyphens to spaces: "youtube-filler" -> "youtube filler"
         ;; - Then try both as-is and with proper casing
         normalized-lib (if (string? library)
-                        (clojure.string/replace library #"-" " ")
-                        library)]
+                         (clojure.string/replace library #"-" " ")
+                         library)]
 
     (log/info "Syncing media FROM Pseudovision" {:library library :normalized normalized-lib})
 
@@ -212,27 +212,27 @@
                                     :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
                     catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
                     item-kind (::media/item-kind catalog-item)
-                    
+
                     ;; Only skip if it's an episode that's missing required structure
                     ;; Filler items are always allowed through
                     should-skip? (and (= :episode item-kind)
-                                     (or (nil? (::media/season-number catalog-item))
-                                         (nil? (::media/episode-number catalog-item))))
-                    
+                                      (or (nil? (::media/season-number catalog-item))
+                                          (nil? (::media/episode-number catalog-item))))
+
                     _ (when should-skip?
                         (log/warn "Skipping malformed episode missing season/episode numbers"
-                                  {:item-id (:id stub) 
+                                  {:item-id (:id stub)
                                    :name (:name item)
                                    :item-kind item-kind
                                    :season (::media/season-number catalog-item)
                                    :episode (::media/episode-number catalog-item)}))
-                    
+
                     _ (when (and (= :filler item-kind) (< idx 3))
                         (log/info "Ingesting filler content"
                                   {:item-id (:id stub)
                                    :name (:name item)
                                    :item-kind item-kind}))
-                                   
+
                     err  (when-not should-skip?
                            (try
                              (catalog/add-media! catalog catalog-item)
@@ -310,11 +310,3 @@
       (log/error e "Migration failed")
       {:migrated 0 :skipped 0 :errors [{:error (.getMessage e)}]})))
 
-(comment
-  ;; Usage example:
-
-  ;; One-time: Migrate existing catalog
-  (migrate-catalog-to-pseudovision! catalog pv-config :movies)
-
-  ;; Future: Sync from Pseudovision instead of Jellyfin
-  (sync-library-from-pseudovision! catalog pv-config :movies {}))

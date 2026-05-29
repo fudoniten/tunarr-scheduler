@@ -186,8 +186,8 @@
                      library
                      "library not specified for pseudovision sync"
                      (fn [opts] (pv-sync/sync-library-tags! catalog
-                                                             pseudovision
-                                                             library))))
+                                                            pseudovision
+                                                            library))))
       (catch Exception e
         (log/error e "Error submitting Pseudovision sync job")
         {:status 500 :body {:error (.getMessage e)}}))))
@@ -203,22 +203,22 @@
             batch-size          (get params :batch-size 10)
             delay-ms            (get params :delay-ms 100)
             pv-config           (pv-client/get-config pseudovision)]
-        
-        (log/info "Starting Pseudovision migration" 
-                  {:dry-run dry-run? 
+
+        (log/info "Starting Pseudovision migration"
+                  {:dry-run dry-run?
                    :batch-size batch-size
                    :include-categories include-categories?})
-        
-        (let [result (pv-migration/migrate-all! 
-                       catalog 
-                       pv-config
-                       {:dry-run dry-run?
-                        :include-categories include-categories?
-                        :batch-size batch-size
-                        :delay-ms delay-ms})]
-          
-          {:status 200 
-           :body (assoc result :message 
+
+        (let [result (pv-migration/migrate-all!
+                      catalog
+                      pv-config
+                      {:dry-run dry-run?
+                       :include-categories include-categories?
+                       :batch-size batch-size
+                       :delay-ms delay-ms})]
+
+          {:status 200
+           :body (assoc result :message
                         (if dry-run?
                           "Dry run complete - no changes made"
                           "Migration complete"))}))
@@ -234,16 +234,16 @@
       (let [library (get-in req [:parameters :path :library])]
         (when-not library
           (throw (ex-info "library parameter required" {:status 400})))
-        
+
         (let [pv-config  (pv-client/get-config pseudovision)]
-          
+
           (log/info "Syncing from Pseudovision" {:library library})
-          
-          (let [result (pv-media-sync/sync-library-from-pseudovision! 
-                         catalog 
-                         pv-config 
-                         library 
-                         {})]
+
+          (let [result (pv-media-sync/sync-library-from-pseudovision!
+                        catalog
+                        pv-config
+                        library
+                        {})]
             {:status 200 :body (assoc result :message "Pseudovision sync complete")})))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
@@ -261,16 +261,16 @@
       (let [library (get-in req [:parameters :path :library])]
         (when-not library
           (throw (ex-info "library parameter required" {:status 400})))
-        
+
         (let [pv-config  (pv-client/get-config pseudovision)
               library-kw (keyword library)]
-          
+
           (log/info "Migrating catalog IDs to Pseudovision" {:library library})
-          
-          (let [result (pv-media-sync/migrate-catalog-to-pseudovision! 
-                         catalog 
-                         pv-config 
-                         library-kw)]
+
+          (let [result (pv-media-sync/migrate-catalog-to-pseudovision!
+                        catalog
+                        pv-config
+                        library-kw)]
             {:status 200 :body (assoc result :message "Catalog ID migration complete")})))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
@@ -321,10 +321,10 @@
             kind (when kind-param (keyword kind-param))]
         (if library-id
           (let [media (if kind
-                       (catalog/get-media-by-kind catalog library-kw kind)
-                       (catalog/get-media-by-library-id catalog library-id))
+                        (catalog/get-media-by-kind catalog library-kw kind)
+                        (catalog/get-media-by-library-id catalog library-id))
                 counts (when-not kind (catalog/count-media-by-kind catalog library-kw))]
-            {:status 200 
+            {:status 200
              :body (cond-> {:media (mapv serialize-time-fields media)}
                      counts (assoc :counts counts)
                      kind (assoc :kind kind))})
