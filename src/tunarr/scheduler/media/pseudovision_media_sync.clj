@@ -135,107 +135,131 @@
 ;; Sync FROM Pseudovision
 ;; ---------------------------------------------------------------------------
 
-(def ^:private fetch-batch-size
-  "Items requested per Pseudovision list call."
-  500)
+(defn- process-single-item
+  "Process a single media item from Pseudovision.
+  
+   Returns a map with :synced, :skipped, :errors to accumulate results."
+  [catalog pv-config item-stub catalog-lib-id idx report-progress page]
+  (let [item (pv/get-media-item pv-config (:id item-stub))
+        _ (when (< idx 5)
+            (log/debug "Fetched PV item"
+                       {:item-id (:id item-stub)
+                        :item-keys (keys item)
+                        :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
+        catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
+        item-kind (::media/item-kind catalog-item)
+        
+        should-skip? (and (= :episode item-kind)
+                          (or (nil? (::media/season-number catalog-item))
+                              (nil? (::media/episode-number catalog-item))))
+        
+        _ (when should-skip?
+            (log/warn "Skipping malformed episode missing season/episode numbers"
+                      {:item-id (:id item-stub) 
+                       :name (:name item)
+                       :item-kind item-kind
+                       :season (::media/season-number catalog-item)
+                       :episode (::media/episode-number catalog-item)}))
+        
+        _ (when (and (= :filler item-kind) (< idx 3))
+            (log/info "Ingesting filler content"
+                      {:item-id (:id item-stub)
+                       :name (:name item)
+                       :item-kind item-kind}))
+                       
+        err (when-not should-skip?
+              (try
+                (catalog/add-media! catalog catalog-item)
+                nil
+                (catch Exception e
+                  (log/warn e "Failed to sync item"
+                            {:item-id (:id item-stub)
+                             :item-keys (keys item)})
+                  {:item-id (:id item-stub) :error (.getMessage e)})))]
+    (report-progress {:phase "syncing" :page page :item idx})
+    {:synced (if (or err should-skip?) 0 1)
+     :skipped (if should-skip? 1 0)
+     :errors (if (and err (not should-skip?)) [err] [])}))
 
-(def ^:private insert-batch-size
-  "Catalog items inserted per add-media-batch! call."
-  50)
+(defn- process-item-batch
+  "Process a batch of item stubs from Pseudovision.
+  
+   Returns a map with :synced, :skipped, :errors counts."
+  [catalog pv-config item-stubs catalog-lib-id report-progress page]
+  (loop [remaining item-stubs
+         idx 0
+         synced 0
+         skipped 0
+         errors []]
+    (if (empty? remaining)
+      {:synced synced :skipped skipped :errors errors}
+      (let [stub (first remaining)
+            result (process-single-item catalog pv-config stub catalog-lib-id idx report-progress page)]
+        (recur (rest remaining)
+               (inc idx)
+               (+ synced (:synced result))
+               (+ skipped (:skipped result))
+               (concat errors (:errors result)))))))
 
-(def ^:private item-stub-attrs "id,remote-key,name,year,parent-id,position")
+(defn- fetch-and-process-pages
+  "Fetch and process items from Pseudovision in paginated batches.
+  
+   Returns a map with :synced, :skipped, :errors counts."
+  [catalog pv-config pv-library-id catalog-lib-id library report-progress]
+  (let [batch-size 500
+        attrs-str "id,remote-key,name,year,parent-id,position"]
+    (log/info "Starting PV→TS sync with pagination"
+              {:library library :batch-size batch-size})
+    
+    (loop [page 0
+           total-synced 0
+           total-skipped 0
+           total-errors []]
+      (let [offset (* page batch-size)
+            item-stubs (pv/list-library-items pv-config pv-library-id 
+                                              {:attrs attrs-str
+                                               :limit batch-size
+                                               :offset offset})]
+        
+        (if (empty? item-stubs)
+          ;; Pagination complete: no more items returned
+          (do
+            (log/info "Pseudovision media sync complete"
+                      {:library library 
+                       :total-synced total-synced 
+                       :total-skipped total-skipped 
+                       :total-errors-count (count total-errors)})
+            (when (seq total-errors)
+              (log/debug "Sample sync errors" {:first-errors (take 3 total-errors)}))
+            {:synced total-synced :skipped total-skipped :errors total-errors})
+          
+          ;; Process this batch of items
+          (do
+            (log/debug "Fetching page"
+                       {:page page :offset offset :batch-size (count item-stubs)})
+            (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
+            
+            (let [batch-result (process-item-batch catalog pv-config item-stubs 
+                                                   catalog-lib-id report-progress page)]
+              ;; Accumulate results from this batch and fetch next page
+              (recur (inc page)
+                     (+ total-synced (:synced batch-result))
+                     (+ total-skipped (:skipped batch-result))
+                     (concat total-errors (:errors batch-result))))))))))
 
 (defn- normalize-library-name
-  "Convert hyphens to spaces so \"youtube-filler\" matches \"youtube filler\".
-   Non-string libraries (integer IDs) pass through unchanged."
+  "Normalize library name for lookup (convert hyphens to spaces)."
   [library]
   (if (string? library)
     (clojure.string/replace library #"-" " ")
     library))
 
-(defn- resolve-catalog-library-id
-  "Look up the catalog library ID, trying the normalized name first and
-   falling back to the original. Throws if neither matches.
-
-   The returned ID doubles as the Pseudovision library ID - they're
-   synchronized during library sync from Pseudovision."
-  [catalog library normalized-lib]
-  (let [catalog-lib-id (or (catalog/get-library-id catalog normalized-lib)
-                           (catalog/get-library-id catalog library))]
-    (log/info "Retrieved catalog library ID"
-              {:library library :normalized normalized-lib :catalog-lib-id catalog-lib-id})
-    (or catalog-lib-id
-        (throw (ex-info "Library not found in catalog"
-                        {:library library :normalized normalized-lib})))))
-
-(defn- malformed-episode?
-  "Episodes must carry season and episode numbers to be schedulable."
-  [catalog-item]
-  (and (= :episode (::media/item-kind catalog-item))
-       (or (nil? (::media/season-number catalog-item))
-           (nil? (::media/episode-number catalog-item)))))
-
-(defn- fetch-catalog-item
-  "Fetch the full Pseudovision item for a stub and convert it to catalog
-   format. Returns {:stub stub :catalog-item item :skip? bool}, with :skip?
-   set for malformed episodes. Logs samples from the start of each page."
-  [pv-config catalog-lib-id stub idx]
-  (let [item (pv/get-media-item pv-config (:id stub))
-        catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
-        item-kind (::media/item-kind catalog-item)
-        skip? (malformed-episode? catalog-item)]
-    (when (< idx 5)
-      (log/debug "Fetched PV item"
-                 {:item-id (:id stub)
-                  :item-keys (keys item)
-                  :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
-    (when skip?
-      (log/warn "Skipping malformed episode missing season/episode numbers"
-                {:item-id (:id stub)
-                 :name (:name item)
-                 :item-kind item-kind
-                 :season (::media/season-number catalog-item)
-                 :episode (::media/episode-number catalog-item)}))
-    (when (and (= :filler item-kind) (< idx 3))
-      (log/info "Ingesting filler content"
-                {:item-id (:id stub)
-                 :name (:name item)
-                 :item-kind item-kind}))
-    {:stub stub :catalog-item catalog-item :skip? skip?}))
-
-(defn- insert-batch!
-  "Insert a batch of catalog items. Returns nil on success, an error map on
-   failure."
-  [catalog items]
-  (try
-    (catalog/add-media-batch! catalog items)
-    nil
-    (catch Exception e
-      (log/error e "Failed to sync batch" {:batch-size (count items)})
-      {:error (.getMessage e)})))
-
-(defn- sync-page!
-  "Sync one page of item stubs into the catalog, inserting in batches of
-   insert-batch-size. Returns {:synced n :skipped n :errors [...]}."
-  [catalog pv-config catalog-lib-id stubs report-progress page]
-  (let [results (map-indexed
-                 (fn [idx stub]
-                   (report-progress {:phase "syncing" :page page
-                                     :completed (+ (* page fetch-batch-size) idx)
-                                     :current-item {:id   (some-> (:id stub) str)
-                                                    :name (:name stub)}})
-                   (fetch-catalog-item pv-config catalog-lib-id stub idx))
-                 stubs)
-        {skipped true insertable false} (group-by (comp boolean :skip?) results)
-        skip-errors (mapv (fn [{:keys [stub]}]
-                            {:item-id (:id stub) :reason :malformed-episode})
-                          skipped)]
-    (reduce (fn [totals batch]
-              (if-let [err (insert-batch! catalog (vec batch))]
-                (update totals :errors conj err)
-                (update totals :synced + (count batch))))
-            {:synced 0 :skipped (count skipped) :errors skip-errors}
-            (partition-all insert-batch-size (map :catalog-item insertable)))))
+(defn- get-catalog-library-id
+  "Get catalog library ID, trying both normalized and original names."
+  [catalog library]
+  (let [normalized-lib (normalize-library-name library)]
+    (or (catalog/get-library-id catalog normalized-lib)
+        (catalog/get-library-id catalog library))))
 
 (defn sync-library-from-pseudovision!
   "Sync media items from Pseudovision into tunarr-scheduler catalog.
@@ -258,40 +282,25 @@
   (let [report-progress (get opts :report-progress (constantly nil))
         normalized-lib (normalize-library-name library)]
     (log/info "Syncing media FROM Pseudovision" {:library library :normalized normalized-lib})
+    
     (try
-      (let [catalog-lib-id (resolve-catalog-library-id catalog library normalized-lib)]
-        (log/info "Starting PV→TS sync with pagination"
-                  {:library library :catalog-lib-id catalog-lib-id :batch-size fetch-batch-size})
-        (loop [page 0
-               totals {:synced 0 :skipped 0 :errors []}]
-          (let [offset (* page fetch-batch-size)
-                item-stubs (pv/list-library-items pv-config catalog-lib-id
-                                                  {:attrs item-stub-attrs
-                                                   :limit fetch-batch-size
-                                                   :offset offset})]
-            (if (empty? item-stubs)
-              ;; Pagination complete: no more items returned
-              (do
-                (log/info "Pseudovision media sync complete"
-                          {:library library
-                           :total-synced (:synced totals)
-                           :total-skipped (:skipped totals)
-                           :total-errors-count (count (:errors totals))})
-                (when (seq (:errors totals))
-                  (log/debug "Sample sync errors" {:first-errors (take 3 (:errors totals))}))
-                totals)
-              (do
-                (log/debug "Fetching page"
-                           {:page page :offset offset :batch-size (count item-stubs)})
-                (report-progress {:phase "fetching" :page page :offset offset
-                                  :completed offset :items-in-batch (count item-stubs)})
-                (let [page-totals (sync-page! catalog pv-config catalog-lib-id
-                                              item-stubs report-progress page)]
-                  (recur (inc page)
-                         (-> totals
-                             (update :synced + (:synced page-totals))
-                             (update :skipped + (:skipped page-totals))
-                             (update :errors into (:errors page-totals))))))))))
+      ;; Get catalog library-id by querying the database
+      (let [catalog-lib-id (get-catalog-library-id catalog library)
+            _ (log/info "Retrieved catalog library ID"
+                        {:library library :normalized normalized-lib :catalog-lib-id catalog-lib-id})
+            _ (when-not catalog-lib-id
+                (throw (ex-info "Library not found in catalog"
+                                {:library library :normalized normalized-lib})))
+            
+            ;; Use catalog-lib-id as Pseudovision library ID
+            ;; (they're synchronized during library sync from Pseudovision)
+            pv-library-id catalog-lib-id]
+        
+        (log/info "Fetching items from Pseudovision library"
+                  {:pv-library-id pv-library-id :catalog-lib-id catalog-lib-id})
+        
+        (fetch-and-process-pages catalog pv-config pv-library-id catalog-lib-id 
+                                 library report-progress))
       (catch Exception e
         (log/error e "Failed to sync from Pseudovision")
         {:synced 0 :skipped 0 :errors [{:error (.getMessage e)}]}))))
@@ -299,6 +308,48 @@
 ;; ---------------------------------------------------------------------------
 ;; Migration Helper
 ;; ---------------------------------------------------------------------------
+
+(defn- migrate-single-item
+  "Migrate a single catalog item to use Pseudovision ID.
+  
+   Returns a map with :migrated (0 or 1), :skipped (0 or 1), and :error (or nil)."
+  [catalog pv-config item]
+  (let [jf-id (:jellyfin-id item)]
+    (if-not jf-id
+      {:migrated 0 :skipped 1 :error nil}
+      (try
+        (let [pv-item (pv/find-media-item-by-jellyfin-id pv-config jf-id)]
+          (if pv-item
+            (do
+              (catalog/add-media! catalog (assoc item :id (:id pv-item)))
+              {:migrated 1 :skipped 0 :error nil})
+            (do
+              (log/warn "No Pseudovision item found for Jellyfin ID"
+                        {:jellyfin-id jf-id :title (:title item)})
+              {:migrated 0 :skipped 1 :error nil})))
+        (catch Exception e
+          (log/error e "Migration failed for item" {:jellyfin-id jf-id})
+          {:migrated 0 :skipped 0 :error {:jellyfin-id jf-id :error (.getMessage e)}})))))
+
+(defn- migrate-items-loop
+  "Loop through catalog items and migrate each one.
+  
+   Returns a map with :migrated, :skipped, :errors counts."
+  [catalog pv-config catalog-items]
+  (loop [remaining catalog-items
+         migrated 0
+         skipped 0
+         errors []]
+    (if (empty? remaining)
+      {:migrated migrated :skipped skipped :errors errors}
+      (let [item (first remaining)
+            result (migrate-single-item catalog pv-config item)]
+        (recur (rest remaining)
+               (+ migrated (:migrated result))
+               (+ skipped (:skipped result))
+               (if (:error result)
+                 (conj errors (:error result))
+                 errors))))))
 
 (defn migrate-catalog-to-pseudovision!
   "One-time migration: Match existing catalog items to Pseudovision by Jellyfin ID.
@@ -315,41 +366,18 @@
    After migration, future syncs use Pseudovision as source."
   [catalog pv-config library]
   (log/info "Migrating catalog to use Pseudovision IDs" {:library library})
-
+  
   (try
     (let [catalog-items (catalog/get-media-by-library catalog library)
-          total         (count catalog-items)]
-
+          total (count catalog-items)]
       (log/info "Building Pseudovision item index for migration" {:items total})
-
-      (loop [remaining catalog-items
-             migrated 0
-             skipped  0
-             errors   []]
-        (if (empty? remaining)
-          (do
-            (log/info "Migration complete" {:library library :migrated migrated :skipped skipped})
-            {:migrated migrated :skipped skipped :errors errors})
-
-          (let [item  (first remaining)
-                jf-id (:jellyfin-id item)]
-            (if-not jf-id
-              (recur (rest remaining) migrated (inc skipped) errors)
-              (let [[found? err] (try
-                                   (let [pv-item (pv/find-media-item-by-jellyfin-id pv-config jf-id)]
-                                     (if pv-item
-                                       (do (catalog/add-media! catalog (assoc item :id (:id pv-item)))
-                                           [true nil])
-                                       (do (log/warn "No Pseudovision item found for Jellyfin ID"
-                                                     {:jellyfin-id jf-id :title (:title item)})
-                                           [false nil])))
-                                   (catch Exception e
-                                     (log/error e "Migration failed for item" {:jellyfin-id jf-id})
-                                     [false {:jellyfin-id jf-id :error (.getMessage e)}]))]
-                (recur (rest remaining)
-                       (if found? (inc migrated) migrated)
-                       (if (and (not found?) (nil? err)) (inc skipped) skipped)
-                       (if err (conj errors err) errors))))))))
+      
+      (let [result (migrate-items-loop catalog pv-config catalog-items)]
+        (log/info "Migration complete" 
+                  {:library library 
+                   :migrated (:migrated result) 
+                   :skipped (:skipped result)})
+        result))
     (catch Exception e
       (log/error e "Migration failed")
       {:migrated 0 :skipped 0 :errors [{:error (.getMessage e)}]})))
