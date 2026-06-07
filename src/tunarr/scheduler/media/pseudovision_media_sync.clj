@@ -26,32 +26,32 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- classify-item-kind
-  "Determine item_kind based on Pseudovision metadata structure.
+  \"Determine item_kind based on Pseudovision metadata structure.
   
    This replaces the strict episode number requirement with intelligent
-   classification that allows YouTube/orphaned content to be treated as filler."
+   classification that allows YouTube/orphaned content to be treated as filler.\"
   [pv-item]
   (let [parent-id (:parent-id pv-item)
         season-number (:season-number pv-item)
-        episode-number (or (:position pv-item)
-                           (:episode-number pv-item)
-                           (:index-number pv-item))
+        episode-number (or (:position pv-item) 
+                          (:episode-number pv-item) 
+                          (:index-number pv-item))
         kind (:kind pv-item)
         is-episode (= kind :episode)]
-
+    
     (cond
       ;; Has parent relationship AND proper episode structure → episode
       (and parent-id is-episode season-number episode-number) :episode
-
+      
       ;; Has season/episode structure but no parent → likely series entry
       (and season-number episode-number (not parent-id)) :series
-
+      
       ;; Explicitly marked as show/series and no parent → series
       (and (#{:show :series} kind) (not parent-id)) :series
-
+      
       ;; Movie type → movie
       (= kind :movie) :movie
-
+      
       ;; Everything else → filler (YouTube, orphaned content, etc.)
       :else :filler)))
 
@@ -60,25 +60,25 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- pseudovision-item->catalog-item
-  "Convert a Pseudovision media_item to tunarr-scheduler catalog format.
+  \"Convert a Pseudovision media_item to tunarr-scheduler catalog format.
 
    Uses intelligent classification to determine item_kind, allowing filler
    content to bypass episode structure requirements. Preserves Jellyfin ID 
-   mapping for tag sync."
+   mapping for tag sync.\"
   [pv-item catalog-library-id]
   (let [item-kind (classify-item-kind pv-item)
         item-type (case (:kind pv-item)
-                    :show   :series      ; Map PV "show" to TS "series"
+                    :show   :series      ; Map PV \"show\" to TS \"series\"
                     :episode :episode    ; Keep as-is
                     :season  :season     ; Keep as-is
                     :movie   :movie      ; Keep as-is
                     :song    :song       ; Keep as-is
-                    :music_video :music-video  ; Map PV "music_video" to TS "music-video"
+                    :music_video :music-video  ; Map PV \"music_video\" to TS \"music-video\"
                     :image   :image      ; Keep as-is
                     (keyword (:kind pv-item :movie)))  ; Default to :movie if kind missing
         year (or (:year pv-item) 1970)  ; Default to 1970 if year is missing
         ;; Premiere is required - use release-date if available, else construct from year
-        ;; Convert to LocalDate for proper SQL DATE type (needs format: "YYYY-MM-DD")
+        ;; Convert to LocalDate for proper SQL DATE type (needs format: \"YYYY-MM-DD\")
         premiere-date-str (or (:release-date pv-item)
                               (str year))
         premiere (if (= 4 (count premiere-date-str))
@@ -91,7 +91,7 @@
                          (or (:position pv-item)
                              (:episode-number pv-item)
                              (:index-number pv-item)))]
-    (log/debug "Mapping PV item to catalog"
+    (log/debug \"Mapping PV item to catalog\"
                {:pv-id (:id pv-item)
                 :name (:name pv-item)
                 :item-kind item-kind
@@ -144,7 +144,7 @@
    Args:
      catalog - Catalog instance to update
      pv-config - Pseudovision client config
-     library - Library name (string like \"youtubel-filler\" or \"YouTube Filler\") or integer library ID) 
+     library - Library name (string like \"youtube-filler\" or \"YouTube Filler\") or integer library ID
      opts - Options with :report-progress
 
    Returns:
@@ -158,8 +158,8 @@
         ;; - Convert hyphens to spaces: "youtube-filler" -> "youtube filler"
         ;; - Then try both as-is and with proper casing
         normalized-lib (if (string? library)
-                         (clojure.string/replace library #"-" " ")
-                         library)]
+                        (clojure.string/replace library #"-" " ")
+                        library)]
 
     (log/info "Syncing media FROM Pseudovision" {:library library :normalized normalized-lib})
 
@@ -180,74 +180,100 @@
         (log/info "Fetching items from Pseudovision library"
                   {:pv-library-id pv-library-id :catalog-lib-id catalog-lib-id})
 
-        (let [item-stubs (pv/list-library-items pv-config pv-library-id {:attrs "id,remote-key,name,year,parent-id,position"})
-              total      (count item-stubs)]
+        (let [batch-size 500  ; Process 500 items per Pseudovision request
+              attrs-str "id,remote-key,name,year,parent-id,position"]
 
-          (log/info "Starting PV→TS sync"
+          (log/info "Starting PV→TS sync with pagination"
                     {:library library
-                     :total-items total
-                     :sample-stub (first item-stubs)})
+                     :batch-size batch-size})
 
-          (report-progress {:phase "fetching" :current 0 :total total})
-
-          (loop [remaining item-stubs
-                 idx    0
-                 synced 0
-                 skipped 0
-                 errors []]
-            (if (empty? remaining)
-              (do
-                (log/info "Pseudovision media sync complete"
-                          {:library library :synced synced :skipped skipped :errors-count (count errors)})
-                (when (seq errors)
-                  (log/debug "Sample sync errors" {:first-errors (take 3 errors)}))
-                {:synced synced :skipped skipped :errors errors})
-
-              (let [stub (first remaining)
-                    item (pv/get-media-item pv-config (:id stub))
-                    _ (when (< idx 5)  ; Log first 5 items for debugging
-                        (log/debug "Fetched PV item"
-                                   {:item-id (:id stub)
-                                    :item-keys (keys item)
-                                    :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
-                    catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
-                    item-kind (::media/item-kind catalog-item)
-
-                    ;; Only skip if it's an episode that's missing required structure
-                    ;; Filler items are always allowed through
-                    should-skip? (and (= :episode item-kind)
-                                      (or (nil? (::media/season-number catalog-item))
-                                          (nil? (::media/episode-number catalog-item))))
-
-                    _ (when should-skip?
-                        (log/warn "Skipping malformed episode missing season/episode numbers"
-                                  {:item-id (:id stub)
-                                   :name (:name item)
-                                   :item-kind item-kind
-                                   :season (::media/season-number catalog-item)
-                                   :episode (::media/episode-number catalog-item)}))
-
-                    _ (when (and (= :filler item-kind) (< idx 3))
-                        (log/info "Ingesting filler content"
-                                  {:item-id (:id stub)
-                                   :name (:name item)
-                                   :item-kind item-kind}))
-
-                    err  (when-not should-skip?
-                           (try
-                             (catalog/add-media! catalog catalog-item)
-                             (catch Exception e
-                               (log/warn e "Failed to sync item"
-                                         {:item-id (:id stub)
-                                          :item-keys (keys item)})
-                               {:item-id (:id stub) :error (.getMessage e)})))]
-                (report-progress {:phase "syncing" :current (inc idx) :total total})
-                (recur (rest remaining)
-                       (inc idx)
-                       (if (or err should-skip?) synced (inc synced))
-                       (if should-skip? (inc skipped) skipped)
-                       (if (and err (not should-skip?)) (conj errors err) errors)))))))
-
+          (loop [page 0
+                 total-synced 0
+                 total-skipped 0
+                 total-errors []]
+            (let [offset (* page batch-size)
+                  item-stubs (pv/list-library-items pv-config pv-library-id 
+                                                    {:attrs attrs-str
+                                                     :limit batch-size
+                                                     :offset offset})]
+              
+              (if (empty? item-stubs)
+                ;; Pagination complete: no more items returned
+                (do
+                  (log/info "Pseudovision media sync complete"
+                            {:library library 
+                             :total-synced total-synced 
+                             :total-skipped total-skipped 
+                             :total-errors-count (count total-errors)})
+                  (when (seq total-errors)
+                    (log/debug "Sample sync errors" {:first-errors (take 3 total-errors)}))
+                  {:synced total-synced :skipped total-skipped :errors total-errors})
+                
+                ;; Process this batch of items
+                (do
+                  (log/debug "Fetching page"
+                             {:page page :offset offset :batch-size (count item-stubs)})
+                  (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
+                  
+                  ;; Process each item in this batch (inner loop)
+                  (let [batch-result 
+                        (loop [remaining item-stubs
+                               idx    0
+                               synced 0
+                               skipped 0
+                               errors []]
+                          (if (empty? remaining)
+                            {:synced synced :skipped skipped :errors errors}
+                            
+                            (let [stub (first remaining)
+                                  item (pv/get-media-item pv-config (:id stub))
+                                  _ (when (< idx 5)
+                                      (log/debug "Fetched PV item"
+                                                 {:item-id (:id stub)
+                                                  :item-keys (keys item)
+                                                  :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
+                                  catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
+                                  item-kind (::media/item-kind catalog-item)
+                                  
+                                  should-skip? (and (= :episode item-kind)
+                                                   (or (nil? (::media/season-number catalog-item))
+                                                       (nil? (::media/episode-number catalog-item))))
+                                  
+                                  _ (when should-skip?
+                                      (log/warn "Skipping malformed episode missing season/episode numbers"
+                                                {:item-id (:id stub) 
+                                                 :name (:name item)
+                                                 :item-kind item-kind
+                                                 :season (::media/season-number catalog-item)
+                                                 :episode (::media/episode-number catalog-item)}))
+                                  
+                                  _ (when (and (= :filler item-kind) (< idx 3))
+                                      (log/info "Ingesting filler content"
+                                                {:item-id (:id stub)
+                                                 :name (:name item)
+                                                 :item-kind item-kind}))
+                                                 
+                                  err  (when-not should-skip?
+                                         (try
+                                           (catalog/add-media! catalog catalog-item)
+                                           (catch Exception e
+                                             (log/warn e "Failed to sync item"
+                                                       {:item-id (:id stub)
+                                                        :item-keys (keys item)})
+                                             {:item-id (:id stub) :error (.getMessage e)})))
+                                  ]
+                              (report-progress {:phase "syncing" :page page :item idx})
+                              (recur (rest remaining)
+                                     (inc idx)
+                                     (if (or err should-skip?) synced (inc synced))
+                                     (if should-skip? (inc skipped) skipped)
+                                     (if (and err (not should-skip?)) (conj errors err) errors))))))]
+                    
+                    ;; Accumulate results from this batch and fetch next page
+                    (recur (inc page)
+                           (+ total-synced (:synced batch-result))
+                           (+ total-skipped (:skipped batch-result))
+                           (concat total-errors (:errors batch-result)))))))))
       (catch Exception e
         (log/error e "Failed to sync from Pseudovision")
         {:synced 0 :skipped 0 :errors [{:error (.getMessage e)}]}))))
@@ -310,3 +336,11 @@
       (log/error e "Migration failed")
       {:migrated 0 :skipped 0 :errors [{:error (.getMessage e)}]})))
 
+(comment
+  ;; Usage example:
+
+  ;; One-time: Migrate existing catalog
+  (migrate-catalog-to-pseudovision! catalog pv-config :movies)
+
+  ;; Future: Sync from Pseudovision instead of Jellyfin
+  (sync-library-from-pseudovision! catalog pv-config :movies {}))

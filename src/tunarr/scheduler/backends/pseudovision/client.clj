@@ -42,60 +42,6 @@
       (throw (ex-info "HTTP request failed" {:url url} e)))))
 
 ;; ---------------------------------------------------------------------------
-;; Pagination Helpers
-;; ---------------------------------------------------------------------------
-
-(defn- fetch-all-pages-offset
-  "Fetch all pages of results from an offset-paginated endpoint.
-   
-   Args:
-     fetch-fn - Function that takes limit and offset, returns {:items [...] :pagination {...}}
-     page-size - Number of items per page (default 100)
-   
-   Returns:
-     Vector of all items across all pages."
-  ([fetch-fn] (fetch-all-pages-offset fetch-fn 100))
-  ([fetch-fn page-size]
-   (loop [offset 0
-          all-items []]
-     (let [response (fetch-fn page-size offset)
-           items (if (map? response)
-                   (:items response)
-                   response)  ; Fallback for non-paginated responses
-           has-more (if (map? response)
-                      (get-in response [:pagination :has_more])
-                      false)]
-       (let [updated-items (into all-items items)]
-         (if (and has-more (seq items))
-           (recur (+ offset page-size) updated-items)
-           updated-items))))))
-
-(defn- fetch-all-pages-cursor
-  "Fetch all pages of results from a cursor-paginated endpoint.
-   
-   Args:
-     fetch-fn - Function that takes limit and cursor, returns {:items [...] :pagination {...}}
-     page-size - Number of items per page (default 100)
-   
-   Returns:
-     Vector of all items across all pages."
-  ([fetch-fn] (fetch-all-pages-cursor fetch-fn 100))
-  ([fetch-fn page-size]
-   (loop [cursor nil
-          all-items []]
-     (let [response (fetch-fn page-size cursor)
-           items (if (map? response)
-                   (:items response)
-                   response)  ; Fallback for non-paginated responses
-           pagination (when (map? response) (:pagination response))
-           has-more (:has_more pagination)
-           next-cursor (:next_cursor pagination)]
-       (let [updated-items (into all-items items)]
-         (if (and has-more next-cursor (seq items))
-           (recur next-cursor updated-items)
-           updated-items))))))
-
-;; ---------------------------------------------------------------------------
 ;; Tag Management
 ;; ---------------------------------------------------------------------------
 
@@ -136,12 +82,9 @@
 
    Returns vector of maps: [{:name 'comedy' :count 42} ...]"
   [config]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/tags")
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config "/api/tags")
+            {}))
 
 ;; ---------------------------------------------------------------------------
 ;; Media Sources
@@ -150,12 +93,9 @@
 (defn list-media-sources
   "List all configured media sources (local, plex, jellyfin, emby)."
   [config]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/media/sources")
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config "/api/media/sources")
+            {}))
 
 (defn create-media-source!
   "Create a new media source.
@@ -185,12 +125,9 @@
 (defn list-all-libraries
   "List all media libraries across all sources."
   [config]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/media/libraries")
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config "/api/media/libraries")
+            {}))
 
 (defn list-source-libraries
   "List all libraries for a specific media source."
@@ -223,25 +160,29 @@
             {}))
 
 (defn list-library-items
-  "List media items in a library.
+  "List media items in a library with optional pagination.
 
    opts fields:
      :attrs - Comma-separated attribute names to include in response
      :type - Filter by media type string
      :parent-id - Filter by parent item ID
+     :limit - Max items to return in this batch (default: no limit, optional for pagination)
+     :offset - Starting item index for pagination (0-based, optional)
 
-   Returns vector of item maps (guaranteed to have :id)."
-  [config library-id & [{:keys [attrs type parent-id]}]]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config (str "/api/media/libraries/" library-id "/items"))
-               {:query-params (cond-> {"limit" (str limit)
-                                       "offset" (str offset)}
-                                attrs     (assoc "attrs" attrs)
-                                type      (assoc "type" type)
-                                parent-id (assoc "parent-id" (str parent-id)))}))
-   50))  ; Use 50 as page size since this is the most critical endpoint
+   Returns vector of item maps (guaranteed to have :id).
+   
+   Example paginated usage:
+     (list-library-items config lib-id {:limit 500 :offset 0})    ; Fetch first 500
+     (list-library-items config lib-id {:limit 500 :offset 500})  ; Fetch next 500"
+  [config library-id & [{:keys [attrs type parent-id limit offset]}]]
+  (request! :get
+            (api-url config (str "/api/media/libraries/" library-id "/items"))
+            {:query-params (cond-> {}
+                             attrs     (assoc "attrs" attrs)
+                             type      (assoc "type" type)
+                             parent-id (assoc "parent-id" (str parent-id))
+                             limit     (assoc "limit" limit)
+                             offset    (assoc "offset" offset))}))
 
 (defn scan-library!
   "Trigger an asynchronous library scan.
@@ -310,12 +251,9 @@
 (defn get-collections
   "List all collections (smart/manual/playlist/multi/trakt/rerun)."
   [config]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/media/collections")
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config "/api/media/collections")
+            {}))
 
 (defn create-collection!
   "Create a new collection.
@@ -360,12 +298,9 @@
 (defn list-schedules
   "List all schedules."
   [config]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/schedules")
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config "/api/schedules")
+            {}))
 
 (defn update-schedule!
   "Update an existing schedule.
@@ -422,12 +357,9 @@
 (defn list-slots
   "List all slots for a schedule."
   [config schedule-id]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config (str "/api/schedules/" schedule-id "/slots"))
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config (str "/api/schedules/" schedule-id "/slots"))
+            {}))
 
 (defn get-slot
   "Get a single slot by schedule ID and slot ID."
@@ -456,22 +388,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn list-channels
-  "List all channels. Pass {:uuid uuid-str} to filter by UUID.
-   
-   Note: When filtering by UUID, returns a single channel directly (not paginated)."
+  "List all channels. Pass {:uuid uuid-str} to filter by UUID."
   [config & [{:keys [uuid]}]]
-  (if uuid
-    ;; UUID filter returns single channel directly, not paginated
-    (request! :get
-              (api-url config "/api/channels")
-              {:query-params {"uuid" uuid}})
-    ;; List all channels with pagination
-    (fetch-all-pages-offset
-     (fn [limit offset]
-       (request! :get
-                 (api-url config "/api/channels")
-                 {:query-params {"limit" (str limit)
-                                 "offset" (str offset)}})))))
+  (request! :get
+            (api-url config "/api/channels")
+            (cond-> {} uuid (assoc :query-params {"uuid" uuid}))))
 
 (defn get-channel
   "Get channel by ID."
@@ -536,15 +457,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn list-playout-events
-  "List upcoming scheduled playout events for a channel.
-   Uses cursor-based pagination to fetch all future events."
+  "List upcoming scheduled playout events for a channel."
   [config channel-id]
-  (fetch-all-pages-cursor
-   (fn [limit cursor]
-     (request! :get
-               (api-url config (str "/api/channels/" channel-id "/playout/events"))
-               {:query-params (cond-> {"limit" (str limit)}
-                                cursor (assoc "cursor" cursor))}))))
+  (request! :get
+            (api-url config (str "/api/channels/" channel-id "/playout/events"))
+            {}))
 
 (defn inject-manual-event!
   "Inject a manual event into the playout timeline.
@@ -585,12 +502,9 @@
 (defn list-ffmpeg-profiles
   "List all FFmpeg encoder profiles."
   [config]
-  (fetch-all-pages-offset
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/ffmpeg/profiles")
-               {:query-params {"limit" (str limit)
-                               "offset" (str offset)}}))))
+  (request! :get
+            (api-url config "/api/ffmpeg/profiles")
+            {}))
 
 (defn get-ffmpeg-profile
   "Get an FFmpeg profile by ID."
