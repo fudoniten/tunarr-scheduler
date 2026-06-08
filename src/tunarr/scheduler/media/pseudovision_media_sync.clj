@@ -216,14 +216,30 @@
                   (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
                   
                   ;; Process each item in this batch (inner loop)
+                  ;; Collect items for batch insertion to respect FK constraints
                   (let [batch-result 
                         (loop [remaining item-stubs
                                idx    0
                                synced 0
                                skipped 0
-                               errors []]
-                          (if (empty? remaining)
-                            {:synced synced :skipped skipped :errors errors}
+                               errors []
+                               items-to-insert []]
+                          (if (or (empty? remaining) (>= (count items-to-insert) 50))
+                            ;; Flush batch when we hit 50 items or no more items
+                            (let [batch-err (when (seq items-to-insert)
+                                              (try
+                                                (catalog/add-media-batch! catalog items-to-insert)
+                                                nil
+                                                (catch Exception e
+                                                  (log/error e "Failed to sync batch"
+                                                             {:batch-size (count items-to-insert)})
+                                                  {:error (.getMessage e)})))
+                                  new-synced (+ synced (if batch-err 0 (count items-to-insert)))
+                                  new-errors (if batch-err (conj errors batch-err) errors)]
+                              
+                              (if (empty? remaining)
+                                {:synced new-synced :skipped skipped :errors new-errors}
+                                (recur remaining idx new-synced skipped new-errors [])))
                             
                             (let [stub (first remaining)
                                   item (pv/get-media-item pv-config (:id stub))
@@ -251,23 +267,15 @@
                                       (log/info "Ingesting filler content"
                                                 {:item-id (:id stub)
                                                  :name (:name item)
-                                                 :item-kind item-kind}))
-                                                 
-                                  err  (when-not should-skip?
-                                         (try
-                                           (catalog/add-media! catalog catalog-item)
-                                           (catch Exception e
-                                             (log/warn e "Failed to sync item"
-                                                       {:item-id (:id stub)
-                                                        :item-keys (keys item)})
-                                             {:item-id (:id stub) :error (.getMessage e)})))
-                                  ]
+                                                 :item-kind item-kind}))]
+                              
                               (report-progress {:phase "syncing" :page page :item idx})
                               (recur (rest remaining)
                                      (inc idx)
-                                     (if (or err should-skip?) synced (inc synced))
+                                     synced
                                      (if should-skip? (inc skipped) skipped)
-                                     (if (and err (not should-skip?)) (conj errors err) errors))))))]
+                                     (if should-skip? (conj errors {:item-id (:id stub) :reason :malformed-episode}) errors)
+                                     (if should-skip? items-to-insert (conj items-to-insert catalog-item)))))\)]
                     
                     ;; Accumulate results from this batch and fetch next page
                     (recur (inc page)
