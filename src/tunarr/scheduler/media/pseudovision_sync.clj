@@ -75,17 +75,34 @@
       (log/error e "Failed to sync tags" {:pv-item-id pv-item-id})
       {:synced false :error (.getMessage e)})))
 
+(defn- sync-library-item!
+  "Sync tags for one catalog item, resolving it through the Jellyfin ID map.
+
+   Returns {:synced? bool :error error-map-or-nil}."
+  [catalog pv-config id-map item]
+  (let [jf-id (get item :jellyfin-id)]
+    (if-let [pv-item (get id-map jf-id)]
+      (let [result (sync-item-tags! pv-config (:id pv-item) catalog (:id item))]
+        {:synced? (boolean (:synced result))
+         :error (when (:error result)
+                  {:jellyfin-id jf-id :error (:error result)})})
+      (do
+        (log/warn "No Pseudovision item found for Jellyfin ID"
+                  {:jellyfin-id jf-id :title (:title item)})
+        {:synced? false
+         :error {:jellyfin-id jf-id :error "No matching Pseudovision media item"}}))))
+
 (defn sync-library-tags!
   "Sync all tags from catalog to Pseudovision for a library.
-   
+
    This is the main entry point called by the API endpoint.
-   
+
    Args:
      catalog - Catalog instance with tagged media
-     pv-config - Pseudovision client config  
+     pv-config - Pseudovision client config
      library - Library name (keyword like :movies)
      opts - Options map with :report-progress function
-   
+
    Returns:
      Map with :synced, :failed, :errors counts"
   [catalog pv-config library opts]
@@ -93,53 +110,24 @@
         items (catalog/get-media-by-library catalog library)
         total (count items)
         id-map (build-jellyfin-id-map pv-config)]
-    
-    (log/info "Starting Pseudovision tag sync" 
+    (log/info "Starting Pseudovision tag sync"
               {:library library :items total})
-    
     (report-progress {:phase "mapping" :current 0 :total total})
-    
-    (loop [remaining items
-           idx 0
-           synced 0
-           failed 0
-           errors []]
-      (if (empty? remaining)
-        (do
-          (log/info "Pseudovision tag sync complete" 
-                    {:library library 
-                     :synced synced 
-                     :failed failed})
-          {:synced synced :failed failed :errors errors})
-        
-        (let [item (first remaining)
-              jf-id (get item :jellyfin-id)
-              pv-item (get id-map jf-id)]
-          
-          (if pv-item
-            ;; Found matching Pseudovision item - sync tags
-            (let [catalog-item-id (:id item)
-                  result (sync-item-tags! pv-config (:id pv-item) catalog catalog-item-id)]
-              (report-progress {:phase "syncing" :current (inc idx) :total total})
-              (recur (rest remaining)
-                     (inc idx)
-                     (if (:synced result) (inc synced) synced)
-                     (if (:error result) (inc failed) failed)
-                     (if (:error result) 
-                       (conj errors {:jellyfin-id jf-id :error (:error result)})
-                       errors)))
-            
-            ;; No Pseudovision item found - skip
-            (do
-              (log/warn "No Pseudovision item found for Jellyfin ID" 
-                       {:jellyfin-id jf-id :title (:title item)})
-              (report-progress {:phase "syncing" :current (inc idx) :total total})
-              (recur (rest remaining)
-                     (inc idx)
-                     synced
-                     (inc failed)
-                     (conj errors {:jellyfin-id jf-id 
-                                  :error "No matching Pseudovision media item"})))))))))
+    (let [totals (reduce
+                  (fn [totals [idx item]]
+                    (let [{:keys [synced? error]} (sync-library-item! catalog pv-config id-map item)]
+                      (report-progress {:phase "syncing" :current (inc idx) :total total})
+                      (cond-> totals
+                        synced? (update :synced inc)
+                        error   (-> (update :failed inc)
+                                    (update :errors conj error)))))
+                  {:synced 0 :failed 0 :errors []}
+                  (map-indexed vector items))]
+      (log/info "Pseudovision tag sync complete"
+                {:library library
+                 :synced (:synced totals)
+                 :failed (:failed totals)})
+      totals)))
 
 ;; ---------------------------------------------------------------------------
 ;; Convenience Wrappers

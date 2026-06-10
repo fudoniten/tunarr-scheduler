@@ -135,6 +135,105 @@
 ;; Sync FROM Pseudovision
 ;; ---------------------------------------------------------------------------
 
+(def ^:private fetch-batch-size
+  "Items requested per Pseudovision list call."
+  500)
+
+(def ^:private insert-batch-size
+  "Catalog items inserted per add-media-batch! call."
+  50)
+
+(def ^:private item-stub-attrs "id,remote-key,name,year,parent-id,position")
+
+(defn- normalize-library-name
+  "Convert hyphens to spaces so \"youtube-filler\" matches \"youtube filler\".
+   Non-string libraries (integer IDs) pass through unchanged."
+  [library]
+  (if (string? library)
+    (clojure.string/replace library #"-" " ")
+    library))
+
+(defn- resolve-catalog-library-id
+  "Look up the catalog library ID, trying the normalized name first and
+   falling back to the original. Throws if neither matches.
+
+   The returned ID doubles as the Pseudovision library ID - they're
+   synchronized during library sync from Pseudovision."
+  [catalog library normalized-lib]
+  (let [catalog-lib-id (or (catalog/get-library-id catalog normalized-lib)
+                           (catalog/get-library-id catalog library))]
+    (log/info "Retrieved catalog library ID"
+              {:library library :normalized normalized-lib :catalog-lib-id catalog-lib-id})
+    (or catalog-lib-id
+        (throw (ex-info "Library not found in catalog"
+                        {:library library :normalized normalized-lib})))))
+
+(defn- malformed-episode?
+  "Episodes must carry season and episode numbers to be schedulable."
+  [catalog-item]
+  (and (= :episode (::media/item-kind catalog-item))
+       (or (nil? (::media/season-number catalog-item))
+           (nil? (::media/episode-number catalog-item)))))
+
+(defn- fetch-catalog-item
+  "Fetch the full Pseudovision item for a stub and convert it to catalog
+   format. Returns {:stub stub :catalog-item item :skip? bool}, with :skip?
+   set for malformed episodes. Logs samples from the start of each page."
+  [pv-config catalog-lib-id stub idx]
+  (let [item (pv/get-media-item pv-config (:id stub))
+        catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
+        item-kind (::media/item-kind catalog-item)
+        skip? (malformed-episode? catalog-item)]
+    (when (< idx 5)
+      (log/debug "Fetched PV item"
+                 {:item-id (:id stub)
+                  :item-keys (keys item)
+                  :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
+    (when skip?
+      (log/warn "Skipping malformed episode missing season/episode numbers"
+                {:item-id (:id stub)
+                 :name (:name item)
+                 :item-kind item-kind
+                 :season (::media/season-number catalog-item)
+                 :episode (::media/episode-number catalog-item)}))
+    (when (and (= :filler item-kind) (< idx 3))
+      (log/info "Ingesting filler content"
+                {:item-id (:id stub)
+                 :name (:name item)
+                 :item-kind item-kind}))
+    {:stub stub :catalog-item catalog-item :skip? skip?}))
+
+(defn- insert-batch!
+  "Insert a batch of catalog items. Returns nil on success, an error map on
+   failure."
+  [catalog items]
+  (try
+    (catalog/add-media-batch! catalog items)
+    nil
+    (catch Exception e
+      (log/error e "Failed to sync batch" {:batch-size (count items)})
+      {:error (.getMessage e)})))
+
+(defn- sync-page!
+  "Sync one page of item stubs into the catalog, inserting in batches of
+   insert-batch-size. Returns {:synced n :skipped n :errors [...]}."
+  [catalog pv-config catalog-lib-id stubs report-progress page]
+  (let [results (map-indexed
+                 (fn [idx stub]
+                   (report-progress {:phase "syncing" :page page :item idx})
+                   (fetch-catalog-item pv-config catalog-lib-id stub idx))
+                 stubs)
+        {skipped true insertable false} (group-by (comp boolean :skip?) results)
+        skip-errors (mapv (fn [{:keys [stub]}]
+                            {:item-id (:id stub) :reason :malformed-episode})
+                          skipped)]
+    (reduce (fn [totals batch]
+              (if-let [err (insert-batch! catalog (vec batch))]
+                (update totals :errors conj err)
+                (update totals :synced + (count batch))))
+            {:synced 0 :skipped (count skipped) :errors skip-errors}
+            (partition-all insert-batch-size (map :catalog-item insertable)))))
+
 (defn sync-library-from-pseudovision!
   "Sync media items from Pseudovision into tunarr-scheduler catalog.
 
@@ -154,134 +253,41 @@
    metadata, not categorization data."
   [catalog pv-config library opts]
   (let [report-progress (get opts :report-progress (constantly nil))
-        ;; Normalize library name for lookup:
-        ;; - Convert hyphens to spaces: "youtube-filler" -> "youtube filler"
-        ;; - Then try both as-is and with proper casing
-        normalized-lib (if (string? library)
-                        (clojure.string/replace library #"-" " ")
-                        library)]
-
+        normalized-lib (normalize-library-name library)]
     (log/info "Syncing media FROM Pseudovision" {:library library :normalized normalized-lib})
-
     (try
-      ;; Get catalog library-id by querying the database
-      (let [catalog-lib-id (or (catalog/get-library-id catalog normalized-lib)
-                               (catalog/get-library-id catalog library))  ; Try original if normalized fails
-            _ (log/info "Retrieved catalog library ID"
-                        {:library library :normalized normalized-lib :catalog-lib-id catalog-lib-id})
-            _ (when-not catalog-lib-id
-                (throw (ex-info "Library not found in catalog "
-                                {:library library :normalized normalized-lib})))
-
-            ;; Use catalog-lib-id as Pseudovision library ID
-            ;; (they're synchronized during library sync from Pseudovision)
-            pv-library-id catalog-lib-id]
-
-        (log/info "Fetching items from Pseudovision library"
-                  {:pv-library-id pv-library-id :catalog-lib-id catalog-lib-id})
-
-        (let [batch-size 500  ; Process 500 items per Pseudovision request
-              attrs-str "id,remote-key,name,year,parent-id,position"]
-
-          (log/info "Starting PV→TS sync with pagination"
-                    {:library library
-                     :batch-size batch-size})
-
-          (loop [page 0
-                 total-synced 0
-                 total-skipped 0
-                 total-errors []]
-            (let [offset (* page batch-size)
-                  item-stubs (pv/list-library-items pv-config pv-library-id 
-                                                    {:attrs attrs-str
-                                                     :limit batch-size
-                                                     :offset offset})]
-              
-              (if (empty? item-stubs)
-                ;; Pagination complete: no more items returned
-                (do
-                  (log/info "Pseudovision media sync complete"
-                            {:library library 
-                             :total-synced total-synced 
-                             :total-skipped total-skipped 
-                             :total-errors-count (count total-errors)})
-                  (when (seq total-errors)
-                    (log/debug "Sample sync errors" {:first-errors (take 3 total-errors)}))
-                  {:synced total-synced :skipped total-skipped :errors total-errors})
-                
-                ;; Process this batch of items
-                (do
-                  (log/debug "Fetching page"
-                             {:page page :offset offset :batch-size (count item-stubs)})
-                  (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
-                  
-                  ;; Process each item in this batch (inner loop)
-                  ;; Collect items for batch insertion to respect FK constraints
-                  (let [batch-result 
-                        (loop [remaining item-stubs
-                               idx    0
-                               synced 0
-                               skipped 0
-                               errors []
-                               items-to-insert []]
-                          (if (or (empty? remaining) (>= (count items-to-insert) 50))
-                            ;; Flush batch when we hit 50 items or no more items
-                            (let [batch-err (when (seq items-to-insert)
-                                              (try
-                                                (catalog/add-media-batch! catalog items-to-insert)
-                                                nil
-                                                (catch Exception e
-                                                  (log/error e "Failed to sync batch"
-                                                             {:batch-size (count items-to-insert)})
-                                                  {:error (.getMessage e)})))
-                                  new-synced (+ synced (if batch-err 0 (count items-to-insert)))
-                                  new-errors (if batch-err (conj errors batch-err) errors)]
-                              
-                              (if (empty? remaining)
-                                {:synced new-synced :skipped skipped :errors new-errors}
-                                (recur remaining idx new-synced skipped new-errors [])))
-                            
-                            (let [stub (first remaining)
-                                  item (pv/get-media-item pv-config (:id stub))
-                                  _ (when (< idx 5)
-                                      (log/debug "Fetched PV item"
-                                                 {:item-id (:id stub)
-                                                  :item-keys (keys item)
-                                                  :sample-data (select-keys item [:id :name :year :remote-key :kind :parent-id :release-date])}))
-                                  catalog-item (pseudovision-item->catalog-item item catalog-lib-id)
-                                  item-kind (::media/item-kind catalog-item)
-                                  
-                                  should-skip? (and (= :episode item-kind)
-                                                   (or (nil? (::media/season-number catalog-item))
-                                                       (nil? (::media/episode-number catalog-item))))
-                                  
-                                  _ (when should-skip?
-                                      (log/warn "Skipping malformed episode missing season/episode numbers"
-                                                {:item-id (:id stub) 
-                                                 :name (:name item)
-                                                 :item-kind item-kind
-                                                 :season (::media/season-number catalog-item)
-                                                 :episode (::media/episode-number catalog-item)}))
-                                  
-                                  _ (when (and (= :filler item-kind) (< idx 3))
-                                      (log/info "Ingesting filler content"
-                                                {:item-id (:id stub)
-                                                 :name (:name item)
-                                                 :item-kind item-kind}))]
-                              
-                              (report-progress {:phase "syncing" :page page :item idx})
-                              (recur (rest remaining)
-                                     (inc idx)
-                                     synced
-                                     (if should-skip? (inc skipped) skipped)
-                                     (if should-skip? (conj errors {:item-id (:id stub) :reason :malformed-episode}) errors)
-                                     (if should-skip? items-to-insert (conj items-to-insert catalog-item))))))]
-                    
-                    ;; Accumulate results from this batch and fetch next page
-                    (recur (inc page)
-                           (+ total-synced (:synced batch-result))
-                           (+ total-skipped (:skipped batch-result))
-                           (concat total-errors (:errors batch-result)))))))))
+      (let [catalog-lib-id (resolve-catalog-library-id catalog library normalized-lib)]
+        (log/info "Starting PV→TS sync with pagination"
+                  {:library library :catalog-lib-id catalog-lib-id :batch-size fetch-batch-size})
+        (loop [page 0
+               totals {:synced 0 :skipped 0 :errors []}]
+          (let [offset (* page fetch-batch-size)
+                item-stubs (pv/list-library-items pv-config catalog-lib-id
+                                                  {:attrs item-stub-attrs
+                                                   :limit fetch-batch-size
+                                                   :offset offset})]
+            (if (empty? item-stubs)
+              ;; Pagination complete: no more items returned
+              (do
+                (log/info "Pseudovision media sync complete"
+                          {:library library
+                           :total-synced (:synced totals)
+                           :total-skipped (:skipped totals)
+                           :total-errors-count (count (:errors totals))})
+                (when (seq (:errors totals))
+                  (log/debug "Sample sync errors" {:first-errors (take 3 (:errors totals))}))
+                totals)
+              (do
+                (log/debug "Fetching page"
+                           {:page page :offset offset :batch-size (count item-stubs)})
+                (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
+                (let [page-totals (sync-page! catalog pv-config catalog-lib-id
+                                              item-stubs report-progress page)]
+                  (recur (inc page)
+                         (-> totals
+                             (update :synced + (:synced page-totals))
+                             (update :skipped + (:skipped page-totals))
+                             (update :errors into (:errors page-totals))))))))))
       (catch Exception e
         (log/error e "Failed to sync from Pseudovision")
         {:synced 0 :skipped 0 :errors [{:error (.getMessage e)}]}))))
