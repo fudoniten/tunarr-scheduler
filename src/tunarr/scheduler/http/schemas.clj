@@ -71,7 +71,9 @@
    [:status   JobStatus]
    [:metadata {:optional true} [:maybe :map]]
    [:progress {:optional true} [:maybe :int]]
-   [:error    {:optional true} [:maybe :string]]
+   [:error    {:optional true} [:maybe [:map {:closed false}
+                                         [:message :string]
+                                         [:type :string]]]]
    [:created-at {:optional true} [:maybe :string]]
    [:started-at {:optional true} [:maybe :string]]
    [:finished-at {:optional true} [:maybe :string]]])
