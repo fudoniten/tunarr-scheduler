@@ -60,9 +60,25 @@
    :media/retag-episodes
    :media/pseudovision-sync])
 
+;; NOTE: keep JobType in sync with the job types submitted in
+;; tunarr.scheduler.http.api.media.
+
 (def JobStatus
   [:enum {:description "Current job status"}
    :queued :running :succeeded :failed])
+
+(def JobProgress
+  "Standard progress shape for item-based jobs. Open map: individual jobs may
+   report extra keys (e.g. :page, :library)."
+  [:map {:closed false}
+   [:phase        {:optional true} [:maybe :string]]
+   [:total        {:optional true} [:maybe :int]]
+   [:completed    {:optional true} [:maybe :int]]
+   [:failed       {:optional true} [:maybe :int]]
+   [:skipped      {:optional true} [:maybe :int]]
+   [:current-item {:optional true} [:maybe [:map {:closed false}
+                                            [:id   {:optional true} [:maybe :string]]
+                                            [:name {:optional true} [:maybe :string]]]]]])
 
 (def Job
   [:map
@@ -70,13 +86,14 @@
    [:type     JobType]
    [:status   JobStatus]
    [:metadata {:optional true} [:maybe :map]]
-   [:progress {:optional true} [:maybe :int]]
+   [:progress {:optional true} [:maybe [:or JobProgress number?]]]
+   [:duration-ms {:optional true} [:maybe :int]]
    [:error    {:optional true} [:maybe [:map {:closed false}
                                          [:message :string]
                                          [:type :string]]]]
    [:created-at {:optional true} [:maybe :string]]
    [:started-at {:optional true} [:maybe :string]]
-   [:finished-at {:optional true} [:maybe :string]]])
+   [:completed-at {:optional true} [:maybe :string]]])
 
 (def JobSubmitResponse
   [:map

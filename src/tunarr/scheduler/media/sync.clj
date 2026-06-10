@@ -19,12 +19,16 @@
   Returns a map detailing how many items were imported per library."
   [collection catalog {:keys [library report-progress batch-size]
                        :or {batch-size 250}}]
-  (let [library (normalize-library library)]
+  (let [library (normalize-library library)
+        report-progress (or report-progress (constantly nil))]
     (log/info "Starting media rescan" {:library library :batch-size batch-size})
     (let [items (collection/get-library-items collection library)
+          total (count items)
           processed-count (volatile! 0)
           result
           (do
+            (report-progress {:phase "scanning" :library library
+                              :total total :completed 0})
             ;; Process items in batches to reduce database transactions
             (doseq [batch (partition-all batch-size items)]
               (log/info (format "Processing batch of %d items (total processed: %d)"
@@ -32,8 +36,8 @@
                                 @processed-count))
               (catalog/add-media-batch! catalog batch)
               (vswap! processed-count + (count batch))
-              (report-progress {:library        library
-                                :complete-items @processed-count}))
+              (report-progress {:phase "scanning" :library library
+                                :total total :completed @processed-count}))
             {:library library
              :count   @processed-count})]
       (log/info "Completed media rescan" {:library library

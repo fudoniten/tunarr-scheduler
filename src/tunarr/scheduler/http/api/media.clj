@@ -108,11 +108,14 @@
                      :media/retag
                      library
                      "library not specified for retag"
-                     (fn [opts] (curate/retag-library!
-                                 (curate/->TunabrainCuratorBackend
-                                  tunabrain catalog throttler curation-config)
-                                 library
-                                 {:force force :kind (when kind (keyword kind))}))))
+                     (fn [{:keys [report-progress]}]
+                       (curate/retag-library!
+                        (curate/->TunabrainCuratorBackend
+                         tunabrain catalog throttler curation-config)
+                        library
+                        {:force force
+                         :kind (when kind (keyword kind))
+                         :report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting retag job")
         {:status 500 :body {:error (.getMessage e)}}))))
@@ -127,7 +130,7 @@
                      :media/taglines
                      library
                      "library not specified for taglines"
-                     (fn [opts] (curate/generate-library-taglines!
+                     (fn [_opts] (curate/generate-library-taglines!
                                  (curate/->TunabrainCuratorBackend
                                   tunabrain catalog throttler curation-config)
                                  library))))
@@ -146,11 +149,12 @@
                      :media/recategorize
                      library
                      "library not specified for recategorize"
-                     (fn [opts] (curate/recategorize-library!
-                                 (curate/->TunabrainCuratorBackend
-                                  tunabrain catalog throttler curation-config)
-                                 library
-                                 {:force force}))))
+                     (fn [{:keys [report-progress]}]
+                       (curate/recategorize-library!
+                        (curate/->TunabrainCuratorBackend
+                         tunabrain catalog throttler curation-config)
+                        library
+                        {:force force :report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting recategorize job")
         {:status 500 :body {:error (.getMessage e)}}))))
@@ -166,11 +170,12 @@
                      :media/retag-episodes
                      library
                      "library not specified for episode retagging"
-                     (fn [_opts] (curate/retag-library-episodes!
-                                  (curate/->TunabrainCuratorBackend
-                                   tunabrain catalog throttler curation-config)
-                                  library
-                                  {:force force}))))
+                     (fn [{:keys [report-progress]}]
+                       (curate/retag-library-episodes!
+                        (curate/->TunabrainCuratorBackend
+                         tunabrain catalog throttler curation-config)
+                        library
+                        {:force force :report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting episode retag job")
         {:status 500 :body {:error (.getMessage e)}}))))
@@ -185,9 +190,11 @@
                      :media/pseudovision-sync
                      library
                      "library not specified for pseudovision sync"
-                     (fn [opts] (pv-sync/sync-library-tags! catalog
-                                                            pseudovision
-                                                            library))))
+                     (fn [{:keys [report-progress]}]
+                       (pv-sync/sync-library-tags! catalog
+                                                   (pv-client/get-config pseudovision)
+                                                   library
+                                                   {:report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting Pseudovision sync job")
         {:status 500 :body {:error (.getMessage e)}}))))

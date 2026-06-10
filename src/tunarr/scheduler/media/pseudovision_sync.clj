@@ -4,6 +4,7 @@
    Replaces the Jellyfin tag sync - instead of pushing tags to Jellyfin
    (for ErsatzTV to read), we now push directly to Pseudovision's tag API."
   (:require [tunarr.scheduler.backends.pseudovision.client :as pv]
+            [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
             [taoensso.timbre :as log]))
 
@@ -112,17 +113,22 @@
         id-map (build-jellyfin-id-map pv-config)]
     (log/info "Starting Pseudovision tag sync"
               {:library library :items total})
-    (report-progress {:phase "mapping" :current 0 :total total})
+    (report-progress {:phase "mapping" :completed 0 :total total})
     (let [totals (reduce
                   (fn [totals [idx item]]
+                    (report-progress {:phase "syncing" :completed idx :total total
+                                      :failed (:failed totals)
+                                      :current-item {:id   (::media/id item)
+                                                     :name (::media/name item)}})
                     (let [{:keys [synced? error]} (sync-library-item! catalog pv-config id-map item)]
-                      (report-progress {:phase "syncing" :current (inc idx) :total total})
                       (cond-> totals
                         synced? (update :synced inc)
                         error   (-> (update :failed inc)
                                     (update :errors conj error)))))
                   {:synced 0 :failed 0 :errors []}
                   (map-indexed vector items))]
+      (report-progress {:phase "syncing" :completed total :total total
+                        :failed (:failed totals)})
       (log/info "Pseudovision tag sync complete"
                 {:library library
                  :synced (:synced totals)

@@ -3,7 +3,7 @@
   (:require [taoensso.timbre :as log]
             [clojure.spec.alpha :as s]
             [clojure.stacktrace :refer [print-stack-trace]])
-  (:import (java.time Instant)
+  (:import (java.time Duration Instant)
            (java.util UUID)))
 
 (defprotocol IJobRunner
@@ -22,6 +22,14 @@
   (when inst
     (.toString inst)))
 
+(defn- duration-ms
+  "Elapsed runtime: started-at to completed-at for finished jobs, started-at
+   to now for jobs still running."
+  [{:keys [started-at completed-at]}]
+  (when started-at
+    (.toMillis (Duration/between ^Instant started-at
+                                 ^Instant (or completed-at (now))))))
+
 (defn- ->public-job
   [job]
   (when job
@@ -33,7 +41,8 @@
                :created-at (format-ts created-at)}
         metadata (assoc :metadata metadata)
         (some? progress) (assoc :progress progress)
-        started-at (assoc :started-at (format-ts started-at))
+        started-at (assoc :started-at (format-ts started-at)
+                          :duration-ms (duration-ms job))
         completed-at (assoc :completed-at (format-ts completed-at))
         (contains? #{:succeeded :failed} status) (assoc :result result)
         (= :failed status) (assoc :error error)))))
@@ -42,11 +51,7 @@
 
 (def job-runner? (partial satisfies? IJobRunner))
 
-(s/def ::type #{:media/rescan 
-                :media/retag 
-                :media/taglines 
-                :media/recategorize
-                :media/pseudovision-sync})
+(s/def ::type keyword?)
 
 (s/def ::config
   (s/keys :req-un [::type]))
@@ -54,22 +59,73 @@
 (s/def ::task-fn
   (s/fspec :args (s/cat :report-progress (s/fspec :args (s/cat :progress any?)))))
 
+(defn- normalize-config
+  "Accept either a bare keyword job type or a map with a :type keyword."
+  [config]
+  (let [config (if (keyword? config) {:type config} config)]
+    (when-not (and (map? config) (keyword? (:type config)))
+      (throw (ex-info "Job config must be a map or keyword with a keyword :type"
+                      {:config config})))
+    config))
+
+;; ---------------------------------------------------------------------------
+;; Standard progress shape
+;;
+;; Jobs that process a known set of items report :progress as a map:
+;;
+;;   {:phase "tagging" :total 340 :skipped 88 :completed 12 :failed 1
+;;    :current-item {:id "..." :name "..."}}
+;;
+;; The report-progress callback handed to each task accepts either a map
+;; (which replaces the job's :progress wholesale) or a function of the
+;; current progress map (applied atomically, for concurrent counter
+;; updates). The helpers below produce atomic updates against the standard
+;; shape.
+;; ---------------------------------------------------------------------------
+
+(defn start-items!
+  "Initialize item-based progress tracking for a job phase."
+  [report-progress phase total skipped]
+  (report-progress {:phase phase :total total :skipped skipped :completed 0 :failed 0}))
+
+(defn item-started!
+  "Record the item that is currently being processed."
+  [report-progress {:keys [id name]}]
+  (report-progress #(assoc % :current-item {:id id :name name})))
+
+(defn item-completed!
+  "Atomically count one item as completed."
+  [report-progress]
+  (report-progress #(-> % (update :completed (fnil inc 0)) (dissoc :current-item))))
+
+(defn item-failed!
+  "Atomically count one item as failed."
+  [report-progress]
+  (report-progress #(-> % (update :failed (fnil inc 0)) (dissoc :current-item))))
+
 (defn submit-job!
   "Submit an asynchronous job. Returns the initial job information.
 
-  The job-config map must include a :type keyword describing the job. Optional
-  :metadata will be stored alongside the job record."
-  [runner {:keys [type metadata] :as config} task-fn]
-  (when-not (s/valid? ::config config)
-    (throw (ex-info "invalid task config" {:error (s/explain-data ::config config)})))
-  (let [job-id (str (UUID/randomUUID))
+  The job config may be a bare keyword job type or a map with a :type
+  keyword. Optional :metadata will be stored alongside the job record.
+
+  task-fn is called with a report-progress function; see the progress shape
+  notes above for its semantics."
+  [runner config task-fn]
+  (let [{:keys [type metadata]} (normalize-config config)
+        job-id (str (UUID/randomUUID))
         new-job {:id job-id
                  :type type
                  :status :queued
                  :metadata metadata
                  :created-at (now)}
         update-progress (fn [progress]
-                          (update-job! runner job-id merge {:progress progress}))]
+                          (update-job! runner job-id
+                                       (fn [job]
+                                         (assoc job :progress
+                                                (if (fn? progress)
+                                                  (progress (or (:progress job) {}))
+                                                  progress)))))]
     (log/info (format "creating job: %s" job-id))
     (add-job! runner job-id new-job)
     (future
@@ -125,8 +181,6 @@
          (vec)))
   (submit! [self config task-fn]
     (submit-job! self config task-fn))
-    
-  java.io.Closeable
   (close [_] (reset! jobs {})))
 
 (defn create
