@@ -26,10 +26,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- classify-item-kind
-  \"Determine item_kind based on Pseudovision metadata structure.
+  "Determine item_kind based on Pseudovision metadata structure.
   
    This replaces the strict episode number requirement with intelligent
-   classification that allows YouTube/orphaned content to be treated as filler.\"
+   classification that allows YouTube/orphaned content to be treated as filler."
   [pv-item]
   (let [parent-id (:parent-id pv-item)
         season-number (:season-number pv-item)
@@ -60,11 +60,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- pseudovision-item->catalog-item
-  \"Convert a Pseudovision media_item to tunarr-scheduler catalog format.
+  "Convert a Pseudovision media_item to tunarr-scheduler catalog format.
 
    Uses intelligent classification to determine item_kind, allowing filler
    content to bypass episode structure requirements. Preserves Jellyfin ID 
-   mapping for tag sync.\"
+   mapping for tag sync."
   [pv-item catalog-library-id]
   (let [item-kind (classify-item-kind pv-item)
         item-type (case (:kind pv-item)
@@ -91,7 +91,7 @@
                          (or (:position pv-item)
                              (:episode-number pv-item)
                              (:index-number pv-item)))]
-    (log/debug \"Mapping PV item to catalog\"
+    (log/debug "Mapping PV item to catalog"
                {:pv-id (:id pv-item)
                 :name (:name pv-item)
                 :item-kind item-kind
@@ -275,7 +275,7 @@
                                      synced
                                      (if should-skip? (inc skipped) skipped)
                                      (if should-skip? (conj errors {:item-id (:id stub) :reason :malformed-episode}) errors)
-                                     (if should-skip? items-to-insert (conj items-to-insert catalog-item)))))\)]
+                                     (if should-skip? items-to-insert (conj items-to-insert catalog-item))))))]
                     
                     ;; Accumulate results from this batch and fetch next page
                     (recur (inc page)
