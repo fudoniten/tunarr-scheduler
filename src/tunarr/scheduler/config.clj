@@ -31,62 +31,84 @@
 (defn update-key [m k new-k f]
   (assoc m new-k (f (get m k))))
 
-(defn config->system
-  "Produce the Integrant system configuration map from the raw config map."
+(defn- replace-envvar
+  "Override key `k` in `cfg` with the value of `envvar` when it is set."
+  [cfg k envvar]
+  (if-let [val (System/getenv envvar)]
+    (assoc cfg k val)
+    cfg))
+
+(defn- add-default [cfg k default]
+  (if (contains? cfg k) cfg (assoc cfg k default)))
+
+(defn- resolve-collection-config
+  "Resolve the :collection config, applying env-var overrides per backend
+  type. Pseudovision collections fall back to [:pseudovision :base-url]
+  and must end up with a :base-url."
   [config]
-  (log/info (format "full configuration: %s" config))
+  (let [collection-config (get config :collection {})]
+    (case (:type collection-config)
+      :jellyfin (-> collection-config
+                    (replace-envvar :api-key  "COLLECTION_API_KEY")
+                    (replace-envvar :base-url "COLLECTION_BASE_URL"))
+      :pseudovision (let [resolved (-> collection-config
+                                       (update :base-url #(or % (get-in config [:pseudovision :base-url])))
+                                       (replace-envvar :base-url "PSEUDOVISION_URL")
+                                       (replace-envvar :base-url "COLLECTION_BASE_URL"))]
+                      (when (nil? (:base-url resolved))
+                        (throw (ex-info (str "Pseudovision collection requires :base-url. "
+                                             "Set :base-url under :collection or :pseudovision in your config, "
+                                             "or set the PSEUDOVISION_URL / COLLECTION_BASE_URL environment variable.")
+                                        {:collection-config resolved})))
+                      resolved)
+      collection-config)))
+
+(defn- resolve-catalog-config
+  "Resolve the :catalog config: normalize :type (accepting the legacy
+  :catalog-type / :dbtype spellings) and, for Postgres, apply env-var
+  overrides and connection defaults."
+  [config]
   (let [catalog-config (get config :catalog {})
         catalog-type (parse-catalog-type (or (:type catalog-config)
                                              (:catalog-type config)
                                              (:dbtype catalog-config)
                                              (:dbtype config)))
-        ;; Remove the string :type from catalog-config before merging
-        catalog-config (-> {:type catalog-type}
-                           (merge (dissoc catalog-config :type)))
-        replace-envvar (fn [cfg k envvar]
-                         (if-let [val (System/getenv envvar)]
-                           (assoc cfg k val)
-                           cfg))
-        collection-config (get config :collection {})
-        add-default (fn [cfg k default]
-                      (if (contains? cfg k) cfg (assoc cfg k default)))
-        collection-config (case (-> collection-config :type)
-                            :jellyfin (-> collection-config
-                                          (replace-envvar :api-key  "COLLECTION_API_KEY")
-                                          (replace-envvar :base-url "COLLECTION_BASE_URL"))
-                            :pseudovision (let [resolved (-> collection-config
-                                                              (update :base-url #(or % (get-in config [:pseudovision :base-url])))
-                                                              (replace-envvar :base-url "PSEUDOVISION_URL")
-                                                              (replace-envvar :base-url "COLLECTION_BASE_URL"))]
-                                            (when (nil? (:base-url resolved))
-                                              (throw (ex-info (str "Pseudovision collection requires :base-url. "
-                                                                   "Set :base-url under :collection or :pseudovision in your config, "
-                                                                   "or set the PSEUDOVISION_URL / COLLECTION_BASE_URL environment variable.")
-                                                             {:collection-config resolved})))
-                                            resolved)
-                            collection-config)
-        catalog-config (if (= :postgresql catalog-type)
-                         (-> catalog-config
-                             (replace-envvar :dbname   "CATALOG_DATABASE")
-                             (replace-envvar :user     "CATALOG_USER")
-                             (replace-envvar :password "CATALOG_PASSWORD")
-                             (replace-envvar :host     "CATALOG_HOST")
-                             (replace-envvar :port     "CATALOG_PORT")
-                             (add-default :dbname "tunarr-scheduler")
-                             (add-default :user   "tunarr-scheduler")
-                             (add-default :host   "postgres")
-                             (add-default :port   5432))
-                         catalog-config)
+        catalog-config (merge {:type catalog-type}
+                              (dissoc catalog-config :type))]
+    (if (= :postgresql catalog-type)
+      (-> catalog-config
+          (replace-envvar :dbname   "CATALOG_DATABASE")
+          (replace-envvar :user     "CATALOG_USER")
+          (replace-envvar :password "CATALOG_PASSWORD")
+          (replace-envvar :host     "CATALOG_HOST")
+          (replace-envvar :port     "CATALOG_PORT")
+          (add-default :dbname "tunarr-scheduler")
+          (add-default :user   "tunarr-scheduler")
+          (add-default :host   "postgres")
+          (add-default :port   5432))
+      catalog-config)))
+
+(defn- resolve-channel-config
+  "Rename per-channel config keys to their namespaced media equivalents."
+  [config]
+  (into {}
+        (map (fn [[ch cfg]]
+               [ch (-> cfg
+                       (update-key :id ::media/channel-id identity)
+                       (update-key :description ::media/channel-description identity)
+                       (update-key :name ::media/channel-fullname identity))]))
+        (get config :channels {})))
+
+(defn config->system
+  "Produce the Integrant system configuration map from the raw config map."
+  [config]
+  (log/info (format "full configuration: %s" config))
+  (let [collection-config (resolve-collection-config config)
+        catalog-config (resolve-catalog-config config)
         curation-config (get config :curation)
         tag-config (get config :tag-config {})
         categories-config (get config :categories {})
-        channel-config (into {}
-                             (map (fn [[ch cfg]]
-                                    [ch (-> cfg
-                                            (update-key :id ::media/channel-id identity)
-                                            (update-key :description ::media/channel-description identity)
-                                            (update-key :name ::media/channel-fullname identity))]))
-                             (get config :channels {}))
+        channel-config (resolve-channel-config config)
         backends-config (get config :backends {})
         pseudovision-config (get config :pseudovision {})]
     {:tunarr/logger {:level (get config :log-level :info)}

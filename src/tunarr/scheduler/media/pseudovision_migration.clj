@@ -89,67 +89,68 @@
 ;; Migration
 ;; ---------------------------------------------------------------------------
 
+(defn- item-migration-tags
+  "Build the list of tag strings to push for a catalog item: its tags
+   (keywords) plus, when requested, its categories flattened to
+   category:value strings. Drops nil/blank entries."
+  [{:keys [tags categories]} include-categories?]
+  (->> (concat (map clojure.core/name tags)
+               (when include-categories?
+                 (flatten-categories-to-tags categories)))
+       (remove #(or (nil? %) (empty? (str %))))
+       vec))
+
+(defn- push-item-tags!
+  "Push tags to Pseudovision for one item. Returns a migration status map."
+  [pv-config pv-id {:keys [jellyfin-id name]} all-tags]
+  (try
+    (pv/add-tags! pv-config pv-id all-tags)
+    (log/info "Migrated tags"
+              {:jellyfin-id jellyfin-id
+               :pv-id pv-id
+               :name name
+               :tags-added (count all-tags)})
+    {:status :success :tags-added (count all-tags) :pv-id pv-id}
+    (catch Exception e
+      (log/error e "Failed to migrate tags"
+                 {:jellyfin-id jellyfin-id :pv-id pv-id})
+      {:status :error :error (ex-message e)})))
+
 (defn migrate-item!
   "Migrate a single media item's metadata to Pseudovision.
-   
+
    Returns:
    - {:status :success :tags-added N} - if successful
    - {:status :not-found} - if item not in Pseudovision
    - {:status :skipped :reason X} - if skipped
    - {:status :error :error X} - if failed"
   [pv-config catalog-item opts]
-  (let [{:keys [jellyfin-id name tags categories]} catalog-item
+  (let [{:keys [jellyfin-id name]} catalog-item
         dry-run? (:dry-run opts false)
-        include-categories? (:include-categories opts true)]
-    
-    (log/debug "Migrating item" {:jellyfin-id jellyfin-id :name name})
-    
-    ;; Find matching Pseudovision item
-    (if-let [pv-item (find-pseudovision-item pv-config jellyfin-id)]
-      (let [pv-id (:id pv-item)
-            
-            ;; Build tag list
-            ;; Note: tags are keywords, category tags are strings from flatten-categories-to-tags
-            all-tags (vec (concat 
-                           (map clojure.core/name tags)  ;; Convert tag keywords to strings (use fully qualified name to avoid shadowing)
-                           (when include-categories?
-                             (flatten-categories-to-tags categories))))  ;; Already strings
-            
-            ;; Filter out empty tags
-            all-tags (filter #(and % (not (empty? (str %)))) all-tags)]
-        
-        (if (empty? all-tags)
-          (do
-            (log/debug "No tags to migrate" {:jellyfin-id jellyfin-id})
-            {:status :skipped :reason :no-tags})
-          
-          (if dry-run?
-            (do
-              (log/info "DRY RUN: Would add tags" 
-                        {:jellyfin-id jellyfin-id
-                         :pv-id pv-id
-                         :name name
-                         :tags all-tags})
-              {:status :dry-run :tags all-tags :pv-id pv-id})
-            
-            (try
-              (pv/add-tags! pv-config pv-id all-tags)
-              (log/info "Migrated tags" 
-                        {:jellyfin-id jellyfin-id
-                         :pv-id pv-id
-                         :name name
-                         :tags-added (count all-tags)})
-              {:status :success :tags-added (count all-tags) :pv-id pv-id}
-              
-              (catch Exception e
-                (log/error e "Failed to migrate tags" 
-                          {:jellyfin-id jellyfin-id :pv-id pv-id})
-                {:status :error :error (ex-message e)})))))
-      
-      (do
-        (log/warn "Item not found in Pseudovision" 
-                  {:jellyfin-id jellyfin-id :name name})
-        {:status :not-found}))))
+        include-categories? (:include-categories opts true)
+        _ (log/debug "Migrating item" {:jellyfin-id jellyfin-id :name name})
+        pv-item (find-pseudovision-item pv-config jellyfin-id)
+        all-tags (when pv-item (item-migration-tags catalog-item include-categories?))]
+    (cond
+      (nil? pv-item)
+      (do (log/warn "Item not found in Pseudovision"
+                    {:jellyfin-id jellyfin-id :name name})
+          {:status :not-found})
+
+      (empty? all-tags)
+      (do (log/debug "No tags to migrate" {:jellyfin-id jellyfin-id})
+          {:status :skipped :reason :no-tags})
+
+      dry-run?
+      (do (log/info "DRY RUN: Would add tags"
+                    {:jellyfin-id jellyfin-id
+                     :pv-id (:id pv-item)
+                     :name name
+                     :tags all-tags})
+          {:status :dry-run :tags all-tags :pv-id (:id pv-item)})
+
+      :else
+      (push-item-tags! pv-config (:id pv-item) catalog-item all-tags))))
 
 (defn migrate-all!
   "Migrate all metadata from tunarr-scheduler catalog to Pseudovision.
