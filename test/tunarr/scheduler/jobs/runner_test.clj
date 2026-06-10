@@ -16,7 +16,7 @@
   (let [job-runner (runner/create {})]
     (try
       (testing "job completes successfully"
-        (let [job (runner/submit! job-runner {:type :test/success} (fn [] :done))
+        (let [job (runner/submit! job-runner {:type :test/success} (fn [_] :done))
               final (await-final-status job-runner (:id job))]
           (is final)
           (is (= :succeeded (:status final)))
@@ -29,7 +29,7 @@
     (try
       (testing "job failure captures error information"
         (let [job (runner/submit! job-runner {:type :test/failure}
-                                  (fn [] (throw (RuntimeException. "boom"))))
+                                  (fn [_] (throw (RuntimeException. "boom"))))
               final (await-final-status job-runner (:id job))]
           (is final)
           (is (= :failed (:status final)))
@@ -43,8 +43,8 @@
   (let [job-runner (runner/create {})]
     (try
       (testing "jobs are returned with newest first"
-        (let [first-job (runner/submit! job-runner {:type :test/one} (fn [] (Thread/sleep 5) :one))
-              second-job (runner/submit! job-runner {:type :test/two} (fn [] :two))]
+        (let [first-job (runner/submit! job-runner {:type :test/one} (fn [_] (Thread/sleep 5) :one))
+              second-job (runner/submit! job-runner {:type :test/two} (fn [_] :two))]
           (await-final-status job-runner (:id first-job))
           (await-final-status job-runner (:id second-job))
           (let [jobs (runner/list-jobs job-runner)]
@@ -56,7 +56,7 @@
 (deftest submit-job-normalizes-keyword-config
   (let [job-runner (runner/create {})]
     (try
-      (let [job (runner/submit! job-runner :test/keyword (fn [] :ok))
+      (let [job (runner/submit! job-runner :test/keyword (fn [_] :ok))
             final (await-final-status job-runner (:id job))]
         (is (= :succeeded (:status final)))
         (is (= :test/keyword (:type final))))
@@ -94,6 +94,63 @@
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"Job config must be a map or keyword"
-           (runner/submit! job-runner 123 (fn [] :nope))))
+           (runner/submit! job-runner 123 (fn [_] :nope))))
+      (finally
+        (runner/shutdown! job-runner)))))
+
+(deftest submit-job-fn-progress-applies-atomically
+  (let [job-runner (runner/create {})]
+    (try
+      (testing "functional progress updates transform the current progress map"
+        (let [job (runner/submit! job-runner
+                                  {:type :test/fn-progress}
+                                  (fn [report-progress]
+                                    (runner/start-items! report-progress "tagging" 3 1)
+                                    (runner/item-started! report-progress {:id "m1" :name "Cowboy Bebop"})
+                                    (runner/item-completed! report-progress)
+                                    (runner/item-started! report-progress {:id "m2" :name "Trigun"})
+                                    (runner/item-failed! report-progress)
+                                    (runner/item-started! report-progress {:id "m3" :name "Akira"})
+                                    (runner/item-completed! report-progress)
+                                    :done))
+              final (await-final-status job-runner (:id job))]
+          (is (= :succeeded (:status final)))
+          (is (= {:phase "tagging" :total 3 :skipped 1 :completed 2 :failed 1}
+                 (:progress final)))))
+      (finally
+        (runner/shutdown! job-runner)))))
+
+(deftest job-reports-current-item-and-duration
+  (let [job-runner (runner/create {})
+        started (promise)
+        release (promise)]
+    (try
+      (let [job (runner/submit! job-runner
+                                {:type :test/current-item}
+                                (fn [report-progress]
+                                  (runner/start-items! report-progress "tagging" 1 0)
+                                  (runner/item-started! report-progress {:id "m1" :name "Cowboy Bebop"})
+                                  (deliver started true)
+                                  @release
+                                  (runner/item-completed! report-progress)
+                                  :done))
+            job-id (:id job)]
+        @started
+        (loop [remaining 200]
+          (let [info (runner/job-info job-runner job-id)]
+            (when (and (pos? remaining)
+                       (not= "Cowboy Bebop" (get-in info [:progress :current-item :name])))
+              (Thread/sleep 10)
+              (recur (dec remaining)))))
+        (let [info (runner/job-info job-runner job-id)]
+          (is (= {:id "m1" :name "Cowboy Bebop"}
+                 (get-in info [:progress :current-item])))
+          (is (int? (:duration-ms info)))
+          (is (>= (:duration-ms info) 0)))
+        (deliver release true)
+        (let [final (await-final-status job-runner job-id)]
+          (is (= :succeeded (:status final)))
+          (is (nil? (get-in final [:progress :current-item])))
+          (is (int? (:duration-ms final)))))
       (finally
         (runner/shutdown! job-runner)))))

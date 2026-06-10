@@ -220,7 +220,10 @@
   [catalog pv-config catalog-lib-id stubs report-progress page]
   (let [results (map-indexed
                  (fn [idx stub]
-                   (report-progress {:phase "syncing" :page page :item idx})
+                   (report-progress {:phase "syncing" :page page
+                                     :completed (+ (* page fetch-batch-size) idx)
+                                     :current-item {:id   (some-> (:id stub) str)
+                                                    :name (:name stub)}})
                    (fetch-catalog-item pv-config catalog-lib-id stub idx))
                  stubs)
         {skipped true insertable false} (group-by (comp boolean :skip?) results)
@@ -280,7 +283,8 @@
               (do
                 (log/debug "Fetching page"
                            {:page page :offset offset :batch-size (count item-stubs)})
-                (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
+                (report-progress {:phase "fetching" :page page :offset offset
+                                  :completed offset :items-in-batch (count item-stubs)})
                 (let [page-totals (sync-page! catalog pv-config catalog-lib-id
                                               item-stubs report-progress page)]
                   (recur (inc page)
