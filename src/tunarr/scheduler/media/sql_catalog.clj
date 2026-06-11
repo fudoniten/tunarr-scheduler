@@ -236,6 +236,16 @@
       (from :tag)
       (where [:= :name (name tag)])))
 
+(defn sql:get-channels
+  []
+  (-> (select :name :full_name :id :description)
+      (from :channel)
+      (order-by :name)))
+
+(defn sql:get-genres
+  []
+  (-> (select :name) (from :genre) (order-by :name)))
+
 (defn sql:get-media-tags
   [media-id]
   (-> (select :tag)
@@ -557,6 +567,14 @@
   (get-tags [_]
     (map (comp keyword :tag/name) (sql:fetch! executor (sql:get-tags))))
 
+  (get-channels [_]
+    (map (fn [{:keys [channel/name channel/full_name channel/id channel/description]}]
+           {:name name :full-name full_name :id id :description description})
+         (sql:fetch! executor (sql:get-channels))))
+
+  (get-genres [_]
+    (map (comp keyword :genre/name) (sql:fetch! executor (sql:get-genres))))
+
   (get-tag-samples [_]
     (map (fn [{:keys [tag usage_count example_titles]}]
            {:tag            tag
@@ -603,20 +621,26 @@
   (add-media-genres! [_ media-id genres]
     (sql:exec! executor (sql:insert-media-genres media-id genres)))
 
-  (get-media-by-channel [_ channel]
-    (sql:fetch! executor
-                (-> (sql:get-media)
-                    (where [:= :media_channels/channel channel]))))
+  (get-media-by-channel [this channel]
+    (->> (sql:fetch! executor
+                     (-> (sql:get-media)
+                         (where [:= :media_channels/channel (name channel)])))
+         (map row->media)
+         (catalog/enrich-media-with-timestamps this)))
 
-  (get-media-by-tag [_ tag]
-    (sql:fetch! executor
-                (-> (sql:get-media)
-                    (where [:= :media_tags/tag tag]))))
+  (get-media-by-tag [this tag]
+    (->> (sql:fetch! executor
+                     (-> (sql:get-media)
+                         (where [:= :media_tags/tag (name tag)])))
+         (map row->media)
+         (catalog/enrich-media-with-timestamps this)))
 
-  (get-media-by-genre [_ genre]
-    (sql:fetch! executor
-                (-> (sql:get-media)
-                    (where [:= :media_genres/genre genre]))))
+  (get-media-by-genre [this genre]
+    (->> (sql:fetch! executor
+                     (-> (sql:get-media)
+                         (where [:= :media_genres/genre (name genre)])))
+         (map row->media)
+         (catalog/enrich-media-with-timestamps this)))
 
   (add-media-taglines! [_ media-id taglines]
     (sql:exec! executor (sql:insert-media-taglines media-id taglines)))

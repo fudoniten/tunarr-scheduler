@@ -15,6 +15,8 @@
   (get-filler-items [catalog library-name])        ; NEW: Convenience for filler
   (count-media-by-kind [catalog library-name])     ; NEW: Count by kind
   (get-tags [catalog])
+  (get-channels [catalog])
+  (get-genres [catalog])
   (get-media-tags [catalog media-id])
   (add-media-tags! [catalog media-id tags])
   (set-media-tags! [catalog media-id tags])
