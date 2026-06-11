@@ -23,15 +23,15 @@
       (catalog/update-process-timestamp! catalog id process))))
 
 (defn process-timestamp
-  [media target]
-  (let [find-proc (partial some
-                           (fn [{:keys [::media/process-name] :as proc}]
-                             (when (= process-name target) proc)))]
-    (some-> media
-            ::media/process-timestamps
-            (find-proc)
-            (get ::media/last-run)
-            (.toInstant))))
+  "Return the last-run Instant for the given process from a collection of
+   process timestamp maps, as returned by get-media-process-timestamps."
+  [timestamps target]
+  (some (fn [{:keys [::media/process-name ::media/last-run]}]
+          (when (= process-name target)
+            (if (instance? Instant last-run)
+              last-run
+              (some-> last-run .toInstant))))
+        timestamps))
 
 (defn days-ago
   [days]
@@ -49,11 +49,11 @@
      Tier 1 (deterministic) runs on all episodes, Tier 2 (LLM) only
      on episodes that appear to need special tags."))
 
-(defn overdue? [media process threshold]
-  (let [ts (process-timestamp media process)]
-    (if (nil? ts)
-      true
-      (.isBefore ts threshold))))
+(defn overdue? [timestamps process threshold]
+  (let [ts (process-timestamp timestamps process)]
+    (or (nil? ts)
+        (nil? threshold)
+        (.isBefore ts threshold))))
 
 ;; ---------------------------------------------------------------------------
 ;; Job progress plumbing

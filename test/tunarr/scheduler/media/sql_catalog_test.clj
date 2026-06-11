@@ -361,7 +361,7 @@
 
     (let [timestamps (catalog/get-media-process-timestamps *test-catalog* sample-movie)]
       (is (seq timestamps))
-      (is (some #(= :process/tagging (:media/process-name %)) timestamps)))))
+      (is (some #(= :process/tagging (::media/process-name %)) timestamps)))))
 
 ;; Category value tests
 (deftest add-media-category-value-test

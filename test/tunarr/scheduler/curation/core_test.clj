@@ -26,7 +26,7 @@
 (defrecord MockCatalog [media timestamp-log]
   catalog/Catalog
   (get-media-by-library [_ _library] media)
-  (get-media-process-timestamps [_ m] m)
+  (get-media-process-timestamps [_ m] (::media/process-timestamps m))
   (get-episodes-by-series [_ series-id]
     (filterv #(= series-id (::media/parent-id %)) media))
   (add-media-tags! [_ _media-id _tags] nil)
