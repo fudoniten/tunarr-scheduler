@@ -201,6 +201,44 @@
    [:events-created {:optional true} :int]])
 
 ;; ---------------------------------------------------------------------------
+;; Browse / catalog exploration
+;; ---------------------------------------------------------------------------
+
+(def TagName
+  [:string {:min 1 :description "Tag name"}])
+
+(def GenreName
+  [:string {:min 1 :description "Genre name"}])
+
+(def ChannelName
+  [:string {:min 1 :description "Channel name"}])
+
+(def TagSample
+  [:map
+   [:tag          :string]
+   [:usage-count  {:optional true} [:maybe :int]]
+   [:example-titles {:optional true} [:maybe [:vector :string]]]])
+
+(def TagListResponse
+  [:map
+   [:tags [:vector TagSample]]])
+
+(def GenreListResponse
+  [:map
+   [:genres [:vector :string]]])
+
+(def ChannelInfo
+  [:map
+   [:name        :string]
+   [:full-name   {:optional true} [:maybe :string]]
+   [:id          {:optional true} [:maybe :string]]
+   [:description {:optional true} [:maybe :string]]])
+
+(def ChannelListResponse
+  [:map
+   [:channels [:vector ChannelInfo]]])
+
+;; ---------------------------------------------------------------------------
 ;; Query parameters
 ;; ---------------------------------------------------------------------------
 

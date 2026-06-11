@@ -94,6 +94,25 @@
          vals
          (filter #(some #{genre} (::media/genres %)))
          vec))
+  (get-tags [_]
+    (->> (get @state :media {})
+         vals
+         (mapcat ::media/tags)
+         distinct
+         vec))
+  (get-channels [_]
+    (->> (get @state :media {})
+         vals
+         (mapcat ::media/channels)
+         (remove nil?)
+         distinct
+         (mapv (fn [ch] {:name (name ch)}))))
+  (get-genres [_]
+    (->> (get @state :media {})
+         vals
+         (mapcat ::media/genres)
+         distinct
+         vec))
   (rename-tag! [self old-tag new-tag]
     ;; Replace old-tag with new-tag in all media items
     (doseq [media (catalog/get-media-by-tag self old-tag)]

@@ -11,7 +11,8 @@
             [tunarr.scheduler.http.schemas          :as s]
             [tunarr.scheduler.http.api.media        :as media]
             [tunarr.scheduler.http.api.channels     :as channels]
-            [tunarr.scheduler.http.api.jobs         :as jobs]))
+            [tunarr.scheduler.http.api.jobs         :as jobs]
+            [tunarr.scheduler.http.api.browse       :as browse]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -189,6 +190,52 @@
                   :responses {202 {:body s/JobSubmitResponse}
                               500 {:body s/APIError}}
                   :handler   (media/triage-tags-handler ctx)}}]
+
+   ;; ── Browse ──────────────────────────────────────────────────────────────
+   ["/api/tags"
+    {:tags ["browse"]
+     :get  {:summary   "List all tags with usage counts and example titles"
+            :responses {200 {:body s/TagListResponse}
+                        500 {:body s/APIError}}
+            :handler   (browse/list-tags-handler ctx)}}]
+
+   ["/api/tags/:tag/media"
+    {:tags       ["browse"]
+     :parameters {:path [:map [:tag s/TagName]]}
+     :get        {:summary   "List media items with a given tag"
+                  :responses {200 {:body s/MediaListResponse}
+                              500 {:body s/APIError}}
+                  :handler   (browse/get-media-by-tag-handler ctx)}}]
+
+   ["/api/genres"
+    {:tags ["browse"]
+     :get  {:summary   "List all genres"
+            :responses {200 {:body s/GenreListResponse}
+                        500 {:body s/APIError}}
+            :handler   (browse/list-genres-handler ctx)}}]
+
+   ["/api/genres/:genre/media"
+    {:tags       ["browse"]
+     :parameters {:path [:map [:genre s/GenreName]]}
+     :get        {:summary   "List media items with a given genre"
+                  :responses {200 {:body s/MediaListResponse}
+                              500 {:body s/APIError}}
+                  :handler   (browse/get-media-by-genre-handler ctx)}}]
+
+   ["/api/catalog/channels"
+    {:tags ["browse"]
+     :get  {:summary   "List all channels in the catalog"
+            :responses {200 {:body s/ChannelListResponse}
+                        500 {:body s/APIError}}
+            :handler   (browse/list-channels-handler ctx)}}]
+
+   ["/api/catalog/channels/:channel-name/media"
+    {:tags       ["browse"]
+     :parameters {:path [:map [:channel-name s/ChannelName]]}
+     :get        {:summary   "List media items assigned to a given channel"
+                  :responses {200 {:body s/MediaListResponse}
+                              500 {:body s/APIError}}
+                  :handler   (browse/get-media-by-channel-handler ctx)}}]
 
    ;; ── Channels ────────────────────────────────────────────────────────────
    ["/api/channels/sync-pseudovision"
