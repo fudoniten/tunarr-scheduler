@@ -197,7 +197,7 @@
   (-> (insert-into :library)
       (columns :id :name)
       (values (into [] (map (fn [[k v]] [v (name k)])) libraries))
-      (on-conflict :id) (do-update-set :id :name)))
+      (on-conflict :name) (do-update-set :id)))
 
 (s/fdef sql:insert-channels
   :args (s/cat :channels ::media/channel-descriptions))
