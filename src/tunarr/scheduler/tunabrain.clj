@@ -26,7 +26,7 @@
   (cond-> {:id              (::media/id media)
            :title           (::media/name media)
            :description     (::media/overview media)
-           :genres          (::media/genres media)
+           :genres          (mapv name (remove nil? (::media/genres media)))
            :current_tags    (mapv name (remove nil? (::media/tags media)))
            :rating          (::media/rating media)
            :critical_rating (::media/critic-rating media)

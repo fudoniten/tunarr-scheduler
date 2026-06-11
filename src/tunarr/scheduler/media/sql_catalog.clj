@@ -74,10 +74,10 @@
    :media/parent_id         identity
    :media/season_number     identity
    :media/episode_number    identity
-   :tags                    (comp (partial map keyword) pgarray->vec)
-   :channels                (comp (partial map keyword) pgarray->vec)
-   :genres                  (comp (partial map keyword) pgarray->vec)
-   :taglines                pgarray->vec})
+   :tags                    (comp (partial mapv keyword) (partial remove nil?) pgarray->vec)
+   :channels                (comp (partial mapv keyword) (partial remove nil?) pgarray->vec)
+   :genres                  (comp (partial mapv keyword) (partial remove nil?) pgarray->vec)
+   :taglines                (comp vec (partial remove nil?) pgarray->vec)})
 
 (defn media->row
   "Rename the media map keys to match the SQL schema."
@@ -440,6 +440,8 @@
               :media.parent_id
               :media.season_number
               :media.episode_number
+              ;; array_agg over a left join with no matching rows yields
+              ;; {NULL}; the nils are stripped by field-transforms
               [[:array_agg [:distinct :media_tags.tag]]
                :tags]
               [[:array_agg [:distinct :media_channels.channel]]
