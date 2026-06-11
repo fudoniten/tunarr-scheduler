@@ -125,24 +125,23 @@
 
 (defn- triage-decision->op
   "Translate a tunabrain triage decision into a catalog operation.
-   Tolerates the upstream's variations in action naming and in the key
-   carrying the replacement tag for rename/merge decisions."
-  [{:keys [tag action] :as decision}]
-  (let [new-tag (some decision [:new_tag :replacement :merge_into :rename_to])]
-    (cond
-      (= :keep action)
-      {:op :keep :tag tag}
+   Actions are keep | drop | merge | rename; merge and rename carry the
+   canonical tag in :replacement (see tunabrain api/models.py TagDecision)."
+  [{:keys [tag action replacement] :as decision}]
+  (cond
+    (= :keep action)
+    {:op :keep :tag tag}
 
-      (contains? #{:remove :delete :drop} action)
-      {:op :delete :tag tag}
+    (= :drop action)
+    {:op :delete :tag tag}
 
-      (and new-tag (contains? #{:rename :merge :simplify :replace} action))
-      {:op :rename :tag tag :new-tag new-tag}
+    (and replacement (contains? #{:merge :rename} action))
+    {:op :rename :tag tag :new-tag replacement}
 
-      :else
-      (do (log/warn (format "skipping unrecognized triage decision for tag '%s': %s"
-                            tag decision))
-          {:op :skip :tag tag}))))
+    :else
+    (do (log/warn (format "skipping unrecognized triage decision for tag '%s': %s"
+                          tag decision))
+        {:op :skip :tag tag})))
 
 (defn triage-tags!
   "Run tunabrain tag-governance triage over all catalog tags (with usage

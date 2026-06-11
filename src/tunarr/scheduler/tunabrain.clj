@@ -208,10 +208,12 @@
   `:example_titles`) and optional target limit and debug flags that mirror the
   upstream service."
   [client tag-samples & {:keys [target-limit debug]}]
+  ;; Omit absent optional fields: upstream's `debug` is a non-nullable bool,
+  ;; so sending an explicit null fails validation.
   (if-let [response (json-post! client "/tag-governance/triage"
-                                {:tags         tag-samples
-                                 :target_limit target-limit
-                                 :debug        debug})]
+                                (cond-> {:tags tag-samples}
+                                  (some? target-limit) (assoc :target_limit target-limit)
+                                  (some? debug)        (assoc :debug debug)))]
     (let [{:keys [decisions]} response]
       (when (nil? decisions)
         (throw (ex-info "Invalid tag triage response: missing 'decisions' key"
@@ -224,30 +226,23 @@
                     {:endpoint (:endpoint client)
                      :tags-count (count tag-samples)}))))
 
-(defn- normalize-audit-entry
-  "Audit removal entries may be maps with :tag/:reason or bare tag strings."
-  [entry]
-  (if (map? entry)
-    entry
-    {:tag (str entry) :reason nil}))
-
 (defn request-tag-audit!
   "Audit a list of tags for suitability and get removal recommendations.
 
-  Accepts a list of tags (strings or keywords) and returns a list of tags
-  recommended for removal with explanations."
+  Accepts a list of tags (strings or keywords) and returns a list of
+  `{:tag ... :reason ...}` maps recommended for removal (see tunabrain
+  api/models.py TagAuditResponse)."
   [client tags]
   (if-let [response (json-post! client "/tags/audit"
                                 {:tags (mapv name tags)})]
-    (let [removals (or (:tags_to_delete response)
-                       (:recommended_for_removal response))]
-      (when (nil? removals)
-        (throw (ex-info "Invalid tag audit response: missing 'tags_to_delete' or 'recommended_for_removal' key"
+    (let [{:keys [tags_to_delete]} response]
+      (when (nil? tags_to_delete)
+        (throw (ex-info "Invalid tag audit response: missing 'tags_to_delete' key"
                         {:response response
-                         :expected-keys [:tags_to_delete :recommended_for_removal]})))
+                         :expected-keys [:tags_to_delete]})))
       (log/info (format "Tag audit response: %d tags recommended for deletion"
-                        (count removals)))
-      {:recommended-for-removal (mapv normalize-audit-entry removals)})
+                        (count tags_to_delete)))
+      {:recommended-for-removal (vec tags_to_delete)})
     (throw (ex-info "No response received from tunabrain tag audit"
                     {:endpoint (:endpoint client)
                      :tags-count (count tags)}))))

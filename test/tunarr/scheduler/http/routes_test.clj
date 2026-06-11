@@ -290,10 +290,12 @@
     (with-redefs [tunabrain/request-tag-triage!
                   (fn [_ samples & _]
                     (is (= 3 (count samples)))
-                    {:decisions [{:tag "german" :action :keep :reason "Useful for scheduling"}
-                                 {:tag "yakuza" :action :merge :merge_into "gangster"
-                                  :reason "Fits under gangster"}
-                                 {:tag "team_owner" :action :remove :reason "Too niche"}]})]
+                    {:decisions [{:tag "german" :action :keep :replacement nil
+                                  :rationale "Useful for scheduling"}
+                                 {:tag "yakuza" :action :merge :replacement "gangster"
+                                  :rationale "Fits under gangster"}
+                                 {:tag "team_owner" :action :drop :replacement nil
+                                  :rationale "Too niche"}]})]
       (let [handler (routes/handler {:job-runner *job-runner*
                                      :collection mock-collection
                                      :catalog *catalog*
@@ -322,7 +324,8 @@
            :tag-samples [{:tag "team_owner" :usage_count 1 :example_titles ["Major League"]}])
     (with-redefs [tunabrain/request-tag-triage!
                   (fn [_ _samples & _]
-                    {:decisions [{:tag "team_owner" :action :remove :reason "Too niche"}]})]
+                    {:decisions [{:tag "team_owner" :action :drop :replacement nil
+                                  :rationale "Too niche"}]})]
       (let [handler (routes/handler {:job-runner *job-runner*
                                      :collection mock-collection
                                      :catalog *catalog*
