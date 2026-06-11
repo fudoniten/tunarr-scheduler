@@ -121,14 +121,28 @@
   (testing "request-tag-audit! parses audit response"
     (with-redefs [http/post (fn [_ _]
                              {:status 200
-                              :body "{\"recommended_for_removal\": [{\"tag\": \"inappropriate\",
-                                                                     \"reason\": \"Violates content policy\"}]}"})]
+                              :body "{\"tags_to_delete\": [{\"tag\": \"inappropriate\",
+                                                            \"reason\": \"Violates content policy\"}]}"})]
       (let [client (tunabrain/create! {:endpoint "http://test.local"})
             tags [:action :comedy :inappropriate]
             result (tunabrain/request-tag-audit! client tags)]
         (is (= 1 (count (:recommended-for-removal result))))
         (is (= "inappropriate" (get-in result [:recommended-for-removal 0 :tag])))
         (is (= "Violates content policy" (get-in result [:recommended-for-removal 0 :reason])))))))
+
+(deftest request-tag-triage-omits-absent-optional-fields-test
+  (testing "request-tag-triage! omits target_limit/debug when not provided
+            (upstream's debug is a non-nullable bool that rejects null)"
+    (let [posted-data (atom nil)]
+      (with-redefs [http/post (fn [_ opts]
+                               (reset! posted-data (clojure.walk/keywordize-keys
+                                                   (cheshire.core/parse-string (:body opts))))
+                               {:status 200
+                                :body "{\"decisions\": []}"})]
+        (let [client (tunabrain/create! {:endpoint "http://test.local"})]
+          (tunabrain/request-tag-triage! client [{:tag "action" :usage_count 1 :example_titles []}])
+          (is (not (contains? @posted-data :target_limit)))
+          (is (not (contains? @posted-data :debug))))))))
 
 (deftest request-tag-audit-converts-keywords-to-strings-test
   (testing "request-tag-audit! converts keyword tags to strings in request"
@@ -137,7 +151,7 @@
                                (reset! posted-data (clojure.walk/keywordize-keys
                                                    (cheshire.core/parse-string (:body opts))))
                                {:status 200
-                                :body "{\"recommended_for_removal\": []}"})]
+                                :body "{\"tags_to_delete\": []}"})]
         (let [client (tunabrain/create! {:endpoint "http://test.local"})]
           (tunabrain/request-tag-audit! client [:action :comedy])
           (is (= ["action" "comedy"] (:tags @posted-data))))))))

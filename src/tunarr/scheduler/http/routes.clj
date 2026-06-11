@@ -175,11 +175,20 @@
                   :handler   (media/migrate-catalog-ids-handler ctx)}}]
 
    ["/api/media/tags/audit"
-    {:tags ["media"]
-     :post {:summary   "Audit all tags with LLM and remove unsuitable ones"
-            :responses {200 {:body s/TagAuditResponse}
-                        500 {:body s/APIError}}
-            :handler   (media/audit-tags-handler ctx)}}]
+    {:tags       ["media"]
+     :parameters {:query s/TagAuditQuery}
+     :post       {:summary   "Trigger async LLM tag audit job. Deletes unsuitable tags unless ?dry-run=true; the report is available in the job result."
+                  :responses {202 {:body s/JobSubmitResponse}
+                              500 {:body s/APIError}}
+                  :handler   (media/audit-tags-handler ctx)}}]
+
+   ["/api/media/tags/triage"
+    {:tags       ["media"]
+     :parameters {:query s/TagTriageQuery}
+     :post       {:summary   "Trigger async LLM tag governance triage job. Applies keep/remove/rename decisions (with usage context) unless ?dry-run=true; supports ?target-limit=N."
+                  :responses {202 {:body s/JobSubmitResponse}
+                              500 {:body s/APIError}}
+                  :handler   (media/triage-tags-handler ctx)}}]
 
    ;; ── Channels ────────────────────────────────────────────────────────────
    ["/api/channels/sync-pseudovision"

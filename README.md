@@ -167,6 +167,11 @@ as needed. The service exposes the following HTTP endpoints:
 * `GET /healthz` - readiness/liveness probe.
 * `POST /api/media/:library/sync-pseudovision-tags`
 * `POST /api/media/:library/retag`
+* `POST /api/media/tags/audit` - async LLM tag audit; deletes unsuitable tags
+  unless `?dry-run=true`. Results are reported via `GET /api/jobs/:job-id`.
+* `POST /api/media/tags/triage` - async LLM tag governance; applies
+  keep/remove/rename decisions using per-tag usage counts and example titles.
+  Supports `?dry-run=true` and `?target-limit=N`.
 * `POST /api/channels/sync-pseudovision`
 * `POST /api/channels/:channel-id/schedule`
 * `POST /api/bumpers/up-next`

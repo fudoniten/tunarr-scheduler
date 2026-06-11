@@ -1,10 +1,11 @@
 (ns tunarr.scheduler.curation.tags
   (:require [tunarr.scheduler.media.catalog :as catalog]
-            
+            [tunarr.scheduler.tunabrain :as tunabrain]
+
             [clojure.string :as str]
             [clojure.data.csv :as csv]
             [clojure.java.io :as io]
-            
+
             [taoensso.timbre :as log]))
 
 (defmulti load-tag-rule second)
@@ -94,3 +95,87 @@
 (defmethod normalize-tag! :no-op
   [_ {:keys [tag]}]
   (log/debug (format "no operation specified for tag %s" tag)))
+
+;; ---------------------------------------------------------------------------
+;; LLM-driven tag governance (via tunabrain)
+;; ---------------------------------------------------------------------------
+
+(defn audit-tags!
+  "Audit all catalog tags with tunabrain and delete those it recommends
+   removing. With :dry-run true, returns the recommendations without
+   deleting anything."
+  [catalog brain {:keys [dry-run]}]
+  (let [tags (vec (catalog/get-tags catalog))]
+    (log/info (format "auditing %d tags%s" (count tags) (if dry-run " (dry run)" "")))
+    (if (empty? tags)
+      {:tags-audited 0 :tags-removed 0 :removed [] :dry-run (boolean dry-run)}
+      (let [{:keys [recommended-for-removal]} (tunabrain/request-tag-audit! brain tags)]
+        (when-not dry-run
+          (doseq [{:keys [tag reason]} recommended-for-removal]
+            (log/info (format "removing tag '%s': %s" tag reason))
+            (catalog/delete-tag! catalog (keyword tag))))
+        (log/info (format "tag audit complete: %d audited, %d recommended for removal%s"
+                          (count tags)
+                          (count recommended-for-removal)
+                          (if dry-run " (dry run, none removed)" "")))
+        {:tags-audited (count tags)
+         :tags-removed (if dry-run 0 (count recommended-for-removal))
+         :removed      (vec recommended-for-removal)
+         :dry-run      (boolean dry-run)}))))
+
+(defn- triage-decision->op
+  "Translate a tunabrain triage decision into a catalog operation.
+   Actions are keep | drop | merge | rename; merge and rename carry the
+   canonical tag in :replacement (see tunabrain api/models.py TagDecision)."
+  [{:keys [tag action replacement] :as decision}]
+  (cond
+    (= :keep action)
+    {:op :keep :tag tag}
+
+    (= :drop action)
+    {:op :delete :tag tag}
+
+    (and replacement (contains? #{:merge :rename} action))
+    {:op :rename :tag tag :new-tag replacement}
+
+    :else
+    (do (log/warn (format "skipping unrecognized triage decision for tag '%s': %s"
+                          tag decision))
+        {:op :skip :tag tag})))
+
+(defn triage-tags!
+  "Run tunabrain tag-governance triage over all catalog tags (with usage
+   counts and example titles) and apply the keep/remove/rename decisions.
+   With :dry-run true, returns the decisions without modifying the catalog.
+   :target-limit caps the number of tags the upstream should aim to keep."
+  [catalog brain {:keys [target-limit dry-run]}]
+  (let [samples (vec (catalog/get-tag-samples catalog))]
+    (log/info (format "triaging %d tags%s" (count samples) (if dry-run " (dry run)" "")))
+    (if (empty? samples)
+      {:tags-triaged 0 :decisions [] :dry-run (boolean dry-run)}
+      (let [{:keys [decisions]} (tunabrain/request-tag-triage! brain samples
+                                                               :target-limit target-limit)
+            ops (group-by :op (map triage-decision->op decisions))
+            {:keys [delete rename]} ops]
+        (when-not dry-run
+          (doseq [{:keys [tag]} delete]
+            (log/info (format "triage: deleting tag '%s'" tag))
+            (catalog/delete-tag! catalog (keyword tag)))
+          (when (seq rename)
+            (doseq [{:keys [tag new-tag]} rename]
+              (log/info (format "triage: renaming tag '%s' -> '%s'" tag new-tag)))
+            (catalog/batch-rename-tags! catalog (mapv (juxt :tag :new-tag) rename))))
+        (log/info (format "tag triage complete: %d triaged, %d kept, %d deleted, %d renamed, %d skipped%s"
+                          (count samples)
+                          (count (:keep ops))
+                          (count delete)
+                          (count rename)
+                          (count (:skip ops))
+                          (if dry-run " (dry run, no changes applied)" "")))
+        {:tags-triaged (count samples)
+         :kept         (count (:keep ops))
+         :deleted      (count delete)
+         :renamed      (count rename)
+         :skipped      (count (:skip ops))
+         :decisions    (vec decisions)
+         :dry-run      (boolean dry-run)}))))

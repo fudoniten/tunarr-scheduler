@@ -9,7 +9,7 @@
             [tunarr.scheduler.media.pseudovision-media-sync :as pv-media-sync]
             [tunarr.scheduler.backends.pseudovision.client :as pv-client]
             [tunarr.scheduler.curation.core :as curate]
-            [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.curation.tags :as curation-tags]
             [tunarr.scheduler.media.catalog :as catalog])
   (:import [java.time LocalDate Instant]))
 
@@ -288,30 +288,45 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn audit-tags-handler
-  "Audit all tags with LLM and remove unsuitable ones."
-  [{:keys [tunabrain catalog]}]
-  (fn [_]
+  "Trigger async LLM tag audit job. Tags recommended for removal are deleted
+   unless ?dry-run=true, in which case the recommendations are only reported
+   in the job result."
+  [{:keys [job-runner tunabrain catalog]}]
+  (fn [req]
     (try
-      (let [tags (catalog/get-tags catalog)
-            _ (log/info (format "Auditing %d tags" (count tags)))
-            {:keys [recommended-for-removal]} (tunabrain/request-tag-audit! tunabrain tags)
-            removal-count (count recommended-for-removal)
-            removed-count (atom 0)]
-        (log/info (format "Tunabrain recommended %d tags for removal" removal-count))
-        (if (pos? removal-count)
-          (doseq [{:keys [tag reason]} recommended-for-removal]
-            (log/info (format "Removing tag '%s': %s" tag reason))
-            (catalog/delete-tag! catalog (keyword tag))
-            (swap! removed-count inc))
-          (log/info "No tags recommended for removal"))
-        (log/info (format "Tag audit complete: %d audited, %d removed"
-                          (count tags) @removed-count))
-        {:status 200
-         :body {:tags-audited (count tags)
-                :tags-removed @removed-count
-                :removed recommended-for-removal}})
+      (let [dry-run (= "true" (get-in req [:parameters :query :dry-run]))
+            job (jobs/submit! job-runner
+                              {:type :media/tag-audit
+                               :metadata {:dry-run dry-run}}
+                              (fn [_report-progress]
+                                (curation-tags/audit-tags! catalog tunabrain
+                                                           {:dry-run dry-run})))]
+        {:status 202 :body {:job job}})
       (catch Exception e
-        (log/error e "Error during tag audit")
+        (log/error e "Error submitting tag audit job")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn triage-tags-handler
+  "Trigger async LLM tag governance triage job. Sends all tags with usage
+   counts and example titles to tunabrain and applies its keep/remove/rename
+   decisions, unless ?dry-run=true, in which case the decisions are only
+   reported in the job result."
+  [{:keys [job-runner tunabrain catalog]}]
+  (fn [req]
+    (try
+      (let [dry-run      (= "true" (get-in req [:parameters :query :dry-run]))
+            target-limit (get-in req [:parameters :query :target-limit])
+            job (jobs/submit! job-runner
+                              {:type :media/tag-triage
+                               :metadata (cond-> {:dry-run dry-run}
+                                           target-limit (assoc :target-limit target-limit))}
+                              (fn [_report-progress]
+                                (curation-tags/triage-tags! catalog tunabrain
+                                                            {:dry-run dry-run
+                                                             :target-limit target-limit})))]
+        {:status 202 :body {:job job}})
+      (catch Exception e
+        (log/error e "Error submitting tag triage job")
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn get-library-media-handler
