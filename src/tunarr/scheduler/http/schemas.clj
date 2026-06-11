@@ -58,7 +58,9 @@
    :media/taglines
    :media/recategorize
    :media/retag-episodes
-   :media/pseudovision-sync])
+   :media/pseudovision-sync
+   :media/tag-audit
+   :media/tag-triage])
 
 ;; NOTE: keep JobType in sync with the job types submitted in
 ;; tunarr.scheduler.http.api.media.
@@ -178,14 +180,6 @@
    [:message  :string]
    [:migrated {:optional true} :int]])
 
-(def TagAuditResponse
-  [:map
-   [:tags-audited :int]
-   [:tags-removed :int]
-   [:removed      [:vector [:map
-                            [:tag    :string]
-                            [:reason :string]]]]])
-
 ;; ---------------------------------------------------------------------------
 ;; Channel operations
 ;; ---------------------------------------------------------------------------
@@ -217,3 +211,12 @@
 (def KindQuery
   [:map
    [:kind {:optional true} :string]])
+
+(def TagAuditQuery
+  [:map
+   [:dry-run {:optional true} [:enum "true" "false"]]])
+
+(def TagTriageQuery
+  [:map
+   [:dry-run      {:optional true} [:enum "true" "false"]]
+   [:target-limit {:optional true} [:int {:min 1 :description "Approximate number of tags the triage should aim to keep"}]]])

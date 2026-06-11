@@ -130,6 +130,17 @@
         (is (= "inappropriate" (get-in result [:recommended-for-removal 0 :tag])))
         (is (= "Violates content policy" (get-in result [:recommended-for-removal 0 :reason])))))))
 
+(deftest request-tag-audit-tags-to-delete-shape-test
+  (testing "request-tag-audit! also accepts the 'tags_to_delete' response shape with bare strings"
+    (with-redefs [http/post (fn [_ _]
+                             {:status 200
+                              :body "{\"tags_to_delete\": [\"team_owner\", \"peugeot_403\"]}"})]
+      (let [client (tunabrain/create! {:endpoint "http://test.local"})
+            result (tunabrain/request-tag-audit! client [:action :team_owner :peugeot_403])]
+        (is (= 2 (count (:recommended-for-removal result))))
+        (is (= "team_owner" (get-in result [:recommended-for-removal 0 :tag])))
+        (is (nil? (get-in result [:recommended-for-removal 0 :reason])))))))
+
 (deftest request-tag-audit-converts-keywords-to-strings-test
   (testing "request-tag-audit! converts keyword tags to strings in request"
     (let [posted-data (atom nil)]

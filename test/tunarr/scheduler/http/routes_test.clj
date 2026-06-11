@@ -6,6 +6,7 @@
             [tunarr.scheduler.jobs.runner :as runner]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media :as media]
+            [tunarr.scheduler.tunabrain :as tunabrain]
             [tunarr.scheduler.backends.pseudovision.client :as pv-client]))
 
 ;; Mock catalog implementation for testing
@@ -58,6 +59,15 @@
     (swap! state update :tags (fn [tags] (remove #(= % tag) tags))))
   (rename-tag! [_ tag new-tag]
     (swap! state update :tags (fn [tags] (map #(if (= % tag) new-tag %) tags))))
+  (batch-rename-tags! [_ tag-pairs]
+    (swap! state update :tags
+           (fn [tags]
+             (map (fn [t]
+                    (or (some (fn [[old new]]
+                                (when (= (name t) (name old)) (keyword new)))
+                              tag-pairs)
+                        t))
+                  tags))))
   (update-process-timestamp! [_ media-id process]
     (swap! state update-in [:process-timestamps media-id] conj process))
   (close-catalog! [_] nil)
@@ -82,11 +92,9 @@
 (def mock-collection
   {:get-library-items (fn [_] [{:id "1" :name "Test Movie"}])})
 
-;; Mock tunabrain implementation
-(def mock-tunabrain
-  {:request-tag-audit! (fn [_ tags]
-                        {:recommended-for-removal
-                         [{:tag "inappropriate" :reason "Violates content policy"}]})})
+;; Placeholder tunabrain client; tests that exercise tunabrain calls redefine
+;; the tunarr.scheduler.tunabrain functions with with-redefs.
+(def mock-tunabrain {})
 
 (def ^:dynamic *job-runner* nil)
 (def ^:dynamic *catalog* nil)
@@ -207,34 +215,126 @@
         (is (= "documentaries" (get-in job-info [:metadata :library])))))))
 
 ;; Tag audit endpoint tests
-(deftest audit-tags-endpoint-test
-  (testing "POST /api/media/tags/audit audits tags"
-    (let [handler (routes/handler {:job-runner *job-runner*
-                                   :collection mock-collection
-                                   :catalog *catalog*
-                                   :tunabrain mock-tunabrain})
-          response (handler (mock/request :post "/api/media/tags/audit"))]
-      (is (= 200 (:status response)))
-      (let [body (parse-json-response response)]
-        (is (contains? body :tags-audited))
-        (is (contains? body :tags-removed))
-        (is (contains? body :removed))))))
+(deftest audit-tags-endpoint-submits-job-test
+  (testing "POST /api/media/tags/audit submits a tag audit job"
+    (with-redefs [tunabrain/request-tag-audit!
+                  (fn [_ _tags] {:recommended-for-removal []})]
+      (let [handler (routes/handler {:job-runner *job-runner*
+                                     :collection mock-collection
+                                     :catalog *catalog*
+                                     :tunabrain mock-tunabrain})
+            response (handler (mock/request :post "/api/media/tags/audit"))]
+        (is (= 202 (:status response)))
+        (let [body (parse-json-response response)]
+          (is (contains? body :job))
+          (is (= :media/tag-audit (get-in body [:job :type])))
+          (let [job-info (await-job *job-runner* (get-in body [:job :id]) 5000)]
+            (is (= :succeeded (:status job-info)))
+            (is (contains? (:result job-info) :tags-audited))
+            (is (contains? (:result job-info) :tags-removed))
+            (is (contains? (:result job-info) :removed))))))))
 
 (deftest audit-tags-removes-inappropriate-tags-test
-  (testing "audit endpoint removes tags recommended for removal"
+  (testing "audit job removes tags recommended for removal"
     (swap! (:state *catalog*) assoc :tags [:action :comedy :inappropriate])
-    (let [handler (routes/handler {:job-runner *job-runner*
-                                   :collection mock-collection
-                                   :catalog *catalog*
-                                   :tunabrain mock-tunabrain})
-          response (handler (mock/request :post "/api/media/tags/audit"))
-          body (parse-json-response response)]
-      (is (= 1 (:tags-removed body)))
-      (is (= 1 (count (:removed body))))
-      (is (= "inappropriate" (get-in body [:removed 0 :tag])))
-      ;; Verify tag was actually deleted
-      (let [remaining-tags (catalog/get-tags *catalog*)]
-        (is (not (contains? (set remaining-tags) :inappropriate)))))))
+    (with-redefs [tunabrain/request-tag-audit!
+                  (fn [_ _tags]
+                    {:recommended-for-removal
+                     [{:tag "inappropriate" :reason "Violates content policy"}]})]
+      (let [handler (routes/handler {:job-runner *job-runner*
+                                     :collection mock-collection
+                                     :catalog *catalog*
+                                     :tunabrain mock-tunabrain})
+            response (handler (mock/request :post "/api/media/tags/audit"))
+            body (parse-json-response response)
+            job-info (await-job *job-runner* (get-in body [:job :id]) 5000)
+            result (:result job-info)]
+        (is (= :succeeded (:status job-info)))
+        (is (= 1 (:tags-removed result)))
+        (is (= 1 (count (:removed result))))
+        (is (= "inappropriate" (get-in result [:removed 0 :tag])))
+        ;; Verify tag was actually deleted
+        (let [remaining-tags (catalog/get-tags *catalog*)]
+          (is (not (contains? (set remaining-tags) :inappropriate))))))))
+
+(deftest audit-tags-dry-run-test
+  (testing "audit job with ?dry-run=true reports without deleting"
+    (swap! (:state *catalog*) assoc :tags [:action :comedy :inappropriate])
+    (with-redefs [tunabrain/request-tag-audit!
+                  (fn [_ _tags]
+                    {:recommended-for-removal
+                     [{:tag "inappropriate" :reason "Violates content policy"}]})]
+      (let [handler (routes/handler {:job-runner *job-runner*
+                                     :collection mock-collection
+                                     :catalog *catalog*
+                                     :tunabrain mock-tunabrain})
+            response (handler (mock/request :post "/api/media/tags/audit?dry-run=true"))
+            body (parse-json-response response)
+            job-info (await-job *job-runner* (get-in body [:job :id]) 5000)
+            result (:result job-info)]
+        (is (= :succeeded (:status job-info)))
+        (is (= 0 (:tags-removed result)))
+        (is (= 1 (count (:removed result))))
+        (is (true? (:dry-run result)))
+        ;; Tag must still be present
+        (is (contains? (set (catalog/get-tags *catalog*)) :inappropriate))))))
+
+;; Tag triage endpoint tests
+(deftest triage-tags-endpoint-applies-decisions-test
+  (testing "POST /api/media/tags/triage applies keep/remove/rename decisions"
+    (swap! (:state *catalog*) assoc
+           :tags [:german :yakuza :team_owner]
+           :tag-samples [{:tag "german" :usage_count 40 :example_titles ["Das Boot"]}
+                         {:tag "yakuza" :usage_count 7 :example_titles ["Outrage"]}
+                         {:tag "team_owner" :usage_count 1 :example_titles ["Major League"]}])
+    (with-redefs [tunabrain/request-tag-triage!
+                  (fn [_ samples & _]
+                    (is (= 3 (count samples)))
+                    {:decisions [{:tag "german" :action :keep :reason "Useful for scheduling"}
+                                 {:tag "yakuza" :action :merge :merge_into "gangster"
+                                  :reason "Fits under gangster"}
+                                 {:tag "team_owner" :action :remove :reason "Too niche"}]})]
+      (let [handler (routes/handler {:job-runner *job-runner*
+                                     :collection mock-collection
+                                     :catalog *catalog*
+                                     :tunabrain mock-tunabrain})
+            response (handler (mock/request :post "/api/media/tags/triage?target-limit=50"))
+            body (parse-json-response response)]
+        (is (= 202 (:status response)))
+        (is (= :media/tag-triage (get-in body [:job :type])))
+        (let [job-info (await-job *job-runner* (get-in body [:job :id]) 5000)
+              result (:result job-info)]
+          (is (= :succeeded (:status job-info)))
+          (is (= 3 (:tags-triaged result)))
+          (is (= 1 (:kept result)))
+          (is (= 1 (:deleted result)))
+          (is (= 1 (:renamed result)))
+          (let [remaining (set (catalog/get-tags *catalog*))]
+            (is (contains? remaining :german))
+            (is (contains? remaining :gangster))
+            (is (not (contains? remaining :yakuza)))
+            (is (not (contains? remaining :team_owner)))))))))
+
+(deftest triage-tags-dry-run-test
+  (testing "triage job with ?dry-run=true reports decisions without applying"
+    (swap! (:state *catalog*) assoc
+           :tags [:team_owner]
+           :tag-samples [{:tag "team_owner" :usage_count 1 :example_titles ["Major League"]}])
+    (with-redefs [tunabrain/request-tag-triage!
+                  (fn [_ _samples & _]
+                    {:decisions [{:tag "team_owner" :action :remove :reason "Too niche"}]})]
+      (let [handler (routes/handler {:job-runner *job-runner*
+                                     :collection mock-collection
+                                     :catalog *catalog*
+                                     :tunabrain mock-tunabrain})
+            response (handler (mock/request :post "/api/media/tags/triage?dry-run=true"))
+            body (parse-json-response response)
+            job-info (await-job *job-runner* (get-in body [:job :id]) 5000)
+            result (:result job-info)]
+        (is (= :succeeded (:status job-info)))
+        (is (true? (:dry-run result)))
+        (is (= 1 (count (:decisions result))))
+        (is (contains? (set (catalog/get-tags *catalog*)) :team_owner))))))
 
 ;; Job listing endpoint tests
 (deftest list-jobs-endpoint-test

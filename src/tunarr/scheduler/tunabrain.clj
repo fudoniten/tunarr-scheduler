@@ -224,6 +224,13 @@
                     {:endpoint (:endpoint client)
                      :tags-count (count tag-samples)}))))
 
+(defn- normalize-audit-entry
+  "Audit removal entries may be maps with :tag/:reason or bare tag strings."
+  [entry]
+  (if (map? entry)
+    entry
+    {:tag (str entry) :reason nil}))
+
 (defn request-tag-audit!
   "Audit a list of tags for suitability and get removal recommendations.
 
@@ -232,14 +239,15 @@
   [client tags]
   (if-let [response (json-post! client "/tags/audit"
                                 {:tags (mapv name tags)})]
-    (let [{:keys [tags_to_delete]} response]
-      (when (nil? tags_to_delete)
-        (throw (ex-info "Invalid tag audit response: missing 'tags_to_delete' key"
+    (let [removals (or (:tags_to_delete response)
+                       (:recommended_for_removal response))]
+      (when (nil? removals)
+        (throw (ex-info "Invalid tag audit response: missing 'tags_to_delete' or 'recommended_for_removal' key"
                         {:response response
-                         :expected-keys [:tags_to_delete]})))
+                         :expected-keys [:tags_to_delete :recommended_for_removal]})))
       (log/info (format "Tag audit response: %d tags recommended for deletion"
-                        (count tags_to_delete)))
-      {:recommended-for-removal tags_to_delete})
+                        (count removals)))
+      {:recommended-for-removal (mapv normalize-audit-entry removals)})
     (throw (ex-info "No response received from tunabrain tag audit"
                     {:endpoint (:endpoint client)
                      :tags-count (count tags)}))))
