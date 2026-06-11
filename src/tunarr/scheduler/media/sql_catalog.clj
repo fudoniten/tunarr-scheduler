@@ -587,8 +587,8 @@
   (get-media-process-timestamps [_ {:keys [::media/id]}]
     (map (fn [{:keys [media_process_timestamp/process
                       media_process_timestamp/last_run_at]}]
-           {:media/process-name (keyword "process" process)
-            :media/last-run     (.toInstant last_run_at)})
+           {::media/process-name (keyword "process" process)
+            ::media/last-run     (.toInstant last_run_at)})
          (sql:fetch! executor (sql:get-media-processes-by-id id))))
 
   (update-channels! [_ channels]

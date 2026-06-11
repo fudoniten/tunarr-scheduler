@@ -46,7 +46,7 @@
 (s/def ::process-name keyword?)
 (s/def ::last-run ::timestamp)
 (s/def ::process-timestamps
-  (s/map-of ::process-name ::last-run))
+  (s/coll-of (s/keys :req [::process-name ::last-run])))
 (s/def ::parent-id (s/nilable string?))
 (s/def ::season-number (s/nilable pos-int?))
 (s/def ::episode-number (s/nilable pos-int?))
