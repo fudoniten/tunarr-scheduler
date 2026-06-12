@@ -78,6 +78,11 @@
       "hash": "sha256-LaaIDz3x3lGTb/GfarGHaT5MAc3MVCiFWE5Z85qs6z4="
     },
     {
+      "mvn-path": "clj-commons/clj-yaml/1.0.29/clj-yaml-1.0.29.pom",
+      "mvn-repo": "https://repo.clojars.org/",
+      "hash": "sha256-Ue4qlviPUuqu23aVx9vNS2C1Gg+0Z+/ufFl5rEh0GHk="
+    },
+    {
       "mvn-path": "clj-http/clj-http/3.13.0/clj-http-3.13.0.jar",
       "mvn-repo": "https://repo.clojars.org/",
       "hash": "sha256-Il8ZfckEYBvydmkCnwNShFgig/Fn+m/vxTxmf2IR154="
