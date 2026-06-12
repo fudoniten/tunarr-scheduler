@@ -145,7 +145,7 @@
 
 (defn sql:get-tag-samples
   []
-  (-> (select [[:media_tags.tag :tag]]
+  (-> (select [:media_tags.tag :tag]
               [[:count [:distinct :media_tags.media_id]] :usage_count]
               [[:array_agg [:distinct :media.name]] :example_titles])
       (from :media_tags)
