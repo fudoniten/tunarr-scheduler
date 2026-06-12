@@ -537,9 +537,9 @@
       (do (log/info (format "getting %s items for library %s (id: %s)" (name kind) library-name library-id))
           (->> (sql:fetch! executor
                            (-> (sql:get-top-level-media)
-                               (where [:and 
-                                      [:= :media/library_id library-id]
-                                      [:= :media/item_kind (name kind)]])))
+                               (where [:and
+                                       [:= :media/library_id library-id]
+                                       [:= :media/item_kind (name kind)]])))
                (map row->media)
                (catalog/enrich-media-with-timestamps this)))
       (throw (ex-info (format "library not found: %s" library-name) {}))))
@@ -554,10 +554,10 @@
                                 first
                                 :library/id)]
       (let [counts (sql:fetch! executor
-                              (-> (select :media/item_kind (:%count.* :count))
-                                  (from :media)
-                                  (where [:= :media/library_id library-id])
-                                  (group-by :media/item_kind)))]
+                               (-> (select :media/item_kind (:%count.* :count))
+                                   (from :media)
+                                   (where [:= :media/library_id library-id])
+                                   (group-by :media/item_kind)))]
         (reduce (fn [acc {:keys [media/item_kind count]}]
                   (assoc acc (keyword item_kind) count))
                 {}
@@ -576,7 +576,7 @@
     (map (comp keyword :genre/name) (sql:fetch! executor (sql:get-genres))))
 
   (get-tag-samples [_]
-    (map (fn [{:keys [tag usage_count example_titles]}]
+    (map (fn [{:keys [media_tags/tag usage_count example_titles]}]
            {:tag            tag
             :usage_count    usage_count
             :example_titles (pgarray->vec example_titles)})
@@ -748,7 +748,6 @@
       (let [id (::media/id media)
             timestamps (catalog/get-media-process-timestamps this {::media/id id})]
         (assoc media ::media/process-timestamps timestamps)))))
-
 
 (defmethod catalog/initialize-catalog! :postgresql
   [{:keys [host port user password database worker-count queue-size]
