@@ -1,0 +1,679 @@
+From ab6011a841e002a6ce8d17ba78933c8b244aafda Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 11 Jun 2026 21:21:24 +0000
+Subject: [PATCH] Add Browse page for exploring media by tag, genre, and
+ channel
+
+Uses the new Tunarr Scheduler browse endpoints:
+- GET /api/tags, /api/tags/:tag/media
+- GET /api/genres, /api/genres/:genre/media
+- GET /api/catalog/channels, /api/catalog/channels/:channel-name/media
+
+Changes:
+- New Browse page with Tags / Genres / Channels facet tabs, a filter
+  input, and per-facet entry lists (tag usage counts + example titles,
+  channel descriptions). Selecting an entry shows its media with
+  client-side pagination; tag/genre chips on results cross-link to
+  browsing by that value.
+- /browse routes with pushState/deep-link support
+  (/browse/:facet and /browse/:facet/:selection).
+- Tags, genres, and channels chips on the media detail page are now
+  clickable and jump to the Browse page.
+- Card components pass through props besides :class (e.g. :on-click).
+- Scheduler media items arrive with namespaced JSON keys; they're
+  normalized (namespace stripped) on receipt.
+
+https://claude.ai/code/session_01TGEcLVvyX8wmp1XSYYeTB5
+---
+ src/marquee/components/card.cljs    |  30 ++--
+ src/marquee/events.cljs             | 150 ++++++++++++++++++-
+ src/marquee/pages/browse.cljs       | 216 ++++++++++++++++++++++++++++
+ src/marquee/pages/media_detail.cljs |  42 ++++--
+ src/marquee/routes.cljs             |  11 ++
+ src/marquee/subs.cljs               |  34 +++++
+ src/marquee/views.cljs              |   2 +
+ 7 files changed, 456 insertions(+), 29 deletions(-)
+ create mode 100644 src/marquee/pages/browse.cljs
+
+diff --git a/src/marquee/components/card.cljs b/src/marquee/components/card.cljs
+index d2e5285..84a9581 100644
+--- a/src/marquee/components/card.cljs
++++ b/src/marquee/components/card.cljs
+@@ -1,23 +1,27 @@
+ (ns marquee.components.card
+-  "shadcn/ui Card family, as Reagent components."
++  "shadcn/ui Card family, as Reagent components. Props besides :class
++  (e.g. :on-click) are passed through to the underlying element."
+   (:require [marquee.lib.utils :refer [cn]]))
+ 
+-(defn card [{:keys [class]} & children]
+-  (into [:div {:class (cn "rounded-lg border bg-card text-card-foreground shadow-sm" class)}]
++(defn- with-classes [props base]
++  (assoc (dissoc props :class) :class (cn base (:class props))))
++
++(defn card [props & children]
++  (into [:div (with-classes props "rounded-lg border bg-card text-card-foreground shadow-sm")]
+         children))
+ 
+-(defn card-header [{:keys [class]} & children]
+-  (into [:div {:class (cn "flex flex-col space-y-1.5 p-6" class)}] children))
++(defn card-header [props & children]
++  (into [:div (with-classes props "flex flex-col space-y-1.5 p-6")] children))
+ 
+-(defn card-title [{:keys [class]} & children]
+-  (into [:h3 {:class (cn "text-2xl font-semibold leading-none tracking-tight" class)}]
++(defn card-title [props & children]
++  (into [:h3 (with-classes props "text-2xl font-semibold leading-none tracking-tight")]
+         children))
+ 
+-(defn card-description [{:keys [class]} & children]
+-  (into [:p {:class (cn "text-sm text-muted-foreground" class)}] children))
++(defn card-description [props & children]
++  (into [:p (with-classes props "text-sm text-muted-foreground")] children))
+ 
+-(defn card-content [{:keys [class]} & children]
+-  (into [:div {:class (cn "p-6 pt-0" class)}] children))
++(defn card-content [props & children]
++  (into [:div (with-classes props "p-6 pt-0")] children))
+ 
+-(defn card-footer [{:keys [class]} & children]
+-  (into [:div {:class (cn "flex items-center p-6 pt-0" class)}] children))
++(defn card-footer [props & children]
++  (into [:div (with-classes props "flex items-center p-6 pt-0")] children))
+diff --git a/src/marquee/events.cljs b/src/marquee/events.cljs
+index 64e492a..aa18f93 100644
+--- a/src/marquee/events.cljs
++++ b/src/marquee/events.cljs
+@@ -24,6 +24,13 @@
+     :media-current-page 1
+     :media-page-size 20
+     :jellyfin-url nil
++    ;; Browse-by-metadata state (Tunarr Scheduler browse endpoints)
++    :browse-facet :tags          ; :tags | :genres | :channels
++    :browse-selection nil        ; selected tag/genre/channel name, or nil
++    :browse-lists {}             ; facet → vector of facet entries
++    :browse-media {}             ; [facet value] → vector of media items
++    :browse-media-page 1
++    :browse-filter ""
+     :api-specs {}
+     :api-selected-service nil
+     :api-expanded-ops #{}
+@@ -69,13 +76,16 @@
+    (let [dispatches (concat
+                       (when (= page :media)
+                         [[::load-media-libraries] [::set-media-page 1]])
++                      (when (= page :browse)
++                        [[::load-browse-facet (or (:browse-facet db) :tags)]])
+                       (when (and (= page :api-docs) (nil? (:api-selected-service db)))
+                         [[::select-api-service :pseudovision]])
+                       (when (= page :schedule-grid)
+                         [[::load-channels]])
+                       (when (= page :jobs)
+                         [[::load-jobs]]))]
+-     (cond-> {:db           (assoc db :active-page page)
++     (cond-> {:db           (cond-> (assoc db :active-page page)
++                              (= page :browse) (assoc :browse-selection nil))
+               :push-history (routes/page->path page)}
+        (seq dispatches) (assoc :dispatch-n dispatches)))))
+ 
+@@ -94,7 +104,8 @@
+ (rf/reg-event-fx
+  ::restore-from-url
+  (fn [{:keys [db]} [_ path]]
+-   (let [{:keys [page media-id channel-id]} (or (routes/parse-path path) {:page :home})
++   (let [{:keys [page media-id channel-id facet selection]}
++         (or (routes/parse-path path) {:page :home})
+          dispatches (concat
+                       (when (= page :media)
+                         [[::load-media-libraries] [::set-media-page 1]])
+@@ -102,6 +113,9 @@
+                         [[::select-api-service :pseudovision]])
+                       (when (= page :media-detail)
+                         [[::load-media-item media-id]])
++                      (when (= page :browse)
++                        (cond-> [[::load-browse-facet (or facet :tags)]]
++                          selection (conj [::load-browse-media (or facet :tags) selection])))
+                       (when (= page :schedule-grid)
+                         [[::load-channels]])
+                       (when (= page :channel-schedule)
+@@ -109,6 +123,9 @@
+                           channel-id (conj [::load-channel-events channel-id]))))]
+      (cond-> {:db (cond-> (assoc db :active-page page)
+                     (= page :media-detail)     (assoc :current-media-id media-id)
++                    (= page :browse)           (assoc :browse-facet (or facet :tags)
++                                                      :browse-selection selection
++                                                      :browse-media-page 1)
+                     (= page :channel-schedule) (assoc :current-channel-id channel-id))}
+        (seq dispatches) (assoc :dispatch-n dispatches)))))
+ 
+@@ -251,6 +268,135 @@
+        (assoc :media-page-size size)
+        (assoc :media-current-page 1))))
+ 
++;; ---------------------------------------------------------------------------
++;; Browse by metadata (Tunarr Scheduler browse endpoints)
++;;
++;;   GET /api/tags                                  → {:tags [{:tag :usage-count :example-titles}]}
++;;   GET /api/tags/:tag/media                       → {:media [...]}
++;;   GET /api/genres                                → {:genres ["..."]}
++;;   GET /api/genres/:genre/media                   → {:media [...]}
++;;   GET /api/catalog/channels                      → {:channels [{:name :full-name :description}]}
++;;   GET /api/catalog/channels/:channel-name/media  → {:media [...]}
++;;
++;; Media items come back with namespaced keys (tunarr.scheduler.media/name);
++;; we strip the namespaces on receipt so views can use plain :name, :tags, etc.
++;; ---------------------------------------------------------------------------
++
++(defn- key-name [k]
++  (if (keyword? k) (name k) (str k)))
++
++(defn- strip-key-namespaces [m]
++  (into {} (map (fn [[k v]] [(keyword (key-name k)) v])) m))
++
++(defn- browse-list-op [facet]
++  (case facet
++    :tags     :get-api-tags
++    :genres   :get-api-genres
++    :channels :get-api-catalog-channels))
++
++(defn- browse-media-request [facet value]
++  (case facet
++    :tags     [:get-api-tags-tag-media {:tag value}]
++    :genres   [:get-api-genres-genre-media {:genre value}]
++    :channels [:get-api-catalog-channels-channel-name-media {:channel-name value}]))
++
++(rf/reg-event-fx
++ ::load-browse-facet
++ (fn [{:keys [db]} [_ facet]]
++   ;; Facet lists are cached for the session; reload only when missing.
++   (if (get-in db [:browse-lists facet])
++     {:db db}
++     {:db db
++      :dispatch [::martian/request
++                 (browse-list-op facet)
++                 {::martian/instance-id :tunarr-scheduler}
++                 [::load-browse-facet-success facet]
++                 [::load-browse-facet-failure facet]]})))
++
++(rf/reg-event-db
++ ::load-browse-facet-success
++ (fn [db [_ facet response]]
++   (let [body  (:body response)
++         items (case facet
++                 :tags     (:tags body)
++                 :genres   (:genres body)
++                 :channels (:channels body))]
++     (assoc-in db [:browse-lists facet] (vec items)))))
++
++(rf/reg-event-db
++ ::load-browse-facet-failure
++ (fn [db [_ facet response]]
++   (js/console.error "Failed to load browse facet:" (name facet) response)
++   (assoc-in db [:browse-lists facet] [])))
++
++(rf/reg-event-fx
++ ::load-browse-media
++ (fn [{:keys [db]} [_ facet value]]
++   (if (get-in db [:browse-media [facet value]])
++     {:db db}
++     (let [[op params] (browse-media-request facet value)]
++       {:db db
++        :dispatch [::martian/request
++                   op
++                   (assoc params ::martian/instance-id :tunarr-scheduler)
++                   [::load-browse-media-success facet value]
++                   [::load-browse-media-failure facet value]]}))))
++
++(rf/reg-event-db
++ ::load-browse-media-success
++ (fn [db [_ facet value response]]
++   (let [media (->> (get-in response [:body :media])
++                    (mapv strip-key-namespaces))]
++     (assoc-in db [:browse-media [facet value]] media))))
++
++(rf/reg-event-db
++ ::load-browse-media-failure
++ (fn [db [_ facet value response]]
++   (js/console.error "Failed to load media for" (name facet) value response)
++   (assoc-in db [:browse-media [facet value]] [])))
++
++(rf/reg-event-fx
++ ::browse-select-facet
++ (fn [{:keys [db]} [_ facet]]
++   {:db           (assoc db
++                         :active-page :browse
++                         :browse-facet facet
++                         :browse-selection nil
++                         :browse-filter ""
++                         :browse-media-page 1)
++    :push-history (routes/browse-path facet)
++    :dispatch     [::load-browse-facet facet]}))
++
++(rf/reg-event-fx
++ ::browse-select-item
++ (fn [{:keys [db]} [_ facet value]]
++   {:db           (assoc db
++                         :active-page :browse
++                         :browse-facet facet
++                         :browse-selection value
++                         :browse-media-page 1)
++    :push-history (routes/browse-path facet value)
++    :dispatch-n   [[::load-browse-facet facet]
++                   [::load-browse-media facet value]]}))
++
++(rf/reg-event-fx
++ ::browse-clear-selection
++ (fn [{:keys [db]} [_]]
++   (let [facet (:browse-facet db :tags)]
++     {:db           (assoc db :browse-selection nil :browse-media-page 1)
++      :push-history (routes/browse-path facet)
++      :dispatch     [::load-browse-facet facet]})))
++
++(rf/reg-event-db
++ ::set-browse-filter
++ (fn [db [_ text]]
++   (assoc db :browse-filter text)))
++
++(rf/reg-event-db
++ ::set-browse-media-page
++ (fn [db [_ page]]
++   (assoc db :browse-media-page page)))
++
+ ;; API documentation browser events
+ 
+ ;; Plain fetch of an OpenAPI spec from the BFF as a JSON map (string keys).
+diff --git a/src/marquee/pages/browse.cljs b/src/marquee/pages/browse.cljs
+new file mode 100644
+index 0000000..bdc41d7
+--- /dev/null
++++ b/src/marquee/pages/browse.cljs
+@@ -0,0 +1,216 @@
++(ns marquee.pages.browse
++  "Browse the Tunarr Scheduler catalog by tag, genre, or channel."
++  (:require [clojure.string :as str]
++            [re-frame.core :as rf]
++            [marquee.events :as events]
++            [marquee.subs :as subs]
++            [marquee.components.button :refer [button]]
++            [marquee.components.card :refer [card card-header card-title
++                                             card-description card-content
++                                             card-footer]]))
++
++(def ^:private page-size 24)
++
++(def ^:private facets
++  [{:key :tags     :label "Tags"}
++   {:key :genres   :label "Genres"}
++   {:key :channels :label "Channels"}])
++
++(defn- display-str [v]
++  (if (keyword? v) (name v) (str v)))
++
++;;; ── Facet lists ─────────────────────────────────────────────────────────────
++
++(defn facet-tabs [active]
++  [:div {:class "flex items-center gap-1 border-b pb-2"}
++   (for [{:keys [key label]} facets]
++     ^{:key key}
++     [button {:variant (if (= key active) :secondary :ghost)
++              :size :sm
++              :on-click #(rf/dispatch [::events/browse-select-facet key])}
++      label])])
++
++(defn filter-input [value]
++  [:input {:type "text"
++           :class "flex h-10 w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
++           :placeholder "Filter…"
++           :value value
++           :on-change #(rf/dispatch [::events/set-browse-filter (.. % -target -value)])}])
++
++(defn- matches-filter? [filter-text & strings]
++  (or (str/blank? filter-text)
++      (let [needle (str/lower-case filter-text)]
++        (some #(and % (str/includes? (str/lower-case (str %)) needle))
++              strings))))
++
++(defn tag-card [{:keys [tag usage-count example-titles]}]
++  [card {:class "cursor-pointer transition-colors hover:border-primary/50"
++         :on-click #(rf/dispatch [::events/browse-select-item :tags tag])}
++   [card-header {:class "p-4"}
++    [card-title {:class "text-base flex items-center justify-between gap-2"}
++     [:span {:class "truncate"} tag]
++     (when usage-count
++       [:span {:class "shrink-0 inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground"}
++        usage-count])]
++    (when (seq example-titles)
++      [card-description {:class "line-clamp-2"}
++       (str/join " · " (take 3 example-titles))])]])
++
++(defn tags-list [tags filter-text]
++  (let [visible (filterv #(matches-filter? filter-text (:tag %)) tags)]
++    (cond
++      (nil? tags)     [:p {:class "text-muted-foreground"} "Loading tags…"]
++      (empty? tags)   [:p {:class "text-muted-foreground"} "No tags found."]
++      (empty? visible) [:p {:class "text-muted-foreground"} "No tags match the filter."]
++      :else
++      [:div {:class "grid gap-3 sm:grid-cols-2"}
++       (for [t visible]
++         ^{:key (:tag t)}
++         [tag-card t])])))
++
++(defn genres-list [genres filter-text]
++  (let [visible (filterv #(matches-filter? filter-text %) genres)]
++    (cond
++      (nil? genres)    [:p {:class "text-muted-foreground"} "Loading genres…"]
++      (empty? genres)  [:p {:class "text-muted-foreground"} "No genres found."]
++      (empty? visible) [:p {:class "text-muted-foreground"} "No genres match the filter."]
++      :else
++      [:div {:class "flex flex-wrap gap-2"}
++       (for [g visible]
++         ^{:key g}
++         [button {:variant :outline
++                  :size :sm
++                  :on-click #(rf/dispatch [::events/browse-select-item :genres g])}
++          g])])))
++
++(defn channel-card [{:keys [name full-name description]}]
++  [card {:class "cursor-pointer transition-colors hover:border-primary/50"
++         :on-click #(rf/dispatch [::events/browse-select-item :channels name])}
++   [card-header {:class "p-4"}
++    [card-title {:class "text-base"} (or full-name name)]
++    (when (and full-name (not= full-name name))
++      [card-description {} name])
++    (when description
++      [card-description {:class "line-clamp-2"} description])]])
++
++(defn channels-list [channels filter-text]
++  (let [visible (filterv #(matches-filter? filter-text (:name %) (:full-name %)) channels)]
++    (cond
++      (nil? channels)  [:p {:class "text-muted-foreground"} "Loading channels…"]
++      (empty? channels) [:p {:class "text-muted-foreground"} "No channels found."]
++      (empty? visible) [:p {:class "text-muted-foreground"} "No channels match the filter."]
++      :else
++      [:div {:class "grid gap-3 sm:grid-cols-2"}
++       (for [ch visible]
++         ^{:key (:name ch)}
++         [channel-card ch])])))
++
++;;; ── Media results ───────────────────────────────────────────────────────────
++
++(defn- metadata-chips
++  "Clickable chips that jump to browsing by that tag/genre/channel."
++  [facet values current]
++  (when (seq values)
++    [:div {:class "flex flex-wrap gap-1.5"}
++     (for [v values
++           :let [label (display-str v)]]
++       ^{:key label}
++       [:button {:class (str "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors "
++                             (if (= label current)
++                               "bg-primary text-primary-foreground"
++                               "bg-secondary text-secondary-foreground hover:bg-secondary/70"))
++                 :on-click #(rf/dispatch [::events/browse-select-item facet label])}
++        label])]))
++
++(defn media-result-card
++  "Card for a media item as returned by the scheduler's browse endpoints."
++  [{:keys [id name overview item-kind type production-year tags genres]} facet selection]
++  [card {}
++   [card-header {:class "pb-2"}
++    [card-title {:class "text-lg"} (or name (str "Item #" id))]
++    [card-description {}
++     (str/join " · " (remove nil? [(some-> (or item-kind type) display-str)
++                                   production-year]))]]
++   [card-content {:class "space-y-2"}
++    (when overview
++      [:p {:class "text-sm text-muted-foreground line-clamp-3"} overview])
++    [metadata-chips :tags tags (when (= facet :tags) selection)]
++    [metadata-chips :genres genres (when (= facet :genres) selection)]]
++   (when id
++     [card-footer {}
++      [button {:size :sm
++               :variant :outline
++               :on-click #(rf/dispatch [::events/navigate-to-media-detail id])}
++       "View Details"]])])
++
++(defn pagination-controls [current-page total-pages]
++  (let [has-prev (> current-page 1)
++        has-next (< current-page total-pages)]
++    [:div {:class "flex items-center justify-between border-t pt-4 mt-6"}
++     [:div {:class "flex items-center gap-2"}
++      [button {:size :sm
++               :variant :outline
++               :disabled (not has-prev)
++               :on-click #(rf/dispatch [::events/set-browse-media-page (dec current-page)])}
++       "← Previous"]
++      [button {:size :sm
++               :variant :outline
++               :disabled (not has-next)
++               :on-click #(rf/dispatch [::events/set-browse-media-page (inc current-page)])}
++       "Next →"]]
++     [:div {:class "text-sm text-muted-foreground"}
++      (str "Page " current-page " of " total-pages)]]))
++
++(defn media-results [facet selection]
++  (let [items @(rf/subscribe [::subs/browse-media facet selection])
++        page  @(rf/subscribe [::subs/browse-media-page])
++        total-pages (when items (js/Math.ceil (/ (count items) page-size)))
++        start (* (dec page) page-size)
++        visible (when (seq items)
++                  (subvec (vec items) start (min (+ start page-size) (count items))))]
++    [:div {:class "space-y-4"}
++     [:div {:class "flex items-center gap-3"}
++      [button {:variant :ghost
++               :size :sm
++               :on-click #(rf/dispatch [::events/browse-clear-selection])}
++       (str "← All " (str/lower-case (some :label (filter #(= (:key %) facet) facets))))]]
++     [:div
++      [:h2 {:class "text-2xl font-semibold"} selection]
++      (when items
++        [:p {:class "text-sm text-muted-foreground"}
++         (str (count items) " item" (when (not= 1 (count items)) "s"))])]
++     (cond
++       (nil? items)  [:p {:class "text-muted-foreground"} "Loading media…"]
++       (empty? items) [:p {:class "text-muted-foreground"} "No media found."]
++       :else
++       [:div
++        [:div {:class "grid gap-4"}
++         (for [item visible]
++           ^{:key (or (:id item) (:name item))}
++           [media-result-card item facet selection])]
++        (when (> total-pages 1)
++          [pagination-controls page total-pages])])]))
++
++;;; ── Page ────────────────────────────────────────────────────────────────────
++
++(defn page []
++  (let [facet       @(rf/subscribe [::subs/browse-facet])
++        selection   @(rf/subscribe [::subs/browse-selection])
++        filter-text @(rf/subscribe [::subs/browse-filter])
++        entries     @(rf/subscribe [::subs/browse-list facet])]
++    [:div {:class "space-y-6"}
++     [:div
++      [:h1 {:class "text-3xl font-bold tracking-tight"} "Browse"]
++      [:p {:class "text-muted-foreground"}
++       "Explore the catalog by tag, genre, or channel."]]
++
++     [facet-tabs facet]
++
++     (if selection
++       [media-results facet selection]
++       [:div {:class "space-y-4"}
++        [filter-input filter-text]
++        (case facet
++          :tags     [tags-list entries filter-text]
++          :genres   [genres-list entries filter-text]
++          :channels [channels-list entries filter-text])])]))
+diff --git a/src/marquee/pages/media_detail.cljs b/src/marquee/pages/media_detail.cljs
+index 816b3e4..f5c501d 100644
+--- a/src/marquee/pages/media_detail.cljs
++++ b/src/marquee/pages/media_detail.cljs
+@@ -38,12 +38,21 @@
+ 
+ ;;; ── Rendering primitives ────────────────────────────────────────────────────
+ 
+-(defn chips [values]
+-  [:div {:class "flex flex-wrap gap-1.5"}
+-   (for [[i v] (map-indexed vector values)]
+-     ^{:key i}
+-     [:span {:class "inline-flex items-center rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground"}
+-      (display-str v)])])
++(defn chips
++  "Render values as chips. With `on-click`, chips become buttons and the
++  handler is called with the chip's display string."
++  ([values] [chips values nil])
++  ([values on-click]
++   [:div {:class "flex flex-wrap gap-1.5"}
++    (for [[i v] (map-indexed vector values)
++          :let [label (display-str v)]]
++      ^{:key i}
++      (if on-click
++        [:button {:class "inline-flex items-center rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/70"
++                  :on-click #(on-click label)}
++         label]
++        [:span {:class "inline-flex items-center rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground"}
++         label]))]))
+ 
+ (declare render-value)
+ 
+@@ -72,11 +81,13 @@
+      [:dt {:class "text-sm font-medium text-muted-foreground"} label]
+      [:dd {:class "text-sm col-span-2"} [render-value value]]]))
+ 
+-(defn chip-list [label values]
+-  (when (seq values)
+-    [:div {:class "py-2"}
+-     [:p {:class "text-sm font-medium text-muted-foreground mb-1.5"} label]
+-     [chips values]]))
++(defn chip-list
++  ([label values] [chip-list label values nil])
++  ([label values on-click]
++   (when (seq values)
++     [:div {:class "py-2"}
++      [:p {:class "text-sm font-medium text-muted-foreground mb-1.5"} label]
++      [chips values on-click]])))
+ 
+ (defn remaining-fields
+   "Render any fields not in `shown`, so nothing is hidden."
+@@ -190,9 +201,12 @@
+         [field-row "Pseudovision ID" (:id merged)]
+         [field-row "Jellyfin ID"    remote-key]
+         [parent-field-row (:parent-id merged) jellyfin-url]]
+-       [chip-list "Tags"     (or (field-by-name merged "tags")     (:tags merged))]
+-       [chip-list "Genres"   (or (field-by-name merged "genres")   (:genres merged))]
+-       [chip-list "Channels" (or (field-by-name merged "channels") (:channels merged))]
++       [chip-list "Tags"     (or (field-by-name merged "tags")     (:tags merged))
++        #(rf/dispatch [::events/browse-select-item :tags %])]
++       [chip-list "Genres"   (or (field-by-name merged "genres")   (:genres merged))
++        #(rf/dispatch [::events/browse-select-item :genres %])]
++       [chip-list "Channels" (or (field-by-name merged "channels") (:channels merged))
++        #(rf/dispatch [::events/browse-select-item :channels %])]
+        [chip-list "Taglines" (or (field-by-name merged "taglines") (:taglines merged))]
+        [remaining-fields merged known-fields]])]])
+ 
+diff --git a/src/marquee/routes.cljs b/src/marquee/routes.cljs
+index 216be14..cf02101 100644
+--- a/src/marquee/routes.cljs
++++ b/src/marquee/routes.cljs
+@@ -4,6 +4,7 @@
+   {:home             "/"
+    :about            "/about"
+    :media            "/media"
++   :browse           "/browse"
+    :api-docs         "/api-docs"
+    :schedule-grid    "/schedule"
+    :channel-schedule "/schedule/channel"
+@@ -15,15 +16,25 @@
+ (defn channel-path [channel-id]
+   (str "/schedule/channel/" channel-id))
+ 
++(defn browse-path
++  ([facet] (str "/browse/" (name facet)))
++  ([facet selection]
++   (str "/browse/" (name facet) "/" (js/encodeURIComponent selection))))
++
+ (defn parse-path [path]
+   (case path
+     "/"          {:page :home}
+     "/about"     {:page :about}
+     "/media"     {:page :media}
++    "/browse"    {:page :browse :facet :tags}
+     "/api-docs"  {:page :api-docs}
+     "/schedule"  {:page :schedule-grid}
+     (or (when-let [[_ id] (re-matches #"/media/(.+)" path)]
+           {:page :media-detail :media-id id})
++        (when-let [[_ facet sel] (re-matches #"/browse/(tags|genres|channels)(?:/(.+))?" path)]
++          {:page      :browse
++           :facet     (keyword facet)
++           :selection (when sel (js/decodeURIComponent sel))})
+         (when-let [[_ id] (re-matches #"/schedule/channel/(.+)" path)]
+           {:page :channel-schedule :channel-id (js/parseInt id)})
+         (when (= path "/jobs")
+diff --git a/src/marquee/subs.cljs b/src/marquee/subs.cljs
+index b00f696..c5de338 100644
+--- a/src/marquee/subs.cljs
++++ b/src/marquee/subs.cljs
+@@ -101,6 +101,40 @@
+        (js/Math.ceil (/ (count items) page-size))
+        0))))
+ 
++;; ---------------------------------------------------------------------------
++;; Browse by metadata subscriptions
++;; ---------------------------------------------------------------------------
++
++(rf/reg-sub
++ ::browse-facet
++ (fn [db _]
++   (:browse-facet db :tags)))
++
++(rf/reg-sub
++ ::browse-selection
++ (fn [db _]
++   (:browse-selection db)))
++
++(rf/reg-sub
++ ::browse-list
++ (fn [db [_ facet]]
++   (get-in db [:browse-lists facet])))
++
++(rf/reg-sub
++ ::browse-filter
++ (fn [db _]
++   (:browse-filter db "")))
++
++(rf/reg-sub
++ ::browse-media
++ (fn [db [_ facet value]]
++   (get-in db [:browse-media [facet value]])))
++
++(rf/reg-sub
++ ::browse-media-page
++ (fn [db _]
++   (:browse-media-page db 1)))
++
+ ;; API documentation browser subscriptions
+ 
+ (rf/reg-sub
+diff --git a/src/marquee/views.cljs b/src/marquee/views.cljs
+index 54e4e90..1645ad3 100644
+--- a/src/marquee/views.cljs
++++ b/src/marquee/views.cljs
+@@ -7,6 +7,7 @@
+             [marquee.pages.about :as about]
+             [marquee.pages.media :as media]
+             [marquee.pages.media-detail :as media-detail]
++            [marquee.pages.browse :as browse]
+             [marquee.pages.api-docs :as api-docs]
+             [marquee.pages.schedule :as schedule]
+             [marquee.pages.jobs :as jobs]))
+@@ -15,6 +16,7 @@
+   {:home             {:label "Home"     :view home/page          :show-in-nav true}
+    :about            {:label "About"    :view about/page         :show-in-nav true}
+    :media            {:label "Media"    :view media/page         :show-in-nav true}
++   :browse           {:label "Browse"   :view browse/page        :show-in-nav true}
+    :api-docs         {:label "API Docs" :view api-docs/page      :show-in-nav true}
+    :schedule-grid    {:label "Guide"    :view schedule/grid-page :show-in-nav true}
+    :jobs             {:label "Jobs"     :view jobs/page          :show-in-nav true}
+-- 
+2.43.0
+
