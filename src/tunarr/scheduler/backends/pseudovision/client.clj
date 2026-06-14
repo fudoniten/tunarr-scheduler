@@ -42,6 +42,31 @@
       (throw (ex-info "HTTP request failed" {:url url} e)))))
 
 ;; ---------------------------------------------------------------------------
+;; Pagination Helpers
+;; ---------------------------------------------------------------------------
+;;
+;; Pseudovision list endpoints return an offset-pagination envelope:
+;;   {:items [...] :pagination {:limit ... :offset ... :total ... :has_more ...}}
+;; These helpers unwrap that envelope and transparently fetch every page so
+;; callers always receive a flat vector of items.
+
+(def ^:private page-size 500)
+
+(defn- fetch-all-pages
+  "Fetch every page from a paginated Pseudovision endpoint and return the
+   concatenated items as a vector. `fetch-page` is a 2-arg fn (limit offset)
+   returning the raw response body (an offset-pagination envelope)."
+  [fetch-page]
+  (loop [offset 0
+         acc    []]
+    (let [body  (fetch-page page-size offset)
+          items (:items body)
+          acc'  (into acc items)]
+      (if (and (get-in body [:pagination :has_more]) (seq items))
+        (recur (+ offset (count items)) acc')
+        acc'))))
+
+;; ---------------------------------------------------------------------------
 ;; Tag Management
 ;; ---------------------------------------------------------------------------
 
@@ -82,9 +107,11 @@
 
    Returns vector of maps: [{:name 'comedy' :count 42} ...]"
   [config]
-  (request! :get
-            (api-url config "/api/tags")
-            {}))
+  (fetch-all-pages
+   (fn [limit offset]
+     (request! :get
+               (api-url config "/api/tags")
+               {:query-params {"limit" limit "offset" offset}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Media Sources
@@ -93,9 +120,11 @@
 (defn list-media-sources
   "List all configured media sources (local, plex, jellyfin, emby)."
   [config]
-  (request! :get
-            (api-url config "/api/media/sources")
-            {}))
+  (fetch-all-pages
+   (fn [limit offset]
+     (request! :get
+               (api-url config "/api/media/sources")
+               {:query-params {"limit" limit "offset" offset}}))))
 
 (defn create-media-source!
   "Create a new media source.
@@ -125,9 +154,11 @@
 (defn list-all-libraries
   "List all media libraries across all sources."
   [config]
-  (request! :get
-            (api-url config "/api/media/libraries")
-            {}))
+  (fetch-all-pages
+   (fn [limit offset]
+     (request! :get
+               (api-url config "/api/media/libraries")
+               {:query-params {"limit" limit "offset" offset}}))))
 
 (defn list-source-libraries
   "List all libraries for a specific media source."
@@ -169,20 +200,26 @@
      :limit - Max items to return in this batch (default: no limit, optional for pagination)
      :offset - Starting item index for pagination (0-based, optional)
 
-   Returns vector of item maps (guaranteed to have :id).
-   
+   Returns vector of item maps (guaranteed to have :id). When neither :limit
+   nor :offset is supplied, every page is fetched and the full set is returned.
+
    Example paginated usage:
      (list-library-items config lib-id {:limit 500 :offset 0})    ; Fetch first 500
      (list-library-items config lib-id {:limit 500 :offset 500})  ; Fetch next 500"
   [config library-id & [{:keys [attrs type parent-id limit offset]}]]
-  (request! :get
-            (api-url config (str "/api/media/libraries/" library-id "/items"))
-            {:query-params (cond-> {}
-                             attrs     (assoc "attrs" attrs)
-                             type      (assoc "type" type)
-                             parent-id (assoc "parent-id" (str parent-id))
-                             limit     (assoc "limit" limit)
-                             offset    (assoc "offset" offset))}))
+  (let [base-params (cond-> {}
+                      attrs     (assoc "attrs" attrs)
+                      type      (assoc "type" type)
+                      parent-id (assoc "parent-id" (str parent-id)))
+        fetch-page  (fn [lim off]
+                      (request! :get
+                                (api-url config (str "/api/media/libraries/" library-id "/items"))
+                                {:query-params (assoc base-params "limit" lim "offset" off)}))]
+    (if (or limit offset)
+      ;; Caller is driving pagination explicitly: return just the requested page.
+      (vec (:items (fetch-page (or limit page-size) (or offset 0))))
+      ;; Otherwise fetch every page so callers get the complete library.
+      (fetch-all-pages fetch-page))))
 
 (defn scan-library!
   "Trigger an asynchronous library scan.
@@ -251,9 +288,11 @@
 (defn get-collections
   "List all collections (smart/manual/playlist/multi/trakt/rerun)."
   [config]
-  (request! :get
-            (api-url config "/api/media/collections")
-            {}))
+  (fetch-all-pages
+   (fn [limit offset]
+     (request! :get
+               (api-url config "/api/media/collections")
+               {:query-params {"limit" limit "offset" offset}}))))
 
 (defn create-collection!
   "Create a new collection.
@@ -298,9 +337,11 @@
 (defn list-schedules
   "List all schedules."
   [config]
-  (request! :get
-            (api-url config "/api/schedules")
-            {}))
+  (fetch-all-pages
+   (fn [limit offset]
+     (request! :get
+               (api-url config "/api/schedules")
+               {:query-params {"limit" limit "offset" offset}}))))
 
 (defn update-schedule!
   "Update an existing schedule.
