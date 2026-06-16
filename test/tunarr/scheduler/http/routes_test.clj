@@ -533,3 +533,69 @@
       ;; This should either be a 404 (route not matched) or handled gracefully
       (is (or (= 404 (:status response))
               (= 400 (:status response)))))))
+
+;; Get media by ID endpoint tests
+;;
+;; The catalog primary key may hold either a Pseudovision media-item ID or its
+;; Jellyfin remote-key, depending on how the item was synced, so the endpoint
+;; must accept either form and resolve external IDs through Pseudovision.
+
+(deftest get-media-by-id-direct-hit-test
+  (testing "GET /api/media-item/:id returns the item when the ID matches the catalog key directly"
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "catalog-1")
+                               {::media/id "catalog-1" ::media/name "Direct Hit"}))]
+      (let [handler (routes/handler {:job-runner   *job-runner*
+                                     :collection   mock-collection
+                                     :catalog      *catalog*
+                                     :tunabrain    mock-tunabrain})
+            response (handler (mock/request :get "/api/media-item/catalog-1"))
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= "catalog-1" (:tunarr.scheduler.media/id body)))))))
+
+(deftest get-media-by-id-resolves-external-id-test
+  (testing "GET /api/media-item/:id resolves an external/Jellyfin ID via Pseudovision"
+    ;; Catalog is keyed on the Jellyfin remote-key; caller supplies the
+    ;; Pseudovision internal ID, which Pseudovision maps back to the remote-key.
+    (let [mock-pv {:config {:base-url "http://localhost:8080"}}]
+      (with-redefs [catalog/get-media-by-id
+                    (fn [_ id] (when (= id "jelly-1")
+                                 {::media/id "jelly-1" ::media/name "External Hit"}))
+                    pv-client/get-media-item
+                    (fn [_ id] (when (= id "pv-1")
+                                 {:id "pv-1" :remote-key "jelly-1"}))]
+        (let [handler (routes/handler {:job-runner   *job-runner*
+                                       :collection   mock-collection
+                                       :catalog      *catalog*
+                                       :tunabrain    mock-tunabrain
+                                       :pseudovision mock-pv})
+              response (handler (mock/request :get "/api/media-item/pv-1"))
+              body     (parse-json-response response)]
+          (is (= 200 (:status response)))
+          (is (= "jelly-1" (:tunarr.scheduler.media/id body))))))))
+
+(deftest get-media-by-id-not-found-test
+  (testing "GET /api/media-item/:id returns 404 when neither direct nor Pseudovision lookup matches"
+    (let [mock-pv {:config {:base-url "http://localhost:8080"}}]
+      (with-redefs [catalog/get-media-by-id (fn [_ _] nil)
+                    pv-client/get-media-item (fn [_ _] nil)]
+        (let [handler (routes/handler {:job-runner   *job-runner*
+                                       :collection   mock-collection
+                                       :catalog      *catalog*
+                                       :tunabrain    mock-tunabrain
+                                       :pseudovision mock-pv})
+              response (handler (mock/request :get "/api/media-item/missing"))
+              body     (parse-json-response response)]
+          (is (= 404 (:status response)))
+          (is (contains? body :error)))))))
+
+(deftest get-media-by-id-no-pseudovision-test
+  (testing "GET /api/media-item/:id falls back to direct lookup only when Pseudovision is absent"
+    (with-redefs [catalog/get-media-by-id (fn [_ _] nil)]
+      (let [handler (routes/handler {:job-runner *job-runner*
+                                     :collection mock-collection
+                                     :catalog    *catalog*
+                                     :tunabrain  mock-tunabrain})
+            response (handler (mock/request :get "/api/media-item/whatever"))]
+        (is (= 404 (:status response)))))))
