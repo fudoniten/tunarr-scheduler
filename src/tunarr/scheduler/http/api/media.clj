@@ -30,6 +30,36 @@
        :else v))
    data))
 
+(defn- resolve-media-by-id
+  "Look up a media item by ID, accepting either the catalog's own ID or an
+   external/Jellyfin ID.
+
+   The catalog primary key (`media.id`) may hold either a Pseudovision
+   media-item ID or its Jellyfin `remote-key`, depending on how the item was
+   synced, and callers may legitimately send either form. We first try a
+   direct catalog lookup. On a miss, and when Pseudovision is configured, we
+   ask Pseudovision (which accepts internal or external IDs) to resolve the ID,
+   then retry the catalog lookup against both the resolved item's internal
+   `:id` and its Jellyfin `:remote-key` — whichever one was used as the
+   catalog key will match."
+  [catalog pseudovision media-id]
+  (or (catalog/get-media-by-id catalog media-id)
+      (when pseudovision
+        (when-let [pv-item (try
+                             (pv-client/get-media-item
+                              (pv-client/get-config pseudovision) media-id)
+                             (catch Exception e
+                               (log/debug e "Pseudovision could not resolve media ID"
+                                          {:media-id media-id})
+                               nil))]
+          (some (fn [candidate]
+                  (when (not= candidate media-id)
+                    (catalog/get-media-by-id catalog candidate)))
+                (->> [(:id pv-item) (:remote-key pv-item)]
+                     (remove nil?)
+                     (map str)
+                     distinct))))))
+
 (defn- submit-job!
   "Generic job submission helper for async operations."
   [job-runner job-type library error-msg job-fn]
@@ -356,12 +386,15 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn get-media-by-id-handler
-  "Get a specific media item by ID with process timestamps."
-  [{:keys [catalog]}]
+  "Get a specific media item by ID with process timestamps.
+
+   Accepts either the catalog's own media ID or an external/Jellyfin ID;
+   external IDs are resolved through Pseudovision when configured."
+  [{:keys [catalog pseudovision]}]
   (fn [req]
     (try
       (let [media-id (get-in req [:parameters :path :media-id])]
-        (if-let [media (catalog/get-media-by-id catalog media-id)]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
           {:status 200 :body (serialize-time-fields media)}
           {:status 404 :body {:error (str "Media not found: " media-id)}}))
       (catch Exception e

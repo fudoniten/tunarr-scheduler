@@ -124,7 +124,7 @@
    ProcessName ProcessTimestamp])
 
 (def MediaId
-  [:string {:min 1 :description "Media item identifier"}])
+  [:string {:min 1 :description "Media item identifier (catalog ID or external/Jellyfin ID)"}])
 
 (def MediaType
   [:enum {:description "Type of media item"}
