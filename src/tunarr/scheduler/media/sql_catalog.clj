@@ -585,7 +585,7 @@
   (get-media-by-id [this media-id]
     (when-let [media (first (sql:fetch! executor (-> (sql:get-media)
                                                      (where [:= :media/id media-id]))))]
-      (first (catalog/enrich-media-with-timestamps this [media]))))
+      (first (catalog/enrich-media-with-timestamps this [(row->media media)]))))
 
   (add-media-tags! [_ media-id tags]
     (sql:exec-with-tx! executor

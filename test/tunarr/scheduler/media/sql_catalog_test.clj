@@ -176,8 +176,8 @@
     (catalog/add-media! *test-catalog* sample-movie)
 
     (let [media (catalog/get-media-by-id *test-catalog* "movie-1")]
-      (is (seq media))
-      (is (= "Test Movie" (:media/name (first media)))))))
+      (is (some? media))
+      (is (= "Test Movie" (::media/name media))))))
 
 (deftest get-media-by-library-test
   (testing "retrieve media by library name"
@@ -455,8 +455,8 @@
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (let [media (first (catalog/get-media-by-id *test-catalog* "movie-1"))]
-      (is (keyword? (:media/media_type media))))))
+    (let [media (catalog/get-media-by-id *test-catalog* "movie-1")]
+      (is (keyword? (::media/type media))))))
 
 (deftest tag-array-transformation-test
   (testing "tags are transformed from arrays to vectors of keywords"
@@ -595,10 +595,10 @@
                                ::media/overview "Updated overview"
                                ::media/community-rating 99.0))
 
-    (let [m (first (catalog/get-media-by-id *test-catalog* "movie-1"))]
-      (is (= "Renamed Movie" (:media/name m)))
-      (is (= "Updated overview" (:media/overview m)))
-      (is (= 99.0 (:media/community_rating m))))))
+    (let [m (catalog/get-media-by-id *test-catalog* "movie-1")]
+      (is (= "Renamed Movie" (::media/name m)))
+      (is (= "Updated overview" (::media/overview m)))
+      (is (= 99.0 (::media/community-rating m))))))
 
 (deftest upsert-preserves-curation-tags-test
   (testing "upserting an item does not drop tags added later by curation"
@@ -652,9 +652,9 @@
                               [(assoc sample-movie ::media/name "Movie v2")
                                sample-series])
 
-    (let [movie  (first (catalog/get-media-by-id *test-catalog* "movie-1"))
-          series (first (catalog/get-media-by-id *test-catalog* "series-1"))
+    (let [movie  (catalog/get-media-by-id *test-catalog* "movie-1")
+          series (catalog/get-media-by-id *test-catalog* "series-1")
           tags   (set (catalog/get-media-tags *test-catalog* "movie-1"))]
-      (is (= "Movie v2" (:media/name movie)))
-      (is (= "Test Series" (:media/name series)))
+      (is (= "Movie v2" (::media/name movie)))
+      (is (= "Test Series" (::media/name series)))
       (is (contains? tags :curated) "curation tag survives batch upsert"))))
