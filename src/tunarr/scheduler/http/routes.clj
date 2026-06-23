@@ -387,7 +387,11 @@
   (let [router
         (ring/router
          (routes ctx)
-         {:data {:muuntaja   mw/muuntaja
+         {;; Allow the static "/api/strategies/current" route to coexist with the
+          ;; "/api/strategies/:id" wildcard route. Reitit's router resolves these
+          ;; at runtime by preferring the exact/static match over the wildcard.
+          :conflicts nil
+          :data {:muuntaja   mw/muuntaja
                  :coercion   malli-coercion/coercion
                  :middleware [parameters/parameters-middleware
                               muuntaja-mw/format-negotiate-middleware
