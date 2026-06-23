@@ -110,8 +110,8 @@
                              (if (s/invalid? (s/conform ::media/metadata defaulted))
                                (do (log/warn :msg "Skipping invalid media item" :item item)
                                    nil)
-                               defaulted)))\
-                        items)]\
+                               defaulted)))
+                        items)]
           (doall (remove nil? parsed))))))
 
   (close! [_]

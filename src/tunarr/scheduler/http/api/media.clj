@@ -100,7 +100,13 @@
         {:status 400 :body {:error "Pseudovision is not configured"}}
         (let [pv-config   (pv-client/get-config pseudovision)
               libraries   (pv-client/list-all-libraries pv-config)
-              library-map (into {} (map (fn [lib] [(keyword (:kind lib)) (:id lib)]) libraries))]
+              ;; Key by the library's name (matching the startup sync in
+              ;; system.clj). The catalog stores `library.name` and looks
+              ;; libraries up by name, and the upsert resolves conflicts on
+              ;; `name` (refreshing the id). Keying by `:kind` instead stored
+              ;; the kind as the name and caused `library_pkey` violations
+              ;; whenever an already-synced id reappeared under a new name.
+              library-map (into {} (map (fn [lib] [(keyword (:name lib)) (:id lib)]) libraries))]
           (catalog/update-libraries! catalog library-map)
           (log/info "Synced libraries from Pseudovision" {:count (count library-map)})
           {:status 200 :body {:libraries libraries}}))
