@@ -57,13 +57,13 @@
    If auto-commit is enabled in the cron config, the strategy is applied
    immediately (the weekly template task will pick up the new strategy
    context).  Otherwise it is stored as a draft for review."
-  [{:keys [llm channels auto-commit]}]
+  [{:keys [llm channels executor auto-commit]}]
   (log/info "cron: running monthly strategy generation" {:auto-commit auto-commit})
   (when llm
-    (let [s (strategy/generate-strategy! llm channels :monthly)]
+    (let [s (strategy/generate-strategy! executor llm channels :monthly)]
       (if auto-commit
         (do
-          (strategy/apply-strategy! (:id s))
+          (strategy/apply-strategy! executor (:id s))
           (log/info "cron: monthly strategy generated and committed"
                     {:id (:id s)}))
         (log/info "cron: monthly strategy generated (draft — awaiting review)"
@@ -73,13 +73,13 @@
   "Generate a high-level programming outline via LLM.
 
    Same auto-commit behaviour as monthly-task."
-  [{:keys [llm channels auto-commit]}]
+  [{:keys [llm channels executor auto-commit]}]
   (log/info "cron: running quarterly strategy generation" {:auto-commit auto-commit})
   (when llm
-    (let [s (strategy/generate-strategy! llm channels :quarterly)]
+    (let [s (strategy/generate-strategy! executor llm channels :quarterly)]
       (if auto-commit
         (do
-          (strategy/apply-strategy! (:id s))
+          (strategy/apply-strategy! executor (:id s))
           (log/info "cron: quarterly strategy generated and committed"
                     {:id (:id s)}))
         (log/info "cron: quarterly strategy generated (draft — awaiting review)"

@@ -198,13 +198,14 @@
   nil)
 
 (defmethod ig/init-key :tunarr/cron-scheduler
-  [_ {:keys [config pseudovision channels llm]}]
+  [_ {:keys [config pseudovision channels llm catalog]}]
   (log/info "initializing cron scheduler")
   (let [scheduler (cron/create config)]
     (when scheduler
       (cron/start! scheduler {:pseudovision pseudovision
                               :channels channels
-                              :llm llm})
+                              :llm llm
+                              :executor (:executor catalog)})
       scheduler)))
 
 (defmethod ig/halt-key! :tunarr/cron-scheduler

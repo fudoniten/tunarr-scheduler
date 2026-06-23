@@ -137,7 +137,8 @@
       :tunarr/cron-scheduler {:config (get config :scheduler {:enabled false})
                               :pseudovision (ig/ref :tunarr/pseudovision)
                               :channels channel-config
-                              :llm (ig/ref :tunarr/llm)}
+                              :llm (ig/ref :tunarr/llm)
+                              :catalog (ig/ref :tunarr/catalog)}
       :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
                                      (or (get-in config [:server :port]))
                                      (parse-port))
