@@ -754,7 +754,4 @@
               response (handler (mock/request :get "/api/channels/6/schedule"))
               body     (parse-json-response response)]
           (is (= 404 (:status response)))
-          (is (contains? body :error))))))
-              body     (parse-json-response response)]
-          (is (= 404 (:status response)))
           (is (contains? body :error)))))))
