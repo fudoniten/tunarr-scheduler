@@ -342,6 +342,17 @@
                                500 {:body s/APIError}}
                    :handler   (strategy/reject-strategy-handler ctx)}}]
 
+    ["/api/strategies/:id/revert"
+     {:tags       ["strategies"]
+      :parameters {:path [:map [:id s/StrategyId]]}
+      :post       {:summary   "Revert a strategy and restore the previous one"
+                   :responses {200 {:body [:map {:closed false}
+                                          [:reverted s/Strategy]
+                                          [:restored {:optional true} [:maybe s/Strategy]]]}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (strategy/revert-strategy-handler ctx)}}]
+
     ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
      {:tags ["jobs"]

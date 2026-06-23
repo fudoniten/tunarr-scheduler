@@ -26,6 +26,7 @@
                :monthly-day #or [#env SCHEDULER_MONTHLY_DAY 1]
                :monthly-hour #or [#env SCHEDULER_MONTHLY_HOUR 5]
                :quarterly-hour #or [#env SCHEDULER_QUARTERLY_HOUR 6]
+               :auto-commit #or [#env SCHEDULER_AUTO_COMMIT true]
                :daytime-hours {:start 6 :end 20}
                :seasonal {:december [:holiday]
                           :october [:spooky]}

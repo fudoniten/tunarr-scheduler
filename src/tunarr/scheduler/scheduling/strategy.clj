@@ -178,3 +178,29 @@
   (->> (list-strategies)
        (filter #(= (:period %) period))
        first))
+
+(defn revert-strategy!
+  "Mark a strategy as reverted and restore the previous strategy as active.
+
+   This is the escape hatch when an auto-committed strategy is bad.
+   The reverted strategy is kept in history for reference.
+
+   Returns {:reverted strategy :restored strategy-or-nil}."
+  [id]
+  (when-let [s (get-strategy id)]
+    (let [period (:period s)
+          all (list-strategies)
+          ;; Find the previous non-rejected strategy for the same period
+          previous (->> all
+                        (filter #(and (= (:period %) period)
+                                      (not= (:id %) id)
+                                      (not= (:status %) :rejected)))
+                        second)
+          updated (assoc s :status :reverted :reverted-at (now-iso))]
+      (swap! strategy-store assoc id updated)
+      (when previous
+        (swap! strategy-store assoc (:id previous)
+               (assoc previous :status :applied :restored-at (now-iso))))
+      (log/info "Strategy reverted" {:id id :restored (:id previous)})
+      {:reverted updated
+       :restored previous})))

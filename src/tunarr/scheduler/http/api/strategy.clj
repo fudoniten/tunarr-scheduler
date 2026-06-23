@@ -99,3 +99,18 @@
       (catch Exception e
         (log/error e "Error generating strategy")
         {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn revert-strategy-handler
+  "POST /api/strategies/:id/revert — undo a strategy and restore the previous one.
+
+   This is the escape hatch when an auto-committed strategy is bad."
+  [_]
+  (fn [req]
+    (try
+      (let [id (get-in req [:parameters :path :id])]
+        (if-let [result (strategy/revert-strategy! id)]
+          {:status 200 :body result}
+          {:status 404 :body {:error "Strategy not found"}}))
+      (catch Exception e
+        (log/error e "Error reverting strategy")
+        {:status 500 :body {:error (.getMessage e)}}))))

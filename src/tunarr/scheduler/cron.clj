@@ -52,22 +52,38 @@
       (log/error e "cron: failed to apply templates"))))
 
 (defn- monthly-task
-  "Generate a refined scheduling strategy via LLM.  The strategy is stored
-   as a draft for Marquee / Hermes to inspect before applying."
-  [{:keys [llm channels]}]
-  (log/info "cron: running monthly strategy generation")
+  "Generate a refined scheduling strategy via LLM.
+
+   If auto-commit is enabled in the cron config, the strategy is applied
+   immediately (the weekly template task will pick up the new strategy
+   context).  Otherwise it is stored as a draft for review."
+  [{:keys [llm channels auto-commit]}]
+  (log/info "cron: running monthly strategy generation" {:auto-commit auto-commit})
   (when llm
     (let [s (strategy/generate-strategy! llm channels :monthly)]
-      (log/info "cron: monthly strategy generated" {:id (:id s)}))))
+      (if auto-commit
+        (do
+          (strategy/apply-strategy! (:id s))
+          (log/info "cron: monthly strategy generated and committed"
+                    {:id (:id s)}))
+        (log/info "cron: monthly strategy generated (draft — awaiting review)"
+                  {:id (:id s)})))))
 
 (defn- quarterly-task
-  "Generate a high-level programming outline via LLM.  Stored as a draft
-   for review before applying."
-  [{:keys [llm channels]}]
-  (log/info "cron: running quarterly strategy generation")
+  "Generate a high-level programming outline via LLM.
+
+   Same auto-commit behaviour as monthly-task."
+  [{:keys [llm channels auto-commit]}]
+  (log/info "cron: running quarterly strategy generation" {:auto-commit auto-commit})
   (when llm
     (let [s (strategy/generate-strategy! llm channels :quarterly)]
-      (log/info "cron: quarterly strategy generated" {:id (:id s)}))))
+      (if auto-commit
+        (do
+          (strategy/apply-strategy! (:id s))
+          (log/info "cron: quarterly strategy generated and committed"
+                    {:id (:id s)}))
+        (log/info "cron: quarterly strategy generated (draft — awaiting review)"
+                  {:id (:id s)})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Cron engine
@@ -115,14 +131,15 @@
 (defn- run-tasks
   "Evaluate which tasks should fire and execute them."
   [ctx now config]
-  (when (should-run-daily? now config)
-    (daily-task ctx))
-  (when (should-run-weekly? now config)
-    (weekly-task ctx))
-  (when (should-run-monthly? now config)
-    (monthly-task ctx))
-  (when (should-run-quarterly? now config)
-    (quarterly-task ctx)))
+  (let [ctx-with-commit (assoc ctx :auto-commit (boolean (:auto-commit config)))]
+    (when (should-run-daily? now config)
+      (daily-task ctx))
+    (when (should-run-weekly? now config)
+      (weekly-task ctx))
+    (when (should-run-monthly? now config)
+      (monthly-task ctx-with-commit))
+    (when (should-run-quarterly? now config)
+      (quarterly-task ctx-with-commit))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
@@ -145,17 +162,18 @@
   (if enabled
     (let [pool (Executors/newSingleThreadScheduledExecutor)
           running (AtomicBoolean. false)]
-      {:pool pool
-       :config (merge {:time-zone "UTC"
-                       :check-interval 60
-                       :daily-hour 3
-                       :weekly-day 1
-                       :weekly-hour 4
-                       :monthly-day 1
-                       :monthly-hour 5
-                       :quarterly-hour 6}
-                      config)
-       :running running})
+       {:pool pool
+        :config (merge {:time-zone "UTC"
+                        :check-interval 60
+                        :daily-hour 3
+                        :weekly-day 1
+                        :weekly-hour 4
+                        :monthly-day 1
+                        :monthly-hour 5
+                        :quarterly-hour 6
+                        :auto-commit true}
+                       config)
+        :running running})
     (do (log/info "cron scheduler disabled")
         nil)))
 
