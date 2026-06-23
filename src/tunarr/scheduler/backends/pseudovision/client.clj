@@ -4,8 +4,6 @@
    Provides integration with Pseudovision's native scheduling engine,
    tag management, and streaming capabilities."
   (:require [clj-http.client :as http]
-            [camel-snake-kebab.core :as csk]
-            [cheshire.core :as json]
             [tunarr.scheduler.backends.protocol :as proto]
             [taoensso.timbre :as log]))
 
@@ -15,25 +13,6 @@
 
 (defn- api-url [config path]
   (str (:base-url config) path))
-
-(defn- ->snake-case-keys
-  "Recursively convert all map keys to snake_case strings.
-
-   Pseudovision's API expects snake_case JSON keys (e.g. 'slot_index',
-   'fill_mode') but Clojure data structures typically use kebab-case keywords.
-   This normalises the request body so the API receives the expected format."
-  [m]
-  (cond
-    (map? m)
-    (into {} (map (fn [[k v]]
-                    [(csk/->snake_case_string (if (keyword? k) (name k) k))
-                     (->snake-case-keys v)]))
-          m)
-    (sequential? m)
-    (mapv ->snake-case-keys m)
-    (keyword? m)
-    (name m)
-    :else m))
 
 (defn- request!
   "Make HTTP request to Pseudovision API with error handling."
@@ -105,7 +84,7 @@
   (request! :post
             (api-url config (str "/api/media-items/" media-item-id "/tags"))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys {:tags tags}))}))
+             :json-params {:tags tags}}))
 
 (defn get-tags
   "Get all tags for a media item.
@@ -159,7 +138,7 @@
   (request! :post
             (api-url config "/api/media/sources")
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys source-data))}))
+             :json-params source-data}))
 
 (defn delete-media-source!
   "Delete a media source by ID."
@@ -200,7 +179,7 @@
   (request! :post
             (api-url config (str "/api/media/sources/" source-id "/libraries"))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys library-data))}))
+             :json-params library-data}))
 
 (defn discover-libraries!
   "Discover and create libraries from a remote media source.
@@ -327,7 +306,7 @@
   (request! :post
             (api-url config "/api/media/collections")
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys collection-data))}))
+             :json-params collection-data}))
 
 ;; ---------------------------------------------------------------------------
 ;; Schedule Management
@@ -346,7 +325,7 @@
   (request! :post
             (api-url config "/api/schedules")
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys schedule-data))}))
+             :json-params schedule-data}))
 
 (defn get-schedule
   "Get schedule by ID."
@@ -378,7 +357,7 @@
   (request! :put
             (api-url config (str "/api/schedules/" schedule-id))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys schedule-data))}))
+             :json-params schedule-data}))
 
 (defn delete-schedule!
   "Delete a schedule by ID."
@@ -414,7 +393,7 @@
   (request! :post
             (api-url config (str "/api/schedules/" schedule-id "/slots"))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys slot-data))}))
+             :json-params slot-data}))
 
 (defn list-slots
   "List all slots for a schedule."
@@ -436,7 +415,7 @@
   (request! :put
             (api-url config (str "/api/schedules/" schedule-id "/slots/" slot-id))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys slot-data))}))
+             :json-params slot-data}))
 
 (defn delete-slot!
   "Delete a slot by schedule ID and slot ID."
@@ -478,7 +457,7 @@
   (request! :post
             (api-url config "/api/channels")
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys channel-data))}))
+             :json-params channel-data}))
 
 (defn update-channel!
   "Update channel configuration.
@@ -491,7 +470,7 @@
   (request! :put
             (api-url config (str "/api/channels/" channel-id))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys updates))}))
+             :json-params updates}))
 
 (defn get-playout
   "Get the playout record for a channel, including build status and cursor."
@@ -540,7 +519,7 @@
   (request! :post
             (api-url config (str "/api/channels/" channel-id "/playout/events"))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys event-data))}))
+             :json-params event-data}))
 
 (defn update-manual-event!
   "Update a manual playout event. event-data is a partial map of event fields."
@@ -548,7 +527,7 @@
   (request! :put
             (api-url config (str "/api/channels/" channel-id "/playout/events/" event-id))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys event-data))}))
+             :json-params event-data}))
 
 (defn delete-manual-event!
   "Delete a manual playout event."
@@ -585,7 +564,7 @@
   (request! :post
             (api-url config "/api/ffmpeg/profiles")
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys profile-data))}))
+             :json-params profile-data}))
 
 (defn update-ffmpeg-profile!
   "Update an FFmpeg profile. profile-data is a partial map."
@@ -593,7 +572,7 @@
   (request! :put
             (api-url config (str "/api/ffmpeg/profiles/" profile-id))
             {:content-type :json
-             :body (json/generate-string (->snake-case-keys profile-data))}))
+             :json-params profile-data}))
 
 (defn delete-ffmpeg-profile!
   "Delete an FFmpeg profile. Returns map with :deleted true and :profile."
