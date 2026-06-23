@@ -8,12 +8,19 @@
             [tunarr.scheduler.scheduling.strategy :as strategy]))
 
 (defn list-strategies-handler
-  "GET /api/strategies — list all strategies newest-first."
+  "GET /api/strategies — list all strategies newest-first.
+
+   Optional query params :period (:monthly|:quarterly) and
+   :status (:draft|:applied|:rejected|:reverted) narrow the result."
   [_]
-  (fn [_]
+  (fn [req]
     (try
-      {:status 200
-       :body {:strategies (strategy/list-strategies)}}
+      (let [{:keys [period status]} (get-in req [:parameters :query])
+            strategies (cond->> (strategy/list-strategies)
+                         period (filter #(= (:period %) period))
+                         status (filter #(= (:status %) status)))]
+        {:status 200
+         :body {:strategies (vec strategies)}})
       (catch Exception e
         (log/error e "Error listing strategies")
         {:status 500 :body {:error (.getMessage e)}}))))
@@ -32,13 +39,20 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn get-current-strategy-handler
-  "GET /api/strategies/current — get the most recent strategy."
+  "GET /api/strategies/current — get the most recent strategy.
+
+   With an optional :period query param, returns the most recent strategy
+   for that period instead of the most recent across all periods."
   [_]
-  (fn [_]
+  (fn [req]
     (try
-      (if-let [s (strategy/current-strategy)]
-        {:status 200 :body s}
-        {:status 404 :body {:error "No strategies yet"}})
+      (let [period (get-in req [:parameters :query :period])
+            s (if period
+                (strategy/current-strategy-by-period period)
+                (strategy/current-strategy))]
+        (if s
+          {:status 200 :body s}
+          {:status 404 :body {:error "No strategies yet"}}))
       (catch Exception e
         (log/error e "Error getting current strategy")
         {:status 500 :body {:error (.getMessage e)}}))))

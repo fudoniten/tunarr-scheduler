@@ -295,6 +295,7 @@
     ["/api/strategies"
      {:tags ["strategies"]
       :get  {:summary   "List all scheduling strategies"
+             :parameters {:query s/StrategyListQuery}
              :responses {200 {:body s/StrategyListResponse}}
              :handler   (strategy/list-strategies-handler ctx)}
       :post {:summary   "Generate a new strategy"
@@ -307,6 +308,7 @@
     ["/api/strategies/current"
      {:tags ["strategies"]
       :get  {:summary   "Get the most recent strategy"
+             :parameters {:query s/CurrentStrategyQuery}
              :responses {200 {:body s/Strategy}
                          404 {:body s/APIError}}
              :handler   (strategy/get-current-strategy-handler ctx)}}]

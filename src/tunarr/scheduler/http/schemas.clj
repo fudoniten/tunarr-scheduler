@@ -318,7 +318,7 @@
   [:enum {:description "Strategy period"} :monthly :quarterly])
 
 (def StrategyStatus
-  [:enum {:description "Strategy lifecycle status"} :draft :applied :rejected])
+  [:enum {:description "Strategy lifecycle status"} :draft :applied :rejected :reverted])
 
 (def ChannelAdjustment
   [:map
@@ -351,6 +351,17 @@
    [:strategies [:vector Strategy]]])
 
 (def GenerateStrategyRequest
+  [:map
+   [:period {:optional true} StrategyPeriod]])
+
+(def StrategyListQuery
+  "Optional filters for the strategy list endpoint."
+  [:map
+   [:period {:optional true} StrategyPeriod]
+   [:status {:optional true} StrategyStatus]])
+
+(def CurrentStrategyQuery
+  "Optional period selector for the current-strategy endpoint."
   [:map
    [:period {:optional true} StrategyPeriod]])
 
