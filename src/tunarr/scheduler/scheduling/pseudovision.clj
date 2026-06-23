@@ -10,7 +10,7 @@
 ;; Schedule Spec → Pseudovision API Translation
 ;; ---------------------------------------------------------------------------
 
-(defn- slot-spec->pseudovision-slot
+(defn slot-spec->pseudovision-slot
   "Convert a schedule slot spec to Pseudovision API format.
    
    Input slot spec:
@@ -38,39 +38,47 @@
   (cond-> {:slot-index idx
            :fill-mode (name (or (:fill-mode slot-spec) :flood))
            :playback-order (name (or (:playback-order slot-spec) :shuffle))}
-    
+
     ;; Anchor type
     (:time slot-spec)
     (assoc :anchor "fixed" :start-time (:time slot-spec))
-    
+
     (not (:time slot-spec))
     (assoc :anchor "sequential")
-    
-    ;; Block duration (convert hours to ISO-8601)
+
+    ;; Block duration: raw ISO-8601 string takes priority
+    (:block-duration slot-spec)
+    (assoc :block-duration (:block-duration slot-spec))
+
+    ;; Block duration: legacy hours → ISO-8601 conversion
     (:duration-hours slot-spec)
     (assoc :block-duration (str "PT" (:duration-hours slot-spec) "H"))
-    
+
     ;; Item count for count mode
     (:item-count slot-spec)
     (assoc :item-count (:item-count slot-spec))
-    
+
     ;; Content source
     (:collection-id slot-spec)
     (assoc :collection-id (:collection-id slot-spec))
-    
+
     (:media-item-id slot-spec)
     (assoc :media-item-id (:media-item-id slot-spec))
-    
+
     ;; Tag filters (convert keywords to strings)
     (seq (:required-tags slot-spec))
     (assoc :required-tags (mapv name (:required-tags slot-spec)))
-    
+
     (seq (:excluded-tags slot-spec))
     (assoc :excluded-tags (mapv name (:excluded-tags slot-spec)))
-    
+
     ;; Semi-sequential batch size
     (:batch-size slot-spec)
-    (assoc :marathon-batch-size (:batch-size slot-spec))))
+    (assoc :marathon-batch-size (:batch-size slot-spec))
+
+    ;; Day-of-week bitmask (integer, e.g. 21 for MWF)
+    (:days-of-week slot-spec)
+    (assoc :days-of-week (:days-of-week slot-spec))))
 
 ;; ---------------------------------------------------------------------------
 ;; Schedule Generation

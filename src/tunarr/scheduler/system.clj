@@ -13,6 +13,7 @@
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
             [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.backends.protocol :as backend-protocol]
             [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
 
@@ -214,13 +215,22 @@
   (log/info "bumpers service shutdown disabled (not yet implemented)")
   nil)
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain throttler backends curation-config pseudovision channels]}]
+(defmethod ig/init-key :tunarr/llm [_ {:keys [provider endpoint api-key model] :as config}]
+  (log/info "initialising llm client" {:provider provider :model model})
+  (llm/create! config))
+
+(defmethod ig/halt-key! :tunarr/llm [_ client]
+  (log/info "shutting down llm client")
+  nil)
+
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain throttler llm backends curation-config pseudovision channels]}]
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
                 :catalog catalog
                 :tunabrain tunabrain
                 :throttler throttler
+                :llm llm
                 :backends backends
                 :pseudovision pseudovision
                 :channels channels

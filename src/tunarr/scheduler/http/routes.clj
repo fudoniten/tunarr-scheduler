@@ -12,7 +12,8 @@
             [tunarr.scheduler.http.api.media        :as media]
             [tunarr.scheduler.http.api.channels     :as channels]
             [tunarr.scheduler.http.api.jobs         :as jobs]
-            [tunarr.scheduler.http.api.browse       :as browse]))
+            [tunarr.scheduler.http.api.browse       :as browse]
+            [tunarr.scheduler.http.api.intent       :as intent]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -245,16 +246,51 @@
                         500 {:body s/APIError}}
             :handler   (channels/sync-channels-handler ctx)}}]
 
-   ["/api/channels/:channel-id/schedule"
-    {:tags       ["channels"]
-     :parameters {:path [:map [:channel-id s/ChannelId]]
-                  :body s/ChannelScheduleRequest}
-     :post       {:summary   "Update channel schedule in Pseudovision"
-                  :responses {200 {:body s/ChannelScheduleResponse}
-                              500 {:body s/APIError}}
-                  :handler   (channels/update-schedule-handler ctx)}}]
+    ["/api/channels/:channel-id/schedule"
+     {:tags       ["channels"]
+      :parameters {:path [:map [:channel-id s/ChannelId]]}
+      :get       {:summary   "Get current channel schedule from Pseudovision"
+                   :parameters {:query [:map [:horizon {:optional true} [:int {:min 1 :max 365}]]]}
+                   :responses {200 {:body s/ChannelScheduleInfoResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (channels/get-schedule-handler ctx)}
+      :post       {:summary   "Update channel schedule in Pseudovision"
+                   :parameters {:body s/ChannelScheduleRequest}
+                   :responses {200 {:body s/ChannelScheduleResponse}
+                               500 {:body s/APIError}}
+                   :handler   (channels/update-schedule-handler ctx)}}]
 
-   ;; ── Jobs ────────────────────────────────────────────────────────────────
+    ["/api/channels/:channel-id/apply-template"
+     {:tags       ["channels"]
+      :parameters {:path [:map [:channel-id s/ChannelId]]
+                   :body s/ApplyTemplateRequest}
+      :post       {:summary   "Apply a schedule template to a channel"
+                   :responses {200 {:body s/ChannelScheduleResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (channels/apply-template-handler ctx)}}]
+
+    ["/api/channels/all/apply-templates"
+     {:tags ["channels"]
+      :post {:summary   "Apply default templates to all channels"
+             :responses {200 {:body s/ApplyAllTemplatesResponse}
+                         500 {:body s/APIError}}
+             :handler   (channels/apply-all-templates-handler ctx)}}]
+
+    ;; ── Intent ───────────────────────────────────────────────────────────────
+    ["/api/channels/:channel-id/intent"
+     {:tags       ["intent"]
+      :parameters {:path [:map [:channel-id s/ChannelId]]
+                   :body s/IntentRequest}
+      :post       {:summary   "Process a natural-language scheduling intent"
+                   :responses {200 {:body s/IntentResponse}
+                               400 {:body s/APIError}
+                               422 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (intent/intent-handler ctx)}}]
+
+    ;; ── Jobs ────────────────────────────────────────────────────────────────
    ["/api/jobs"
     {:tags ["jobs"]
      :get  {:summary   "List all async jobs"

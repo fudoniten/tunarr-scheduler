@@ -7,7 +7,8 @@
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.tunabrain :as tunabrain]
-            [tunarr.scheduler.backends.pseudovision.client :as pv-client]))
+            [tunarr.scheduler.backends.pseudovision.client :as pv-client]
+            [tunarr.scheduler.llm :as llm]))
 
 ;; Mock catalog implementation for testing
 (defrecord MockCatalog [state]
@@ -599,3 +600,161 @@
                                      :tunabrain  mock-tunabrain})
             response (handler (mock/request :get "/api/media-item/whatever"))]
         (is (= 404 (:status response)))))))
+
+;; ── Intent endpoint tests ────────────────────────────────────────────
+
+(deftest intent-endpoint-dry-run-test
+  (testing "POST /api/channels/:id/intent with dry-run returns preview without applying"
+    (let [mock-llm {:provider :mock}
+          mock-pv  {:config {:base-url "http://localhost:8080"}}]
+      (with-redefs [llm/chat-completion!
+                    (fn [_ _]
+                      (json/generate-string
+                        {:success true
+                         :reasoning "User wants to replace the 6pm slot with Cheers"
+                         :operations [{:type "update_slot"
+                                       :slot_index 1
+                                       :changes {:required_tags ["cheers"]}}]
+                         :preview {:affected_blocks ["Tue/Thu 18:00"]
+                                   :description "Now plays Cheers sequentially"}}))
+
+                    pv-client/get-channel
+                    (fn [_ _]
+                      {:id 6 :name "Test Channel" :schedule-id 42})
+
+                    pv-client/get-schedule
+                    (fn [_ _]
+                      {:id 42 :name "Test Schedule"})
+
+                    pv-client/list-slots
+                    (fn [_ _]
+                      [{:id 101 :slot_index 0 :start_time "08:00:00" :required_tags ["comedy"]}
+                       {:id 102 :slot_index 1 :start_time "18:00:00" :required_tags ["drama"]}
+                       {:id 103 :slot_index 2 :start_time "22:00:00" :required_tags ["action"]}])
+
+                    pv-client/update-slot!
+                    (fn [& _] (throw (Exception. "Should not be called in dry-run")))]
+
+        (let [handler  (routes/handler {:job-runner   *job-runner*
+                                         :collection   mock-collection
+                                         :catalog      *catalog*
+                                         :tunabrain    mock-tunabrain
+                                         :pseudovision mock-pv
+                                         :llm          mock-llm})
+              request  (-> (mock/request :post "/api/channels/6/intent")
+                           (mock/json-body {:instruction "Replace the 6pm block with Cheers"
+                                            :dry-run     true}))
+              response (handler request)
+              body     (parse-json-response response)]
+          (is (= 200 (:status response)))
+          (is (true? (:success body)))
+          (is (= "User wants to replace the 6pm slot with Cheers" (:reasoning body)))
+          (is (= 1 (count (:operations body))))
+          (is (= "update_slot" (:type (first (:operations body)))))
+          (is (false? (:applied? body))))))))
+
+(deftest intent-endpoint-applies-changes-test
+  (testing "POST /api/channels/:id/intent applies changes when not dry-run"
+    (let [mock-llm {:provider :mock}
+          mock-pv  {:config {:base-url "http://localhost:8080"}}
+          updated  (atom nil)]
+      (with-redefs [llm/chat-completion!
+                    (fn [_ _]
+                      (json/generate-string
+                        {:success true
+                         :reasoning "User wants to replace the 6pm slot with Cheers"
+                         :operations [{:type "update_slot"
+                                       :slot_index 1
+                                       :changes {:required_tags ["cheers"]}}]
+                         :preview {:affected_blocks ["Tue/Thu 18:00"]
+                                   :description "Now plays Cheers sequentially"}}))
+
+                    pv-client/get-channel
+                    (fn [_ _]
+                      {:id 6 :name "Test Channel" :schedule-id 42})
+
+                    pv-client/get-schedule
+                    (fn [_ _]
+                      {:id 42 :name "Test Schedule"})
+
+                    pv-client/list-slots
+                    (fn [_ _]
+                      [{:id 101 :slot_index 0 :start_time "08:00:00" :required_tags ["comedy"]}
+                       {:id 102 :slot_index 1 :start_time "18:00:00" :required_tags ["drama"]}
+                       {:id 103 :slot_index 2 :start_time "22:00:00" :required_tags ["action"]}])
+
+                    pv-client/update-slot!
+                    (fn [_ _ slot-id slot-data]
+                      (reset! updated {:slot-id slot-id :data slot-data})
+                      {:id slot-id :updated true})]
+
+        (let [handler  (routes/handler {:job-runner   *job-runner*
+                                         :collection   mock-collection
+                                         :catalog      *catalog*
+                                         :tunabrain    mock-tunabrain
+                                         :pseudovision mock-pv
+                                         :llm          mock-llm})
+              request  (-> (mock/request :post "/api/channels/6/intent")
+                           (mock/json-body {:instruction "Replace the 6pm block with Cheers"}))
+              response (handler request)
+              body     (parse-json-response response)]
+          (is (= 200 (:status response)))
+          (is (true? (:success body)))
+          (is (true? (:applied? body)))
+          (is (= 102 (:slot-id @updated)))
+          (is (= ["cheers"] (get-in @updated [:data :required_tags]))))))))
+
+(deftest get-schedule-endpoint-test
+  (testing "GET /api/channels/:id/schedule returns current schedule"
+    (let [mock-pv {:config {:base-url "http://localhost:8080"}}]
+      (with-redefs [pv-client/get-channel
+                    (fn [_ _]
+                      {:id 6 :name "Test Channel" :schedule-id 42})
+
+                    pv-client/get-schedule
+                    (fn [_ _]
+                      {:id 42 :name "Test Schedule"})
+
+                    pv-client/list-slots
+                    (fn [_ _]
+                      [{:id 101 :slot_index 0 :start_time "08:00:00"}
+                       {:id 102 :slot_index 1 :start_time "18:00:00"}])
+
+                    pv-client/list-playout-events
+                    (fn [_ _]
+                      [{:id 1 :title "Show 1" :start_at "2026-01-01T08:00:00Z"}
+                       {:id 2 :title "Show 2" :start_at "2026-01-01T09:00:00Z"}])]
+
+        (let [handler  (routes/handler {:job-runner   *job-runner*
+                                         :collection   mock-collection
+                                         :catalog      *catalog*
+                                         :tunabrain    mock-tunabrain
+                                         :pseudovision mock-pv})
+              response (handler (mock/request :get "/api/channels/6/schedule"))
+              body     (parse-json-response response)]
+          (is (= 200 (:status response)))
+          (is (= 6 (:channel-id body)))
+          (is (= "Test Channel" (:channel-name body)))
+          (is (= 42 (:schedule-id body)))
+          (is (= 2 (count (:slots body))))
+          (is (= 2 (count (:upcoming-events body)))))))))
+
+(deftest get-schedule-no-schedule-test
+  (testing "GET /api/channels/:id/schedule returns 404 when no schedule attached"
+    (let [mock-pv {:config {:base-url "http://localhost:8080"}}]
+      (with-redefs [pv-client/get-channel
+                    (fn [_ _]
+                      {:id 6 :name "Test Channel"})]
+
+        (let [handler  (routes/handler {:job-runner   *job-runner*
+                                         :collection   mock-collection
+                                         :catalog      *catalog*
+                                         :tunabrain    mock-tunabrain
+                                         :pseudovision mock-pv})
+              response (handler (mock/request :get "/api/channels/6/schedule"))
+              body     (parse-json-response response)]
+          (is (= 404 (:status response)))
+          (is (contains? body :error))))))
+              body     (parse-json-response response)]
+          (is (= 404 (:status response)))
+          (is (contains? body :error)))))))

@@ -115,6 +115,7 @@
      :tunarr/job-runner (get config :jobs {})
      :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
      :tunarr/tunabrain (:tunabrain config)
+     :tunarr/llm (get config :llm {:provider :mock})
      :tunarr/pseudovision pseudovision-config
      :tunarr/backends backends-config
      ;; TODO: Add tts, media-source, tunarr-source, scheduler, and bumpers configs when implemented
@@ -137,16 +138,17 @@
                                     (or (get-in config [:server :port]))
                                     (parse-port))
                           :job-runner (ig/ref :tunarr/job-runner)
-                          :tunabrain (ig/ref :tunarr/tunabrain)
-                          :throttler (ig/ref :tunarr/tunabrain-throttler)
-                          :collection (ig/ref :tunarr/collection)
-                          :catalog (ig/ref :tunarr/catalog)
-                          :backends (ig/ref :tunarr/backends)
-                          :pseudovision (ig/ref :tunarr/pseudovision)
-                          :channels channel-config
-                          :logger (ig/ref :tunarr/logger)
-                          :curation-config (merge curation-config
-                                                  {:channels  channel-config
-                                                   :categories categories-config})
-                          ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
-                          }}))
+                           :tunabrain (ig/ref :tunarr/tunabrain)
+                           :throttler (ig/ref :tunarr/tunabrain-throttler)
+                           :llm (ig/ref :tunarr/llm)
+                           :collection (ig/ref :tunarr/collection)
+                           :catalog (ig/ref :tunarr/catalog)
+                           :backends (ig/ref :tunarr/backends)
+                           :pseudovision (ig/ref :tunarr/pseudovision)
+                           :channels channel-config
+                           :logger (ig/ref :tunarr/logger)
+                           :curation-config (merge curation-config
+                                                   {:channels  channel-config
+                                                    :categories categories-config})
+                           ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
+                           }}))
