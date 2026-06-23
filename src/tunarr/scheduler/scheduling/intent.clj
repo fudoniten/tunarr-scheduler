@@ -256,7 +256,7 @@
     (if dry-run?
       {:success true
        :reasoning reasoning
-       :operations (mapv #(assoc % :success nil :dry-run true) operations)
+       :operations (mapv #(assoc % :dry-run true) operations)
        :preview preview
        :applied? false}
 

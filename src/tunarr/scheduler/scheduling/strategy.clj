@@ -120,6 +120,7 @@
                         :strategy "Strategy generation failed"
                         :channel-adjustments []
                         :special-events []
+                        :channels (vec channel-names)
                         :error (.getMessage e)}]
           (swap! strategy-store assoc (:id fallback) fallback)
           fallback)))))
@@ -195,7 +196,7 @@
                         (filter #(and (= (:period %) period)
                                       (not= (:id %) id)
                                       (not= (:status %) :rejected)))
-                        second)
+                        first)
           updated (assoc s :status :reverted :reverted-at (now-iso))]
       (swap! strategy-store assoc id updated)
       (when previous
