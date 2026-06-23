@@ -18,21 +18,26 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- slot->description
-  "Convert a PV slot into a human-readable description for the LLM prompt."
+  "Convert a PV slot into a human-readable description for the LLM prompt.
+
+   NOTE: PV slot field names are a best-guess kebab-case mapping (consistent
+   with slot-spec->pseudovision-slot and the 'kebab-case everywhere' refactor).
+   Re-verify against a live GET /api/schedules/:id/slots payload — see TODO in
+   execute-operation!."
   [slot idx]
-  (let [anchor (:schedule-slots/anchor slot)
+  (let [anchor (:anchor slot)
         time (when (= "fixed" anchor)
-               (:schedule-slots/start-time slot))
-        dow (:schedule-slots/days-of-week slot 127)
+               (:start-time slot))
+        dow (:days-of-week slot 127)
         days (cond
                (= dow 127) "every day"
                (= dow 31) "weekdays"
                (= dow 96) "weekends"
                :else (str "days bitmask " dow))
-        fill (:schedule-slots/fill-mode slot)
-        tags (:schedule-slots/required-tags slot)
-        excluded (:schedule-slots/excluded-tags slot)
-        order (:schedule-slots/playback-order slot)]
+        fill (:fill-mode slot)
+        tags (:required-tags slot)
+        excluded (:excluded-tags slot)
+        order (:playback-order slot)]
     (str "Block " idx ": "
          (when time (str "at " time " "))
          "(" days ") — "
@@ -117,6 +122,11 @@
    Returns:
      {:success true/false :operation op :result ... :error ...}"
   [pv-config channel-id schedule-id op]
+  ;; TODO: The PV slot field names (:slot-index, :id, :playback-order, …) are a
+  ;; best-guess kebab-case mapping consistent with slot-spec->pseudovision-slot
+  ;; and the "kebab-case everywhere" refactor. Verify against a live
+  ;; GET /api/schedules/:id/slots response and adjust if PV actually emits
+  ;; snake_case or namespaced keys.
   (try
     (case (:type op)
       "update_slot"
@@ -126,7 +136,7 @@
             slots (pv/list-slots pv-config schedule-id)
             target (first (filter #(= (:slot-index %) slot-idx) slots))]
         (if target
-          (let [slot-id (:schedule-slots/id target)
+          (let [slot-id (:id target)
                 pv-changes (cond-> {}
                              (:required_tags changes) (assoc :required-tags (:required_tags changes))
                              (:excluded_tags changes) (assoc :excluded-tags (:excluded_tags changes))
@@ -143,7 +153,7 @@
             target (first (filter #(= (:slot-index %) slot-idx) slots))]
         (if target
           (do
-            (pv/delete-slot! pv-config schedule-id (:schedule-slots/id target))
+            (pv/delete-slot! pv-config schedule-id (:id target))
             (pv/add-slot! pv-config schedule-id (pv-schedule/slot-spec->pseudovision-slot new-slot slot-idx))
             {:success true :operation op :result :replaced})
           {:success false :operation op :error (str "Slot index " slot-idx " not found")}))
@@ -154,7 +164,7 @@
             target (first (filter #(= (:slot-index %) slot-idx) slots))]
         (if target
           (do
-            (pv/delete-slot! pv-config schedule-id (:schedule-slots/id target))
+            (pv/delete-slot! pv-config schedule-id (:id target))
             {:success true :operation op :result :deleted})
           {:success false :operation op :error (str "Slot index " slot-idx " not found")}))
 
@@ -170,8 +180,8 @@
             slots (pv/list-slots pv-config schedule-id)
             target (first (filter #(= (:slot-index %) slot-idx) slots))]
         (if target
-          (let [slot-id (:schedule-slots/id target)
-                current-order (:schedule-slots/playback-order target)
+          (let [slot-id (:id target)
+                current-order (:playback-order target)
                 new-order (case current-order
                             "shuffle" "random"
                             "random" "chronological"
@@ -219,7 +229,9 @@
 
   ;; 1. Fetch current schedule
   (let [channel (pv/get-channel pv-config channel-id)
-        schedule-id (:channels/schedule-id channel)
+        ;; TODO: verify PV channel field names against a live response (see
+        ;; TODO in execute-operation!). Best-guess kebab-case.
+        schedule-id (:schedule-id channel)
         schedule (when schedule-id
                    (pv/get-schedule pv-config schedule-id))
         slots (when schedule-id
@@ -227,7 +239,7 @@
         schedule-with-slots (assoc schedule :slots slots)
 
         ;; 2. Build prompt
-        prompt (build-context-prompt (:channels/name channel) schedule-with-slots available-tags tag-samples)
+        prompt (build-context-prompt (:name channel) schedule-with-slots available-tags tag-samples)
         messages [{:role "system" :content prompt}
                   {:role "user" :content instruction}]
 
