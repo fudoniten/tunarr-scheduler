@@ -12,8 +12,9 @@
             [tunarr.scheduler.curation.tags :as tag-curator]
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
-            [tunarr.scheduler.tunabrain :as tunabrain]
+             [tunarr.scheduler.tunabrain :as tunabrain]
             [tunarr.scheduler.llm :as llm]
+            [tunarr.scheduler.cron :as cron]
             [tunarr.scheduler.backends.protocol :as backend-protocol]
             [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
 
@@ -196,15 +197,20 @@
   (log/info "shutting down backends")
   nil)
 
-;; TODO: Implement scheduler engine for automated channel programming
-(defmethod ig/init-key :tunarr/scheduler [_ {:keys [time-zone daytime-hours seasonal preferences]
-                                             :as config}]
-  (log/info "scheduler engine initialization disabled (not yet implemented)")
-  nil)
+(defmethod ig/init-key :tunarr/cron-scheduler
+  [_ {:keys [config pseudovision channels llm]}]
+  (log/info "initializing cron scheduler")
+  (let [scheduler (cron/create config)]
+    (when scheduler
+      (cron/start! scheduler {:pseudovision pseudovision
+                              :channels channels
+                              :llm llm})
+      scheduler)))
 
-(defmethod ig/halt-key! :tunarr/scheduler [_ engine]
-  (log/info "scheduler engine shutdown disabled (not yet implemented)")
-  nil)
+(defmethod ig/halt-key! :tunarr/cron-scheduler
+  [_ scheduler]
+  (log/info "shutting down cron scheduler")
+  (cron/stop! scheduler))
 
 ;; TODO: Implement bumpers service for generating inter-program content
 (defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain tts]}]

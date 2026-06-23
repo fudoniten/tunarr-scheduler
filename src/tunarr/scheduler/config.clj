@@ -134,21 +134,25 @@
                           :catalog (ig/ref :tunarr/catalog)}
      :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
                              :tag-config tag-config}
-     :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
-                                    (or (get-in config [:server :port]))
-                                    (parse-port))
-                          :job-runner (ig/ref :tunarr/job-runner)
-                           :tunabrain (ig/ref :tunarr/tunabrain)
-                           :throttler (ig/ref :tunarr/tunabrain-throttler)
-                           :llm (ig/ref :tunarr/llm)
-                           :collection (ig/ref :tunarr/collection)
-                           :catalog (ig/ref :tunarr/catalog)
-                           :backends (ig/ref :tunarr/backends)
-                           :pseudovision (ig/ref :tunarr/pseudovision)
-                           :channels channel-config
-                           :logger (ig/ref :tunarr/logger)
-                           :curation-config (merge curation-config
-                                                   {:channels  channel-config
-                                                    :categories categories-config})
-                           ;; TODO: Add scheduler, media, tts, bumpers, tunarr refs when implemented
-                           }}))
+      :tunarr/cron-scheduler {:config (get config :scheduler {:enabled false})
+                              :pseudovision (ig/ref :tunarr/pseudovision)
+                              :channels channel-config
+                              :llm (ig/ref :tunarr/llm)}
+      :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
+                                     (or (get-in config [:server :port]))
+                                     (parse-port))
+                           :job-runner (ig/ref :tunarr/job-runner)
+                            :tunabrain (ig/ref :tunarr/tunabrain)
+                            :throttler (ig/ref :tunarr/tunabrain-throttler)
+                            :llm (ig/ref :tunarr/llm)
+                            :collection (ig/ref :tunarr/collection)
+                            :catalog (ig/ref :tunarr/catalog)
+                            :backends (ig/ref :tunarr/backends)
+                            :pseudovision (ig/ref :tunarr/pseudovision)
+                            :channels channel-config
+                            :logger (ig/ref :tunarr/logger)
+                            :curation-config (merge curation-config
+                                                    {:channels  channel-config
+                                                     :categories categories-config})
+                            ;; TODO: Add media, tts, bumpers, tunarr refs when implemented
+                            }}))
