@@ -18,9 +18,12 @@ CREATE TABLE IF NOT EXISTS strategies (
     reverted_at         TEXT,
     restored_at         TEXT
 );
+--;;
 
 CREATE INDEX IF NOT EXISTS idx_strategies_created_at
     ON strategies (created_at DESC);
+--;;
 
 CREATE INDEX IF NOT EXISTS idx_strategies_period_created
     ON strategies (period, created_at DESC);
+--;;
