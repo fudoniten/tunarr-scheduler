@@ -13,7 +13,8 @@
             [tunarr.scheduler.http.api.channels     :as channels]
             [tunarr.scheduler.http.api.jobs         :as jobs]
             [tunarr.scheduler.http.api.browse       :as browse]
-            [tunarr.scheduler.http.api.intent       :as intent]))
+            [tunarr.scheduler.http.api.intent       :as intent]
+            [tunarr.scheduler.http.api.strategy     :as strategy]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -290,20 +291,71 @@
                                500 {:body s/APIError}}
                    :handler   (intent/intent-handler ctx)}}]
 
-    ;; ── Jobs ────────────────────────────────────────────────────────────────
-   ["/api/jobs"
-    {:tags ["jobs"]
-     :get  {:summary   "List all async jobs"
-            :responses {200 {:body s/JobListResponse}}
-            :handler   (jobs/list-jobs-handler ctx)}}]
+    ;; ── Strategy ────────────────────────────────────────────────────────────
+    ["/api/strategies"
+     {:tags ["strategies"]
+      :get  {:summary   "List all scheduling strategies"
+             :responses {200 {:body s/StrategyListResponse}}
+             :handler   (strategy/list-strategies-handler ctx)}
+      :post {:summary   "Generate a new strategy"
+             :parameters {:body s/GenerateStrategyRequest}
+             :responses {201 {:body s/Strategy}
+                         400 {:body s/APIError}
+                         500 {:body s/APIError}}
+             :handler   (strategy/generate-strategy-handler ctx)}}]
 
-   ["/api/jobs/:job-id"
-    {:tags       ["jobs"]
-     :parameters {:path [:map [:job-id s/JobId]]}
-     :get        {:summary   "Get job status and details"
-                  :responses {200 {:body s/JobInfoResponse}
-                              404 {:body s/APIError}}
-                  :handler   (jobs/get-job-handler ctx)}}]])
+    ["/api/strategies/current"
+     {:tags ["strategies"]
+      :get  {:summary   "Get the most recent strategy"
+             :responses {200 {:body s/Strategy}
+                         404 {:body s/APIError}}
+             :handler   (strategy/get-current-strategy-handler ctx)}}]
+
+    ["/api/strategies/:id"
+     {:tags       ["strategies"]
+      :parameters {:path [:map [:id s/StrategyId]]}
+      :get        {:summary   "Get a strategy by ID"
+                   :responses {200 {:body s/Strategy}
+                               404 {:body s/APIError}}
+                   :handler   (strategy/get-strategy-handler ctx)}
+      :delete     {:summary   "Delete a strategy"
+                   :responses {200 {:body s/Strategy}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (strategy/delete-strategy-handler ctx)}}]
+
+    ["/api/strategies/:id/apply"
+     {:tags       ["strategies"]
+      :parameters {:path [:map [:id s/StrategyId]]}
+      :post       {:summary   "Apply a strategy"
+                   :responses {200 {:body s/Strategy}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (strategy/apply-strategy-handler ctx)}}]
+
+    ["/api/strategies/:id/reject"
+     {:tags       ["strategies"]
+      :parameters {:path [:map [:id s/StrategyId]]}
+      :post       {:summary   "Reject a strategy"
+                   :responses {200 {:body s/Strategy}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (strategy/reject-strategy-handler ctx)}}]
+
+    ;; ── Jobs ────────────────────────────────────────────────────────────────
+    ["/api/jobs"
+     {:tags ["jobs"]
+      :get  {:summary   "List all async jobs"
+             :responses {200 {:body s/JobListResponse}}
+             :handler   (jobs/list-jobs-handler ctx)}}]
+
+    ["/api/jobs/:job-id"
+     {:tags       ["jobs"]
+      :parameters {:path [:map [:job-id s/JobId]]}
+      :get        {:summary   "Get job status and details"
+                   :responses {200 {:body s/JobInfoResponse}
+                               404 {:body s/APIError}}
+                   :handler   (jobs/get-job-handler ctx)}}]])
 
 ;; ---------------------------------------------------------------------------
 ;; Handler creation with middleware

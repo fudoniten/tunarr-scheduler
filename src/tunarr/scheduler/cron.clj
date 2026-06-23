@@ -9,10 +9,9 @@
 
    Hermes (external) can still use the intent API for ad-hoc adjustments,
    but this component ensures the channel never runs out of content."
-  (:require [clojure.string :as str]
-            [taoensso.timbre :as log]
-            [tunarr.scheduler.llm :as llm]
+  (:require [taoensso.timbre :as log]
             [tunarr.scheduler.scheduling.templates :as templates]
+            [tunarr.scheduler.scheduling.strategy :as strategy]
             [tunarr.scheduler.backends.pseudovision.client :as pv])
   (:import [java.time ZonedDateTime ZoneId]
            [java.util.concurrent Executors TimeUnit]
@@ -52,46 +51,23 @@
     (catch Exception e
       (log/error e "cron: failed to apply templates"))))
 
-(defn- generate-scheduling-strategy
-  "Use LLM to generate a high-level programming strategy for the upcoming
-   period.  Returns a structured strategy map."
-  [llm-config channels current-date]
-  (let [channel-names (map (fn [[k _]] (name k)) channels)
-        prompt (str "You are a TV programming director. Create a scheduling strategy for the next month.\n\n"
-                    "Channels: " (str/join ", " channel-names) "\n"
-                    "Date: " current-date "\n\n"
-                    "Return a JSON object with:\n"
-                    "  strategy: brief description of the month's theme\n"
-                    "  channel_adjustments: array of {channel, theme, notes} objects\n"
-                    "  special_events: array of {name, date, description} objects (optional)")]
-    (try
-      (let [response (llm/chat-completion!
-                       llm-config
-                       [{:role "system" :content prompt}
-                        {:role "user" :content "Generate strategy"}])]
-        (log/info "cron: generated strategy" {:response response})
-        response)
-      (catch Exception e
-        (log/error e "cron: failed to generate strategy")
-        nil))))
-
 (defn- monthly-task
-  "Generate a refined scheduling strategy via LLM and apply any resulting
-   template adjustments."
+  "Generate a refined scheduling strategy via LLM.  The strategy is stored
+   as a draft for Marquee / Hermes to inspect before applying."
   [{:keys [llm channels]}]
   (log/info "cron: running monthly strategy generation")
-  (let [now (ZonedDateTime/now (ZoneId/of "UTC"))]
-    (when llm
-      (generate-scheduling-strategy llm channels (str now)))))
+  (when llm
+    (let [s (strategy/generate-strategy! llm channels :monthly)]
+      (log/info "cron: monthly strategy generated" {:id (:id s)}))))
 
 (defn- quarterly-task
-  "Generate a high-level programming outline via LLM.  This may result in
-   template updates or new templates being added."
+  "Generate a high-level programming outline via LLM.  Stored as a draft
+   for review before applying."
   [{:keys [llm channels]}]
   (log/info "cron: running quarterly strategy generation")
-  (let [now (ZonedDateTime/now (ZoneId/of "UTC"))]
-    (when llm
-      (generate-scheduling-strategy llm channels (str now)))))
+  (when llm
+    (let [s (strategy/generate-strategy! llm channels :quarterly)]
+      (log/info "cron: quarterly strategy generated" {:id (:id s)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Cron engine

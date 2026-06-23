@@ -308,6 +308,53 @@
    [:applied? {:optional true} :boolean]])
 
 ;; ---------------------------------------------------------------------------
+;; Strategy
+;; ---------------------------------------------------------------------------
+
+(def StrategyId
+  [:string {:min 1 :description "Strategy UUID"}])
+
+(def StrategyPeriod
+  [:enum {:description "Strategy period"} :monthly :quarterly])
+
+(def StrategyStatus
+  [:enum {:description "Strategy lifecycle status"} :draft :applied :rejected])
+
+(def ChannelAdjustment
+  [:map
+   [:channel :string]
+   [:theme :string]
+   [:notes {:optional true} [:maybe :string]]])
+
+(def SpecialEvent
+  [:map
+   [:name :string]
+   [:date :string]
+   [:description {:optional true} [:maybe :string]]])
+
+(def Strategy
+  [:map
+   [:id StrategyId]
+   [:period StrategyPeriod]
+   [:created-at :string]
+   [:status StrategyStatus]
+   [:strategy :string]
+   [:channel-adjustments [:vector ChannelAdjustment]]
+   [:special-events [:vector SpecialEvent]]
+   [:channels [:vector :string]]
+   [:applied-at {:optional true} [:maybe :string]]
+   [:raw {:optional true} [:maybe [:map {:closed false}]]]
+   [:error {:optional true} [:maybe :string]]])
+
+(def StrategyListResponse
+  [:map
+   [:strategies [:vector Strategy]]])
+
+(def GenerateStrategyRequest
+  [:map
+   [:period {:optional true} StrategyPeriod]])
+
+;; ---------------------------------------------------------------------------
 ;; Query parameters
 ;; ---------------------------------------------------------------------------
 
