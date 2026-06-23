@@ -75,7 +75,9 @@
   - Toon Town: animated content
   - Galaxy: sci-fi
   - etc.
-- [ ] Add cron/scheduled task for daily schedule regeneration
+- [x] Add cron/scheduled task for daily schedule regeneration
+      (done via k8s CronJobs → POST /api/scheduling/{daily,weekly,monthly,quarterly};
+      see deploy/k8s)
 - [ ] Add API endpoint: `POST /api/channels/all/regenerate-schedules`
 
 **Estimated time:** 4-6 hours

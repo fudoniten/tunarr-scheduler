@@ -1,0 +1,146 @@
+# Kubernetes CronJobs that drive Tunarr Scheduler's periodic work.
+#
+# Periodic scheduling lives in Kubernetes (not an in-process scheduler): each
+# CronJob simply POSTs to the running service's /api/scheduling/* endpoints with
+# a tiny curl container. Adjust SERVICE_URL, namespace, schedules and the curl
+# image tag to match your cluster.
+#
+#   daily     — extend the playout horizon for every channel
+#   weekly    — re-apply schedule templates to every channel
+#   monthly   — generate + apply a monthly programming strategy
+#   quarterly — generate + apply a quarterly programming strategy
+#
+# Schedules are evaluated in the CronJob's timeZone (UTC below). The service
+# itself is stateless about timing, so multiple replicas are fine — only one
+# CronJob-triggered pod runs per fire.
+#
+# Notes:
+#   * `concurrencyPolicy: Forbid` prevents overlap if a run runs long.
+#   * `curl -f` makes the Job fail (and surface in kubectl) on any HTTP 4xx/5xx.
+#   * `--retry` adds resilience to transient restarts of the service.
+#   * Append `?commit=false` to the monthly/quarterly URL to generate strategies
+#     as drafts for review instead of auto-applying them.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tunarr-scheduler-daily
+  labels: { app: tunarr-scheduler, task: daily }
+spec:
+  schedule: "0 3 * * *"            # 03:00 every day
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.8.0
+              args:
+                - "-fsS"
+                - "--retry"
+                - "5"
+                - "--retry-delay"
+                - "10"
+                - "-X"
+                - "POST"
+                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/daily"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tunarr-scheduler-weekly
+  labels: { app: tunarr-scheduler, task: weekly }
+spec:
+  schedule: "0 4 * * 1"            # 04:00 every Monday
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.8.0
+              args:
+                - "-fsS"
+                - "--retry"
+                - "5"
+                - "--retry-delay"
+                - "10"
+                - "-X"
+                - "POST"
+                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/weekly"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tunarr-scheduler-monthly
+  labels: { app: tunarr-scheduler, task: monthly }
+spec:
+  schedule: "0 5 1 * *"           # 05:00 on the 1st of every month
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.8.0
+              args:
+                - "-fsS"
+                - "--retry"
+                - "5"
+                - "--retry-delay"
+                - "10"
+                - "-X"
+                - "POST"
+                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/monthly"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tunarr-scheduler-quarterly
+  labels: { app: tunarr-scheduler, task: quarterly }
+spec:
+  schedule: "0 6 1 1,4,7,10 *"    # 06:00 on the 1st of Jan/Apr/Jul/Oct
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: trigger
+              image: curlimages/curl:8.8.0
+              args:
+                - "-fsS"
+                - "--retry"
+                - "5"
+                - "--retry-delay"
+                - "10"
+                - "-X"
+                - "POST"
+                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/quarterly"

@@ -14,7 +14,6 @@
             [tunarr.scheduler.jobs.throttler :as job-throttler]
              [tunarr.scheduler.tunabrain :as tunabrain]
             [tunarr.scheduler.llm :as llm]
-            [tunarr.scheduler.cron :as cron]
             [tunarr.scheduler.backends.protocol :as backend-protocol]
             [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
 
@@ -197,21 +196,9 @@
   (log/info "shutting down backends")
   nil)
 
-(defmethod ig/init-key :tunarr/cron-scheduler
-  [_ {:keys [config pseudovision channels llm catalog]}]
-  (log/info "initializing cron scheduler")
-  (let [scheduler (cron/create config)]
-    (when scheduler
-      (cron/start! scheduler {:pseudovision pseudovision
-                              :channels channels
-                              :llm llm
-                              :executor (:executor catalog)})
-      scheduler)))
-
-(defmethod ig/halt-key! :tunarr/cron-scheduler
-  [_ scheduler]
-  (log/info "shutting down cron scheduler")
-  (cron/stop! scheduler))
+;; Periodic scheduling is delegated to Kubernetes CronJobs that POST to
+;; /api/scheduling/{daily,weekly,monthly,quarterly} (see deploy/k8s), so there
+;; is no in-process scheduler component.
 
 ;; TODO: Implement bumpers service for generating inter-program content
 (defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain tts]}]

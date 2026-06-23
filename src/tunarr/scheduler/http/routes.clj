@@ -14,7 +14,8 @@
             [tunarr.scheduler.http.api.jobs         :as jobs]
             [tunarr.scheduler.http.api.browse       :as browse]
             [tunarr.scheduler.http.api.intent       :as intent]
-            [tunarr.scheduler.http.api.strategy     :as strategy]))
+            [tunarr.scheduler.http.api.strategy     :as strategy]
+            [tunarr.scheduler.http.api.scheduling   :as scheduling]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -354,6 +355,38 @@
                                404 {:body s/APIError}
                                500 {:body s/APIError}}
                    :handler   (strategy/revert-strategy-handler ctx)}}]
+
+    ;; ── Scheduling tasks (triggered by k8s CronJobs) ─────────────────────────
+    ["/api/scheduling/daily"
+     {:tags ["scheduling"]
+      :post {:summary    "Extend the playout horizon for every channel"
+             :parameters {:query s/DailyTaskQuery}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/daily-handler ctx)}}]
+
+    ["/api/scheduling/weekly"
+     {:tags ["scheduling"]
+      :post {:summary   "Re-apply schedule templates to every channel"
+             :responses {200 {:body s/SchedulingTaskResponse}
+                         500 {:body s/APIError}}
+             :handler   (scheduling/weekly-handler ctx)}}]
+
+    ["/api/scheduling/monthly"
+     {:tags ["scheduling"]
+      :post {:summary    "Generate (and optionally apply) a monthly strategy"
+             :parameters {:query s/StrategyTaskQuery}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/monthly-handler ctx)}}]
+
+    ["/api/scheduling/quarterly"
+     {:tags ["scheduling"]
+      :post {:summary    "Generate (and optionally apply) a quarterly strategy"
+             :parameters {:query s/StrategyTaskQuery}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/quarterly-handler ctx)}}]
 
     ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
