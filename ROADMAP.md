@@ -79,7 +79,7 @@ Radarr/Sonarr → Jellyfin (raw media + IMDB tags)
 | # | Blocker | Description | Effort |
 |---|---------|-------------|--------|
 | 4.1 | Episode tracking | Track progress through sequential shows | Medium |
-| 4.2 | Schedule automation | Cron for daily/weekly regeneration | Low |
+| 4.2 | Schedule automation | ✅ k8s CronJobs → /api/scheduling/* (see deploy/k8s) | Low |
 | 4.3 | Multi-channel coordination | Avoid scheduling same content simultaneously | Medium |
 | 4.4 | Lookahead maintenance | Keep 3-4 weeks ahead always | Low |
 

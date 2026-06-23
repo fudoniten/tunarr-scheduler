@@ -318,7 +318,7 @@
   [:enum {:description "Strategy period"} :monthly :quarterly])
 
 (def StrategyStatus
-  [:enum {:description "Strategy lifecycle status"} :draft :applied :rejected])
+  [:enum {:description "Strategy lifecycle status"} :draft :applied :rejected :reverted])
 
 (def ChannelAdjustment
   [:map
@@ -353,6 +353,36 @@
 (def GenerateStrategyRequest
   [:map
    [:period {:optional true} StrategyPeriod]])
+
+(def StrategyListQuery
+  "Optional filters for the strategy list endpoint."
+  [:map
+   [:period {:optional true} StrategyPeriod]
+   [:status {:optional true} StrategyStatus]])
+
+(def CurrentStrategyQuery
+  "Optional period selector for the current-strategy endpoint."
+  [:map
+   [:period {:optional true} StrategyPeriod]])
+
+;; ---------------------------------------------------------------------------
+;; Periodic scheduling tasks (triggered by k8s CronJobs)
+;; ---------------------------------------------------------------------------
+
+(def SchedulingTaskResponse
+  "Open envelope for a scheduling-task result. The concrete payload varies by
+   task (daily/weekly return per-channel :results; monthly/quarterly return the
+   generated :strategy), so only :task is required."
+  [:map {:closed false}
+   [:task :string]])
+
+(def DailyTaskQuery
+  [:map
+   [:horizon {:optional true} [:int {:min 1 :max 365 :description "Days to schedule ahead"}]]])
+
+(def StrategyTaskQuery
+  [:map
+   [:commit {:optional true} [:boolean {:description "Apply the generated strategy immediately (default true)"}]]])
 
 ;; ---------------------------------------------------------------------------
 ;; Query parameters

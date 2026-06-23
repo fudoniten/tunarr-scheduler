@@ -5,27 +5,39 @@
    period (monthly or quarterly). It contains high-level theme descriptions,
    per-channel adjustments, and optional special events.
 
-   Strategies are stored in memory and exposed via the HTTP API so that
-   Marquee (web frontend) and Hermes can inspect and modify them."
+   Strategies are persisted to the SQL database (table `strategies`) via the
+   shared SQL executor so they survive restarts and are visible to Marquee
+   (web frontend) and Hermes. Every public function takes the executor as its
+   first argument.
+
+   Complex fields (channel-adjustments, special-events, channels, raw) are
+   stored as JSON text columns; period/status are stored as text and
+   keywordized on read; timestamps are ISO-8601 strings."
 
   (:require [clojure.string :as str]
             [cheshire.core :as json]
+            [honey.sql.helpers :as h]
             [tunarr.scheduler.llm :as llm]
+            [tunarr.scheduler.sql.executor :as executor]
             [taoensso.timbre :as log])
   (:import [java.time ZonedDateTime ZoneId Instant]
            [java.util UUID]))
 
 ;; ---------------------------------------------------------------------------
-;; Storage
+;; Executor helpers
 ;; ---------------------------------------------------------------------------
 
-(defonce ^:private strategy-store (atom {}))
+(defn- unwrap
+  [op [status payload]]
+  (case status
+    :ok  payload
+    :err (do (log/error payload (format "strategy SQL %s failed" op))
+             (throw payload))
+    (throw (ex-info "unexpected SQL executor status"
+                    {:op op :status status}))))
 
-(defn init
-  "Initialise the strategy store.  Returns the store atom."
-  []
-  (log/info "strategy store initialised")
-  strategy-store)
+(defn- exec!  [executor query] (unwrap "exec!"  (deref (executor/exec! executor query))))
+(defn- fetch! [executor query] (unwrap "fetch!" (deref (executor/fetch! executor query))))
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers
@@ -35,6 +47,50 @@
   "Current instant as ISO-8601 string."
   []
   (.toString (Instant/now)))
+
+(defn- ->json [x] (json/generate-string x))
+
+(defn- json->
+  "Parse a JSON text column, returning `default` when the column is nil."
+  [s default]
+  (if (some? s) (json/parse-string s true) default))
+
+(defn- row->strategy
+  "Convert a next.jdbc row (namespaced :strategies/* keys) into the API map."
+  [row]
+  (when row
+    (cond-> {:id                  (:strategies/id row)
+             :period              (keyword (:strategies/period row))
+             :status              (keyword (:strategies/status row))
+             :created-at          (:strategies/created_at row)
+             :strategy            (:strategies/strategy row)
+             ;; vec-coerce so the result satisfies the [:vector …] response
+             ;; schema regardless of how the JSON parser represents arrays.
+             :channel-adjustments (vec (json-> (:strategies/channel_adjustments row) []))
+             :special-events      (vec (json-> (:strategies/special_events row) []))
+             :channels            (vec (json-> (:strategies/channels row) []))}
+      (:strategies/applied_at row)  (assoc :applied-at (:strategies/applied_at row))
+      (:strategies/reverted_at row) (assoc :reverted-at (:strategies/reverted_at row))
+      (:strategies/restored_at row) (assoc :restored-at (:strategies/restored_at row))
+      (:strategies/raw row)         (assoc :raw (json-> (:strategies/raw row) nil))
+      (:strategies/error row)       (assoc :error (:strategies/error row)))))
+
+(defn- strategy->row
+  "Convert an API strategy map into a column map for insertion."
+  [s]
+  {:id                  (:id s)
+   :period              (name (:period s))
+   :status              (name (:status s))
+   :created_at          (:created-at s)
+   :strategy            (:strategy s)
+   :channel_adjustments (->json (:channel-adjustments s []))
+   :special_events      (->json (:special-events s []))
+   :channels            (->json (:channels s []))
+   :raw                 (when (:raw s) (->json (:raw s)))
+   :error               (:error s)
+   :applied_at          (:applied-at s)
+   :reverted_at         (:reverted-at s)
+   :restored_at         (:restored-at s)})
 
 (defn- parse-strategy-response
   "Parse the LLM's JSON response into a structured strategy map."
@@ -68,20 +124,70 @@
      :channels (mapv (fn [[k _]] (name k)) channels)}))
 
 ;; ---------------------------------------------------------------------------
-;; Public API
+;; Reads
 ;; ---------------------------------------------------------------------------
 
+(defn list-strategies
+  "Return all strategies sorted newest-first."
+  [executor]
+  (->> (fetch! executor (-> (h/select :*)
+                            (h/from :strategies)
+                            (h/order-by [:created_at :desc])))
+       (mapv row->strategy)))
+
+(defn get-strategy
+  "Return a single strategy by ID, or nil if not found."
+  [executor id]
+  (-> (fetch! executor (-> (h/select :*)
+                           (h/from :strategies)
+                           (h/where [:= :id id])))
+      first
+      row->strategy))
+
+(defn current-strategy
+  "Return the most recently created strategy (any period)."
+  [executor]
+  (-> (fetch! executor (-> (h/select :*)
+                           (h/from :strategies)
+                           (h/order-by [:created_at :desc])
+                           (h/limit 1)))
+      first
+      row->strategy))
+
+(defn current-strategy-by-period
+  "Return the most recent strategy for a given period."
+  [executor period]
+  (-> (fetch! executor (-> (h/select :*)
+                           (h/from :strategies)
+                           (h/where [:= :period (name period)])
+                           (h/order-by [:created_at :desc])
+                           (h/limit 1)))
+      first
+      row->strategy))
+
+;; ---------------------------------------------------------------------------
+;; Writes
+;; ---------------------------------------------------------------------------
+
+(defn- persist!
+  "Insert a strategy row. Returns the strategy map."
+  [executor s]
+  (exec! executor (-> (h/insert-into :strategies)
+                      (h/values [(strategy->row s)])))
+  s)
+
 (defn generate-strategy!
-  "Generate a new strategy via LLM and store it.
+  "Generate a new strategy via LLM, persist it, and return it.
 
    Args:
+     executor   — SQL executor
      llm-config — LLM client config
      channels   — Channel config map
      period     — :monthly or :quarterly
 
    Returns:
-     The generated strategy map."
-  [llm-config channels period]
+     The generated (persisted) strategy map."
+  [executor llm-config channels period]
   (log/info "Generating strategy" {:period period})
   (let [channel-names (map (fn [[k _]] (name k)) channels)
         now (str (ZonedDateTime/now (ZoneId/of "UTC")))
@@ -108,7 +214,7 @@
                        [{:role "system" :content prompt}
                         {:role "user" :content "Generate strategy"}])
             strategy (make-strategy period response channels)]
-        (swap! strategy-store assoc (:id strategy) strategy)
+        (persist! executor strategy)
         (log/info "Strategy generated" {:id (:id strategy) :period period})
         strategy)
       (catch Exception e
@@ -120,87 +226,74 @@
                         :strategy "Strategy generation failed"
                         :channel-adjustments []
                         :special-events []
+                        :channels (vec channel-names)
                         :error (.getMessage e)}]
-          (swap! strategy-store assoc (:id fallback) fallback)
+          (persist! executor fallback)
           fallback)))))
 
-(defn list-strategies
-  "Return all strategies sorted newest-first."
-  []
-  (->> (vals @strategy-store)
-       (sort-by :created-at #(compare %2 %1))))
-
-(defn get-strategy
-  "Return a single strategy by ID, or nil if not found."
-  [id]
-  (get @strategy-store id))
+(defn- update-status!
+  "Apply a column update to an existing strategy and return the refreshed
+   strategy. Returns nil when the strategy does not exist."
+  [executor id set-map]
+  (when (get-strategy executor id)
+    (exec! executor (-> (h/update :strategies)
+                        (h/set set-map)
+                        (h/where [:= :id id])))
+    (get-strategy executor id)))
 
 (defn apply-strategy!
-  "Mark a strategy as applied and trigger any template changes.
-
-   Returns the updated strategy, or nil if not found."
-  [id]
-  (when-let [s (get-strategy id)]
-    (let [updated (assoc s :status :applied :applied-at (now-iso))]
-      (swap! strategy-store assoc id updated)
-      (log/info "Strategy applied" {:id id})
-      updated)))
+  "Mark a strategy as applied.  Returns the updated strategy, or nil if not found."
+  [executor id]
+  (when-let [updated (update-status! executor id {:status "applied" :applied_at (now-iso)})]
+    (log/info "Strategy applied" {:id id})
+    updated))
 
 (defn reject-strategy!
-  "Mark a strategy as rejected.
-
-   Returns the updated strategy, or nil if not found."
-  [id]
-  (when-let [s (get-strategy id)]
-    (let [updated (assoc s :status :rejected)]
-      (swap! strategy-store assoc id updated)
-      (log/info "Strategy rejected" {:id id})
-      updated)))
+  "Mark a strategy as rejected.  Returns the updated strategy, or nil if not found."
+  [executor id]
+  (when-let [updated (update-status! executor id {:status "rejected"})]
+    (log/info "Strategy rejected" {:id id})
+    updated))
 
 (defn delete-strategy!
-  "Remove a strategy from the store.
-
-   Returns the deleted strategy, or nil if not found."
-  [id]
-  (when-let [s (get-strategy id)]
-    (swap! strategy-store dissoc id)
+  "Remove a strategy from the store.  Returns the deleted strategy, or nil if not found."
+  [executor id]
+  (when-let [s (get-strategy executor id)]
+    (exec! executor (-> (h/delete-from :strategies)
+                        (h/where [:= :id id])))
     (log/info "Strategy deleted" {:id id})
     s))
-
-(defn current-strategy
-  "Return the most recently created strategy (any period)."
-  []
-  (first (list-strategies)))
-
-(defn current-strategy-by-period
-  "Return the most recent strategy for a given period."
-  [period]
-  (->> (list-strategies)
-       (filter #(= (:period %) period))
-       first))
 
 (defn revert-strategy!
   "Mark a strategy as reverted and restore the previous strategy as active.
 
    This is the escape hatch when an auto-committed strategy is bad.
-   The reverted strategy is kept in history for reference.
+   The reverted strategy is kept in history for reference. The previous
+   strategy is the most recent non-rejected strategy of the same period.
 
-   Returns {:reverted strategy :restored strategy-or-nil}."
-  [id]
-  (when-let [s (get-strategy id)]
-    (let [period (:period s)
-          all (list-strategies)
-          ;; Find the previous non-rejected strategy for the same period
-          previous (->> all
-                        (filter #(and (= (:period %) period)
-                                      (not= (:id %) id)
-                                      (not= (:status %) :rejected)))
-                        second)
-          updated (assoc s :status :reverted :reverted-at (now-iso))]
-      (swap! strategy-store assoc id updated)
+   Returns {:reverted strategy :restored strategy-or-nil}, or nil if the
+   strategy does not exist."
+  [executor id]
+  (when-let [s (get-strategy executor id)]
+    (let [period   (:period s)
+          previous (-> (fetch! executor
+                               (-> (h/select :*)
+                                   (h/from :strategies)
+                                   (h/where [:and
+                                             [:= :period (name period)]
+                                             [:<> :id id]
+                                             [:<> :status "rejected"]])
+                                   (h/order-by [:created_at :desc])
+                                   (h/limit 1)))
+                       first
+                       row->strategy)]
+      (exec! executor (-> (h/update :strategies)
+                          (h/set {:status "reverted" :reverted_at (now-iso)})
+                          (h/where [:= :id id])))
       (when previous
-        (swap! strategy-store assoc (:id previous)
-               (assoc previous :status :applied :restored-at (now-iso))))
+        (exec! executor (-> (h/update :strategies)
+                            (h/set {:status "applied" :restored_at (now-iso)})
+                            (h/where [:= :id (:id previous)]))))
       (log/info "Strategy reverted" {:id id :restored (:id previous)})
-      {:reverted updated
-       :restored previous})))
+      {:reverted (get-strategy executor id)
+       :restored (when previous (get-strategy executor (:id previous)))})))

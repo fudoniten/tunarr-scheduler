@@ -14,7 +14,8 @@
             [tunarr.scheduler.http.api.jobs         :as jobs]
             [tunarr.scheduler.http.api.browse       :as browse]
             [tunarr.scheduler.http.api.intent       :as intent]
-            [tunarr.scheduler.http.api.strategy     :as strategy]))
+            [tunarr.scheduler.http.api.strategy     :as strategy]
+            [tunarr.scheduler.http.api.scheduling   :as scheduling]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -295,6 +296,7 @@
     ["/api/strategies"
      {:tags ["strategies"]
       :get  {:summary   "List all scheduling strategies"
+             :parameters {:query s/StrategyListQuery}
              :responses {200 {:body s/StrategyListResponse}}
              :handler   (strategy/list-strategies-handler ctx)}
       :post {:summary   "Generate a new strategy"
@@ -307,6 +309,7 @@
     ["/api/strategies/current"
      {:tags ["strategies"]
       :get  {:summary   "Get the most recent strategy"
+             :parameters {:query s/CurrentStrategyQuery}
              :responses {200 {:body s/Strategy}
                          404 {:body s/APIError}}
              :handler   (strategy/get-current-strategy-handler ctx)}}]
@@ -353,6 +356,38 @@
                                500 {:body s/APIError}}
                    :handler   (strategy/revert-strategy-handler ctx)}}]
 
+    ;; ── Scheduling tasks (triggered by k8s CronJobs) ─────────────────────────
+    ["/api/scheduling/daily"
+     {:tags ["scheduling"]
+      :post {:summary    "Extend the playout horizon for every channel"
+             :parameters {:query s/DailyTaskQuery}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/daily-handler ctx)}}]
+
+    ["/api/scheduling/weekly"
+     {:tags ["scheduling"]
+      :post {:summary   "Re-apply schedule templates to every channel"
+             :responses {200 {:body s/SchedulingTaskResponse}
+                         500 {:body s/APIError}}
+             :handler   (scheduling/weekly-handler ctx)}}]
+
+    ["/api/scheduling/monthly"
+     {:tags ["scheduling"]
+      :post {:summary    "Generate (and optionally apply) a monthly strategy"
+             :parameters {:query s/StrategyTaskQuery}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/monthly-handler ctx)}}]
+
+    ["/api/scheduling/quarterly"
+     {:tags ["scheduling"]
+      :post {:summary    "Generate (and optionally apply) a quarterly strategy"
+             :parameters {:query s/StrategyTaskQuery}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/quarterly-handler ctx)}}]
+
     ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
      {:tags ["jobs"]
@@ -387,7 +422,11 @@
   (let [router
         (ring/router
          (routes ctx)
-         {:data {:muuntaja   mw/muuntaja
+         {;; Allow the static "/api/strategies/current" route to coexist with the
+          ;; "/api/strategies/:id" wildcard route. Reitit's router resolves these
+          ;; at runtime by preferring the exact/static match over the wildcard.
+          :conflicts nil
+          :data {:muuntaja   mw/muuntaja
                  :coercion   malli-coercion/coercion
                  :middleware [parameters/parameters-middleware
                               muuntaja-mw/format-negotiate-middleware

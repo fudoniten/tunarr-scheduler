@@ -17,20 +17,14 @@
  :tunabrain {:endpoint #or [#env TUNABRAIN_ENDPOINT "http://localhost:8080"]
              :http-opts {:socket-timeout 120000
                          :connection-timeout 10000}}
-  :scheduler {:enabled #or [#env SCHEDULER_ENABLED false]
-               :time-zone #or [#env TIME_ZONE "UTC"]
-               :check-interval #or [#env SCHEDULER_CHECK_INTERVAL 60]
-               :daily-hour #or [#env SCHEDULER_DAILY_HOUR 3]
-               :weekly-day #or [#env SCHEDULER_WEEKLY_DAY 1]
-               :weekly-hour #or [#env SCHEDULER_WEEKLY_HOUR 4]
-               :monthly-day #or [#env SCHEDULER_MONTHLY_DAY 1]
-               :monthly-hour #or [#env SCHEDULER_MONTHLY_HOUR 5]
-               :quarterly-hour #or [#env SCHEDULER_QUARTERLY_HOUR 6]
-               :auto-commit #or [#env SCHEDULER_AUTO_COMMIT true]
-               :daytime-hours {:start 6 :end 20}
-               :seasonal {:december [:holiday]
-                          :october [:spooky]}
-               :preferences {}}
+  ;; Periodic scheduling is driven by external Kubernetes CronJobs that POST to
+  ;; /api/scheduling/{daily,weekly,monthly,quarterly} (see deploy/k8s), not by
+  ;; an in-process scheduler.
+  :scheduler {:time-zone #or [#env TIME_ZONE "UTC"]
+              :daytime-hours {:start 6 :end 20}
+              :seasonal {:december [:holiday]
+                         :october [:spooky]}
+              :preferences {}}
  :categories {:time-slot {:description "Best time of day to air this content"
                           :values [:daytime :primetime :late-night]}
               :audience {:description "Primary target audience"

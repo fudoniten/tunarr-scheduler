@@ -134,10 +134,6 @@
                           :catalog (ig/ref :tunarr/catalog)}
      :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
                              :tag-config tag-config}
-      :tunarr/cron-scheduler {:config (get config :scheduler {:enabled false})
-                              :pseudovision (ig/ref :tunarr/pseudovision)
-                              :channels channel-config
-                              :llm (ig/ref :tunarr/llm)}
       :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
                                      (or (get-in config [:server :port]))
                                      (parse-port))

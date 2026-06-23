@@ -609,14 +609,14 @@
           mock-pv  {:config {:base-url "http://localhost:8080"}}]
       (with-redefs [llm/chat-completion!
                     (fn [_ _]
-                      (json/generate-string
-                        {:success true
-                         :reasoning "User wants to replace the 6pm slot with Cheers"
-                         :operations [{:type "update_slot"
-                                       :slot_index 1
-                                       :changes {:required_tags ["cheers"]}}]
-                         :preview {:affected_blocks ["Tue/Thu 18:00"]
-                                   :description "Now plays Cheers sequentially"}}))
+                      {:content
+                       (json/generate-string
+                         {:reasoning "User wants to replace the 6pm slot with Cheers"
+                          :operations [{:type "update_slot"
+                                        :slot_index 1
+                                        :changes {:required_tags ["cheers"]}}]
+                          :preview {:affected_blocks ["Tue/Thu 18:00"]
+                                    :description "Now plays Cheers sequentially"}})})
 
                     pv-client/get-channel
                     (fn [_ _]
@@ -628,9 +628,9 @@
 
                     pv-client/list-slots
                     (fn [_ _]
-                      [{:id 101 :slot_index 0 :start_time "08:00:00" :required_tags ["comedy"]}
-                       {:id 102 :slot_index 1 :start_time "18:00:00" :required_tags ["drama"]}
-                       {:id 103 :slot_index 2 :start_time "22:00:00" :required_tags ["action"]}])
+                      [{:id 101 :slot-index 0 :start-time "08:00:00" :required-tags ["comedy"]}
+                       {:id 102 :slot-index 1 :start-time "18:00:00" :required-tags ["drama"]}
+                       {:id 103 :slot-index 2 :start-time "22:00:00" :required-tags ["action"]}])
 
                     pv-client/update-slot!
                     (fn [& _] (throw (Exception. "Should not be called in dry-run")))]
@@ -660,14 +660,14 @@
           updated  (atom nil)]
       (with-redefs [llm/chat-completion!
                     (fn [_ _]
-                      (json/generate-string
-                        {:success true
-                         :reasoning "User wants to replace the 6pm slot with Cheers"
-                         :operations [{:type "update_slot"
-                                       :slot_index 1
-                                       :changes {:required_tags ["cheers"]}}]
-                         :preview {:affected_blocks ["Tue/Thu 18:00"]
-                                   :description "Now plays Cheers sequentially"}}))
+                      {:content
+                       (json/generate-string
+                         {:reasoning "User wants to replace the 6pm slot with Cheers"
+                          :operations [{:type "update_slot"
+                                        :slot_index 1
+                                        :changes {:required_tags ["cheers"]}}]
+                          :preview {:affected_blocks ["Tue/Thu 18:00"]
+                                    :description "Now plays Cheers sequentially"}})})
 
                     pv-client/get-channel
                     (fn [_ _]
@@ -679,14 +679,17 @@
 
                     pv-client/list-slots
                     (fn [_ _]
-                      [{:id 101 :slot_index 0 :start_time "08:00:00" :required_tags ["comedy"]}
-                       {:id 102 :slot_index 1 :start_time "18:00:00" :required_tags ["drama"]}
-                       {:id 103 :slot_index 2 :start_time "22:00:00" :required_tags ["action"]}])
+                      [{:id 101 :slot-index 0 :start-time "08:00:00" :required-tags ["comedy"]}
+                       {:id 102 :slot-index 1 :start-time "18:00:00" :required-tags ["drama"]}
+                       {:id 103 :slot-index 2 :start-time "22:00:00" :required-tags ["action"]}])
 
                     pv-client/update-slot!
                     (fn [_ _ slot-id slot-data]
                       (reset! updated {:slot-id slot-id :data slot-data})
-                      {:id slot-id :updated true})]
+                      {:id slot-id :updated true})
+
+                    pv-client/rebuild-playout!
+                    (fn [& _] {:ok true})]
 
         (let [handler  (routes/handler {:job-runner   *job-runner*
                                          :collection   mock-collection
@@ -702,7 +705,7 @@
           (is (true? (:success body)))
           (is (true? (:applied? body)))
           (is (= 102 (:slot-id @updated)))
-          (is (= ["cheers"] (get-in @updated [:data :required_tags]))))))))
+          (is (= ["cheers"] (get-in @updated [:data :required-tags]))))))))
 
 (deftest get-schedule-endpoint-test
   (testing "GET /api/channels/:id/schedule returns current schedule"
@@ -752,9 +755,6 @@
                                          :tunabrain    mock-tunabrain
                                          :pseudovision mock-pv})
               response (handler (mock/request :get "/api/channels/6/schedule"))
-              body     (parse-json-response response)]
-          (is (= 404 (:status response)))
-          (is (contains? body :error))))))
               body     (parse-json-response response)]
           (is (= 404 (:status response)))
           (is (contains? body :error)))))))
