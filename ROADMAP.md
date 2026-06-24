@@ -157,11 +157,27 @@ against the contracts before insert and round-trips exactly.
   - **Daily:** horizon extension (unchanged).
   Repoint `http/api/scheduling.clj` handlers at the new orchestration.
 
-### Phase 6 — GUI checkpoints (can follow)
-Human review on the small artifacts: approve the `DaypartSkeleton` and the
-frozen `Grid` (a list of rules) before committing. Optional endpoints to
-fetch/approve a proposed Grid/Overrides and to trigger an on-demand weekly
-expand+push.
+### Phase 6 — UI access + operator input ✅ DONE (non-gating)
+Per the product call, generation is **not** gated on human approval; instead the
+UI gets read access to the plans plus a per-channel manual-input surface that
+*feeds* generation.
+- **Storage:** migration `20260626-001-channel-guidance` + `channel_guidance`
+  table; `storage/get-guidance`/`set-guidance!` (upsert, partial update)/
+  `list-guidance`/`planned-channels`.
+- **Read service** `scheduling/plans.clj`: calendar helpers (`quarter-of`,
+  `month-of`, `months-in-range`), `preview` (expand the stored grid + the active
+  overrides for every month the window touches — no Tunabrain call), and
+  `dashboard` (grid + feasibility snapshot + current overrides + guidance).
+- **HTTP** `http/api/plans.clj` + routes under `/api/scheduling/channels`:
+  `GET /channels`, `GET /:channel/grid` (+`/grids`),
+  `GET /:channel/overrides` (+`/overrides/history`), `GET /:channel/preview`,
+  `GET /:channel/plan`, and `GET`/`PUT /:channel/guidance`. Schemas in
+  `http/schemas.clj`.
+- The guidance fields (`strategic_guidance`, `quarterly_theme`/`monthly_theme`,
+  `planned_events`) line up 1:1 with the Tunabrain request builders, so the
+  orchestration (Phase 5) will pull them into propose-* calls.
+- `plans_test.clj` (7 tests); full ring handler assembles without route
+  conflicts. 55 scheduling tests / 232 assertions green.
 
 ### Deprecation (alongside Phases 1–5)
 `scheduling/pseudovision.clj` (slot-spec translation), `scheduling/templates.clj`

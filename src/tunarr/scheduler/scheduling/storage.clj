@@ -179,3 +179,74 @@
                               (h/order-by [:created_at :desc] [:version :desc]))
                     channel (h/where [:= :channel channel])))
        (mapv row->overrides)))
+
+;; ---------------------------------------------------------------------------
+;; Per-channel operator guidance (the "manual input" surface)
+;; ---------------------------------------------------------------------------
+
+(defn- row->guidance [row]
+  (when row
+    {:channel            (:channel_guidance/channel row)
+     :strategic_guidance (:channel_guidance/strategic_guidance row)
+     :quarterly_theme    (:channel_guidance/quarterly_theme row)
+     :monthly_theme      (:channel_guidance/monthly_theme row)
+     :planned_events     (vec (json-> (:channel_guidance/planned_events row) []))
+     :updated-at         (:channel_guidance/updated_at row)}))
+
+(defn get-guidance
+  "The operator guidance for a channel, or nil if none set."
+  [ex channel]
+  (-> (fetch! ex (-> (h/select :*) (h/from :channel_guidance) (h/where [:= :channel channel])))
+      first row->guidance))
+
+(defn set-guidance!
+  "Upsert the operator guidance for a channel. `fields` may contain any of
+   :strategic_guidance, :quarterly_theme, :monthly_theme, :planned_events
+   (absent keys are left unchanged on update, default/empty on insert). Returns
+   the stored guidance map."
+  [ex channel fields]
+  (let [updated   (now-iso)
+        existing  (get-guidance ex channel)
+        merged    (merge {:strategic_guidance nil :quarterly_theme nil
+                          :monthly_theme nil :planned_events []}
+                         (dissoc existing :channel :updated-at)
+                         (select-keys fields [:strategic_guidance :quarterly_theme
+                                              :monthly_theme :planned_events]))
+        columns   {:strategic_guidance (:strategic_guidance merged)
+                   :quarterly_theme    (:quarterly_theme merged)
+                   :monthly_theme      (:monthly_theme merged)
+                   :planned_events     (->json (vec (:planned_events merged)))
+                   :updated_at         updated}]
+    (if existing
+      (exec! ex (-> (h/update :channel_guidance) (h/set columns)
+                    (h/where [:= :channel channel])))
+      (exec! ex (-> (h/insert-into :channel_guidance)
+                    (h/values [(assoc columns :channel channel)]))))
+    (log/info "Stored channel guidance" {:channel channel})
+    {:channel            channel
+     :strategic_guidance (:strategic_guidance merged)
+     :quarterly_theme    (:quarterly_theme merged)
+     :monthly_theme      (:monthly_theme merged)
+     :planned_events     (vec (:planned_events merged))
+     :updated-at         updated}))
+
+(defn list-guidance
+  "All channel guidance rows."
+  [ex]
+  (->> (fetch! ex (-> (h/select :*) (h/from :channel_guidance) (h/order-by [:channel :asc])))
+       (mapv row->guidance)))
+
+;; ---------------------------------------------------------------------------
+;; Cross-cutting
+;; ---------------------------------------------------------------------------
+
+(defn planned-channels
+  "Distinct channel names that have any stored grid, override set, or guidance."
+  [ex]
+  (->> (concat (map :channel (list-grids ex))
+               (map :channel (list-overrides ex))
+               (map :channel (list-guidance ex)))
+       (remove nil?)
+       distinct
+       sort
+       vec))

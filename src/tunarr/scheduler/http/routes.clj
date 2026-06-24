@@ -15,7 +15,8 @@
             [tunarr.scheduler.http.api.browse       :as browse]
             [tunarr.scheduler.http.api.intent       :as intent]
             [tunarr.scheduler.http.api.strategy     :as strategy]
-            [tunarr.scheduler.http.api.scheduling   :as scheduling]))
+            [tunarr.scheduler.http.api.scheduling   :as scheduling]
+            [tunarr.scheduler.http.api.plans        :as plans]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -387,6 +388,80 @@
              :responses  {200 {:body s/SchedulingTaskResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/quarterly-handler ctx)}}]
+
+    ;; ── Layered-grid plans (UI read access + operator guidance) ──────────────
+    ["/api/scheduling/channels"
+     {:tags ["plans"]
+      :get  {:summary   "List channels that have any stored plan or guidance"
+             :responses {200 {:body s/PlannedChannelsResponse}
+                         500 {:body s/APIError}}
+             :handler   (plans/list-channels-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/grid"
+     {:tags       ["plans"]
+      :parameters {:path  [:map [:channel s/ChannelName]]
+                   :query s/GridQuery}
+      :get        {:summary   "Current frozen quarterly grid (with feasibility snapshot)"
+                   :responses {200 {:body s/GridRecord}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (plans/get-grid-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/grids"
+     {:tags       ["plans"]
+      :parameters {:path [:map [:channel s/ChannelName]]}
+      :get        {:summary   "Quarterly grid version history for a channel"
+                   :responses {200 {:body s/GridListResponse}
+                               500 {:body s/APIError}}
+                   :handler   (plans/list-grids-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/overrides"
+     {:tags       ["plans"]
+      :parameters {:path  [:map [:channel s/ChannelName]]
+                   :query s/OverridesQuery}
+      :get        {:summary   "Current monthly overrides for a channel"
+                   :responses {200 {:body s/OverridesRecord}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (plans/get-overrides-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/overrides/history"
+     {:tags       ["plans"]
+      :parameters {:path [:map [:channel s/ChannelName]]}
+      :get        {:summary   "Monthly override version history for a channel"
+                   :responses {200 {:body s/OverridesListResponse}
+                               500 {:body s/APIError}}
+                   :handler   (plans/list-overrides-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/preview"
+     {:tags       ["plans"]
+      :parameters {:path  [:map [:channel s/ChannelName]]
+                   :query s/PreviewQuery}
+      :get        {:summary   "Expand the current grid + overrides into DailySlots (no LLM)"
+                   :responses {200 {:body s/SchedulePreviewResponse}
+                               500 {:body s/APIError}}
+                   :handler   (plans/preview-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/plan"
+     {:tags       ["plans"]
+      :parameters {:path [:map [:channel s/ChannelName]]}
+      :get        {:summary   "Combined per-channel view: grid, overrides, guidance"
+                   :responses {200 {:body s/ChannelPlanResponse}
+                               500 {:body s/APIError}}
+                   :handler   (plans/dashboard-handler ctx)}}]
+
+    ["/api/scheduling/channels/:channel/guidance"
+     {:tags       ["plans"]
+      :parameters {:path [:map [:channel s/ChannelName]]}
+      :get        {:summary   "Get the per-channel operator guidance"
+                   :responses {200 {:body s/ChannelGuidance}
+                               500 {:body s/APIError}}
+                   :handler   (plans/get-guidance-handler ctx)}
+      :put        {:summary    "Set/update the per-channel operator guidance"
+                   :parameters {:body s/ChannelGuidanceUpdate}
+                   :responses  {200 {:body s/ChannelGuidance}
+                                500 {:body s/APIError}}
+                   :handler    (plans/put-guidance-handler ctx)}}]
 
     ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
