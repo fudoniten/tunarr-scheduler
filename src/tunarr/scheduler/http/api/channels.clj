@@ -2,8 +2,6 @@
   "HTTP handlers for channel operations."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.channels.sync :as channel-sync]
-            [tunarr.scheduler.scheduling.pseudovision :as pv-schedule]
-            [tunarr.scheduler.scheduling.templates :as templates]
             [tunarr.scheduler.backends.pseudovision.client :as pv-client]))
 
 ;; ---------------------------------------------------------------------------
@@ -49,65 +47,4 @@
                       :upcoming-events (take 10 events)}})))
       (catch Exception e
         (log/error e "Error getting channel schedule")
-        {:status 500 :body {:error (.getMessage e)}}))))
-
-(defn update-schedule-handler
-  "Update channel schedule in Pseudovision."
-  [{:keys [pseudovision]}]
-  (fn [req]
-    (try
-      (let [channel-id   (get-in req [:parameters :path :channel-id])
-            channel-spec (get-in req [:parameters :body])
-            horizon      (get channel-spec :horizon 14)
-            result       (pv-schedule/update-channel-schedule!
-                          pseudovision
-                          channel-id
-                          channel-spec
-                          {:horizon horizon})]
-        {:status 200 :body result})
-      (catch Exception e
-        (log/error e "Error creating channel schedule")
-        {:status 500 :body {:error (.getMessage e)}}))))
-
-(defn apply-template-handler
-  "Apply a schedule template to a single channel.
-
-   The request body may contain:
-   • :template — a full template map (name + slots)
-   • :template-key — a keyword to look up in default-templates (e.g. :sitcom-spectrum)
-   • :horizon — optional, defaults to 14
-
-   If neither :template nor :template-key is supplied, returns 400."
-  [{:keys [pseudovision]}]
-  (fn [req]
-    (try
-      (let [channel-id   (get-in req [:parameters :path :channel-id])
-            template     (get-in req [:parameters :body :template])
-            template-key (get-in req [:parameters :body :template-key])
-            horizon      (get-in req [:parameters :body :horizon] 14)
-            result       (cond
-                           template
-                           (templates/apply-template! pseudovision channel-id template {:horizon horizon})
-
-                           template-key
-                           (templates/apply-template-by-name! pseudovision channel-id template-key {:horizon horizon})
-
-                           :else
-                           nil)]
-        (if result
-          {:status 200 :body result}
-          {:status 400 :body {:error "Request must include :template or :template-key"}}))
-      (catch Exception e
-        (log/error e "Error applying template to channel")
-        {:status 500 :body {:error (.getMessage e)}}))))
-
-(defn apply-all-templates-handler
-  "Apply default templates to all configured channels."
-  [{:keys [pseudovision channels]}]
-  (fn [_]
-    (try
-      (let [result (templates/apply-templates-to-channels! pseudovision channels)]
-        {:status 200 :body result})
-      (catch Exception e
-        (log/error e "Error applying templates to all channels")
         {:status 500 :body {:error (.getMessage e)}}))))

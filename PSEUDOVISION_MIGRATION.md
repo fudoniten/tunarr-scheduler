@@ -267,4 +267,4 @@ After successful migration, consider:
 3. **Create schedule templates** - Leverage migrated category tags
 4. **Set up automation** - Daily schedule regeneration using Pseudovision data
 
-See `TODO.md` for the complete roadmap.
+See `ROADMAP.md` for the complete roadmap.

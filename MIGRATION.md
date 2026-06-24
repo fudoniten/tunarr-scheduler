@@ -8,7 +8,7 @@ The system now uses **Pseudovision** exclusively as the IPTV backend. See the fo
 
 - **[PSEUDOVISION_INTEGRATION.md](PSEUDOVISION_INTEGRATION.md)** - Technical design and implementation details
 - **[PSEUDOVISION_MIGRATION.md](PSEUDOVISION_MIGRATION.md)** - One-time migration from local catalog to Pseudovision
-- **[TODO.md](TODO.md)** - Current status and next steps
+- **[ROADMAP.md](ROADMAP.md)** - Current status and next steps
 
 ## Architecture Summary
 
@@ -82,4 +82,4 @@ Completed on **April 19, 2026**:
 
 - **API Endpoints**: See `PSEUDOVISION_INTEGRATION.md`
 - **Tag Migration**: See `PSEUDOVISION_MIGRATION.md`
-- **Current TODO**: See `TODO.md`
+- **Current roadmap**: See `ROADMAP.md`

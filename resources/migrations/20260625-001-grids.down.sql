@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS overrides;
+--;;
+DROP TABLE IF EXISTS grids;
