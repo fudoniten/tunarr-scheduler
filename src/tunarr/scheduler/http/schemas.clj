@@ -191,15 +191,6 @@
    [:channels-updated {:optional true} :int]
    [:message         :string]])
 
-(def ChannelScheduleRequest
-  [:map
-   [:horizon {:optional true} [:int {:min 1 :max 365 :description "Days to schedule ahead"}]]])
-
-(def ChannelScheduleResponse
-  [:map
-   [:message        :string]
-   [:events-created {:optional true} :int]])
-
 (def ChannelScheduleInfoResponse
   "Current schedule state for a channel."
   [:map
@@ -209,31 +200,6 @@
    [:schedule      {:optional true} [:maybe [:map {:closed false}]]]
    [:slots         {:optional true} [:maybe [:vector [:map {:closed false}]]]]
    [:upcoming-events {:optional true} [:maybe [:vector [:map {:closed false}]]]]])
-
-(def ApplyTemplateRequest
-  "Body for applying a schedule template to a channel.
-   Provide either :template (full map) or :template-key (keyword)."
-  [:map
-   [:horizon      {:optional true} [:int {:min 1 :max 365}]]
-   [:template-key {:optional true} :keyword]
-   [:template     {:optional true}
-    [:map
-     [:name :string]
-     [:slots [:vector [:map
-                       [:time {:optional true} :string]
-                       [:fill-mode {:optional true} [:enum :once :count :block :flood]]
-                       [:block-duration {:optional true} :string]
-                       [:duration-hours {:optional true} :int]
-                       [:item-count {:optional true} :int]
-                       [:required-tags {:optional true} [:vector :keyword]]
-                       [:excluded-tags {:optional true} [:vector :keyword]]
-                       [:playback-order {:optional true} [:enum :chronological :random :shuffle :semi-sequential :season-episode]]
-                       [:batch-size {:optional true} :int]
-                       [:days-of-week {:optional true} [:set [:enum :mon :tue :wed :thu :fri :sat :sun]]]]]]]]])
-
-(def ApplyAllTemplatesResponse
-  "Map of channel-key → apply-template result (or :no-template / :no-channel-id)."
-  [:map-of :keyword :any])
 
 ;; ---------------------------------------------------------------------------
 ;; Browse / catalog exploration
@@ -272,40 +238,6 @@
 (def ChannelListResponse
   [:map
    [:channels [:vector ChannelInfo]]])
-
-;; ---------------------------------------------------------------------------
-;; Intent / natural-language scheduling
-;; ---------------------------------------------------------------------------
-
-(def IntentRequest
-  [:map
-   [:instruction :string]
-   [:dry-run {:optional true} :boolean]
-   [:horizon {:optional true} [:int {:min 1 :max 365}]]])
-
-(def Operation
-  [:map {:closed false}
-   [:type :string]
-   [:slot_index {:optional true} :int]
-   [:slot {:optional true} :any]
-   [:new_slot {:optional true} :any]
-   [:changes {:optional true} :any]
-   [:success {:optional true} :boolean]
-   [:result {:optional true} :any]
-   [:error {:optional true} [:maybe :string]]])
-
-(def Preview
-  [:map
-   [:affected_blocks [:vector :string]]
-   [:description :string]])
-
-(def IntentResponse
-  [:map
-   [:success :boolean]
-   [:reasoning :string]
-   [:operations [:vector Operation]]
-   [:preview Preview]
-   [:applied? {:optional true} :boolean]])
 
 ;; ---------------------------------------------------------------------------
 ;; Strategy
@@ -470,10 +402,6 @@
 (def DailyTaskQuery
   [:map
    [:horizon {:optional true} [:int {:min 1 :max 365 :description "Days to schedule ahead"}]]])
-
-(def StrategyTaskQuery
-  [:map
-   [:commit {:optional true} [:boolean {:description "Apply the generated strategy immediately (default true)"}]]])
 
 ;; ---------------------------------------------------------------------------
 ;; Query parameters

@@ -3,7 +3,7 @@
 
    These endpoints are intended to be triggered by Kubernetes CronJobs (see
    deploy/k8s) rather than an in-process scheduler. Each runs the corresponding
-   task against the live system components and returns a summary."
+   task against the live system components and returns a per-channel summary."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.scheduling.tasks :as tasks]))
 
@@ -21,7 +21,8 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn weekly-handler
-  "POST /api/scheduling/weekly — re-apply schedule templates to every channel."
+  "POST /api/scheduling/weekly — expand each channel's grid + overrides for the
+   coming week and push the DailySlots to Pseudovision."
   [ctx]
   (fn [_]
     (try
@@ -31,27 +32,23 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn monthly-handler
-  "POST /api/scheduling/monthly — generate a monthly strategy.
-   Optional ?commit=true|false (default true) controls auto-apply."
+  "POST /api/scheduling/monthly — propose + store sparse monthly overrides for
+   every channel against their frozen grids."
   [ctx]
-  (fn [req]
+  (fn [_]
     (try
-      (let [commit? (get-in req [:parameters :query :commit] true)
-            s       (tasks/run-monthly! ctx :commit? commit?)]
-        {:status 200 :body {:task "monthly" :committed commit? :strategy s}})
+      {:status 200 :body {:task "monthly" :results (tasks/run-monthly! ctx)}}
       (catch Exception e
         (log/error e "monthly scheduling task failed")
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn quarterly-handler
-  "POST /api/scheduling/quarterly — generate a quarterly strategy.
-   Optional ?commit=true|false (default true) controls auto-apply."
+  "POST /api/scheduling/quarterly — propose → check → repair → freeze the
+   quarterly grid for every channel."
   [ctx]
-  (fn [req]
+  (fn [_]
     (try
-      (let [commit? (get-in req [:parameters :query :commit] true)
-            s       (tasks/run-quarterly! ctx :commit? commit?)]
-        {:status 200 :body {:task "quarterly" :committed commit? :strategy s}})
+      {:status 200 :body {:task "quarterly" :results (tasks/run-quarterly! ctx)}}
       (catch Exception e
         (log/error e "quarterly scheduling task failed")
         {:status 500 :body {:error (.getMessage e)}}))))

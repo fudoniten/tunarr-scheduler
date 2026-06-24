@@ -13,7 +13,6 @@
             [tunarr.scheduler.http.api.channels     :as channels]
             [tunarr.scheduler.http.api.jobs         :as jobs]
             [tunarr.scheduler.http.api.browse       :as browse]
-            [tunarr.scheduler.http.api.intent       :as intent]
             [tunarr.scheduler.http.api.strategy     :as strategy]
             [tunarr.scheduler.http.api.scheduling   :as scheduling]
             [tunarr.scheduler.http.api.plans        :as plans]))
@@ -257,41 +256,7 @@
                    :responses {200 {:body s/ChannelScheduleInfoResponse}
                                404 {:body s/APIError}
                                500 {:body s/APIError}}
-                   :handler   (channels/get-schedule-handler ctx)}
-      :post       {:summary   "Update channel schedule in Pseudovision"
-                   :parameters {:body s/ChannelScheduleRequest}
-                   :responses {200 {:body s/ChannelScheduleResponse}
-                               500 {:body s/APIError}}
-                   :handler   (channels/update-schedule-handler ctx)}}]
-
-    ["/api/channels/:channel-id/apply-template"
-     {:tags       ["channels"]
-      :parameters {:path [:map [:channel-id s/ChannelId]]
-                   :body s/ApplyTemplateRequest}
-      :post       {:summary   "Apply a schedule template to a channel"
-                   :responses {200 {:body s/ChannelScheduleResponse}
-                               404 {:body s/APIError}
-                               500 {:body s/APIError}}
-                   :handler   (channels/apply-template-handler ctx)}}]
-
-    ["/api/channels/all/apply-templates"
-     {:tags ["channels"]
-      :post {:summary   "Apply default templates to all channels"
-             :responses {200 {:body s/ApplyAllTemplatesResponse}
-                         500 {:body s/APIError}}
-             :handler   (channels/apply-all-templates-handler ctx)}}]
-
-    ;; ── Intent ───────────────────────────────────────────────────────────────
-    ["/api/channels/:channel-id/intent"
-     {:tags       ["intent"]
-      :parameters {:path [:map [:channel-id s/ChannelId]]
-                   :body s/IntentRequest}
-      :post       {:summary   "Process a natural-language scheduling intent"
-                   :responses {200 {:body s/IntentResponse}
-                               400 {:body s/APIError}
-                               422 {:body s/APIError}
-                               500 {:body s/APIError}}
-                   :handler   (intent/intent-handler ctx)}}]
+                   :handler   (channels/get-schedule-handler ctx)}}]
 
     ;; ── Strategy ────────────────────────────────────────────────────────────
     ["/api/strategies"
@@ -375,16 +340,14 @@
 
     ["/api/scheduling/monthly"
      {:tags ["scheduling"]
-      :post {:summary    "Generate (and optionally apply) a monthly strategy"
-             :parameters {:query s/StrategyTaskQuery}
+      :post {:summary    "Propose + store sparse monthly overrides for every channel"
              :responses  {200 {:body s/SchedulingTaskResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/monthly-handler ctx)}}]
 
     ["/api/scheduling/quarterly"
      {:tags ["scheduling"]
-      :post {:summary    "Generate (and optionally apply) a quarterly strategy"
-             :parameters {:query s/StrategyTaskQuery}
+      :post {:summary    "Propose → check → repair → freeze the quarterly grid per channel"
              :responses  {200 {:body s/SchedulingTaskResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/quarterly-handler ctx)}}]

@@ -161,10 +161,21 @@ against the contracts before insert and round-trips exactly.
   - **Weekly** publish lives in `integration/publish-week!` (expand stored grid +
     overrides → kebab-case → `POST /daily-slots`; no Tunabrain call).
   - **Daily** horizon extension is unchanged (old `tasks.clj`).
-- **Remaining:** repoint `http/api/scheduling.clj` cron handlers at the new
-  orchestration (needs the per-channel `{:name :description}` list +
-  channel→pv-id resolution wired from config/ctx) and retire the old batch
-  `tasks.clj`/`templates.clj` path.
+- **Cron wiring DONE:** `tasks.clj` rewritten to drive the new pipeline per
+  channel — `run-daily!` (horizon), `run-weekly!` (expand + publish via
+  `integration/publish-week!`), `run-monthly!`/`run-quarterly!` (orchestration).
+  Channels come from config (`::media/channel-fullname` keys the stored
+  grids/overrides + is the Tunabrain channel name; `::media/channel-id` UUID
+  resolves to the Pseudovision integer id for the DailySlot push). The
+  `http/api/scheduling.clj` cron handlers return per-channel results.
+
+### Batch-path deprecation ✅ DONE
+Removed `scheduling/pseudovision.clj` (slot-spec translation),
+`scheduling/templates.clj` (3-slot templates), `scheduling/intent.clj` +
+`http/api/intent.clj` (NL slot editing), and their routes/handlers/schemas (the
+`POST /schedule`, `apply-template(s)`, and `/intent` endpoints; `GET /schedule`
+is kept). The old `strategies` table/endpoints remain (independent feature,
+consumed by Marquee).
 
 ### Phase 6 — UI access + operator input ✅ DONE (non-gating)
 Per the product call, generation is **not** gated on human approval; instead the
@@ -187,12 +198,6 @@ UI gets read access to the plans plus a per-channel manual-input surface that
   orchestration (Phase 5) will pull them into propose-* calls.
 - `plans_test.clj` (7 tests); full ring handler assembles without route
   conflicts. 55 scheduling tests / 232 assertions green.
-
-### Deprecation (alongside Phases 1–5)
-`scheduling/pseudovision.clj` (slot-spec translation), `scheduling/templates.clj`
-(3-slot templates), and the slot-mutation parts of `scheduling/intent.clj`
-become legacy. Decide whether to retire `intent.clj` or re-point natural-language
-edits at Overrides. The old `strategies` table may remain for history.
 
 ---
 
