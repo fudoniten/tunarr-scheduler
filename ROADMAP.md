@@ -107,13 +107,20 @@ Assemble a per-channel `CatalogProfile`. **Decision: source runtimes and
 eligibility from Pseudovision** (see "Open decisions" below). Add a
 `get-catalog-aggregate` client fn; assemble/slice per channel.
 
-### Phase 3 — Feasibility checker
-Pure `(grid, catalog-profile, horizon-start, horizon-end) → FeasibilityReport`:
-per-strip `slots_required` (day-pattern × horizon), `episodes_available` by
-`media_id` kind, `headroom_ratio`, status thresholds (`MARGIN = 1.2`),
-base-grid overlap detection, broadcast-day coverage gaps, `overall_status`
-rollup.
-- **Deliverable:** `…scheduling.feasibility` + tests.
+### Phase 3 — Feasibility checker ✅ DONE
+Pure `(grid, catalog-profile, horizon-start, horizon-end) → FeasibilityReport`
+in `scheduling/feasibility.clj`: per-strip `slots_required` (day-pattern ×
+horizon), `episodes_available` by `media_id` kind (`series:` sequential vs.
+pooled, `random:` pool floor, `movie:` repeat check), `headroom_ratio`, status
+thresholds (`margin = 1.2`, `random-pool-floor = 10`), base-grid overlap
+detection (with cross-midnight handling), broadcast-day coverage gaps (only when
+no `default_content`), `overall_status` rollup.
+- **Done:** `…scheduling.feasibility` + `feasibility_test.clj` (13 tests). Day
+  helpers extracted to a shared `scheduling/calendar.clj` used by both expander
+  and checker. 32 scheduling tests / 153 assertions green.
+- **Local policy knobs** (`margin`, `random-pool-floor`) and the random-category
+  → catalog `genres` lookup are judgment calls with no upstream reference;
+  reconcile if tunabrain ever ships a checker.
 
 ### Phase 4 — Storage
 Persist the system of record (mirroring `scheduling/strategy.clj`'s executor

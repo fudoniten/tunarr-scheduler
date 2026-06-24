@@ -35,8 +35,9 @@
    suite. The tests alongside this namespace reproduce its enumerated cases from
    the spec prose; the upstream file should still be ported verbatim once
    accessible, to catch any case not covered here."
-  (:require [tunarr.scheduler.scheduling.contracts :as contracts])
-  (:import [java.time LocalDate LocalTime LocalDateTime DayOfWeek]
+  (:require [tunarr.scheduler.scheduling.contracts :as contracts]
+            [tunarr.scheduler.scheduling.calendar :as cal])
+  (:import [java.time LocalDate LocalTime LocalDateTime]
            [java.time.format DateTimeFormatter]))
 
 ;; ---------------------------------------------------------------------------
@@ -49,34 +50,6 @@
 
 (defn- ->date ^LocalDate [d]
   (if (instance? LocalDate d) d (LocalDate/parse (str d))))
-
-(def ^:private dow->name
-  {DayOfWeek/MONDAY "mon" DayOfWeek/TUESDAY "tue" DayOfWeek/WEDNESDAY "wed"
-   DayOfWeek/THURSDAY "thu" DayOfWeek/FRIDAY "fri" DayOfWeek/SATURDAY "sat"
-   DayOfWeek/SUNDAY "sun"})
-
-(def ^:private weekday-set #{"mon" "tue" "wed" "thu" "fri"})
-(def ^:private weekend-set #{"sat" "sun"})
-
-(defn- day-name [^LocalDate d]
-  (dow->name (.getDayOfWeek d)))
-
-(defn- days-match?
-  "True when a days-pattern (\"daily\"/\"weekdays\"/\"weekends\" or an explicit
-   list like [\"mon\" \"wed\"]) applies to the given day name."
-  [pattern day]
-  (cond
-    (= pattern "daily")     true
-    (= pattern "weekdays")  (contains? weekday-set day)
-    (= pattern "weekends")  (contains? weekend-set day)
-    (sequential? pattern)   (boolean (some #(= % day) pattern))
-    :else                   false))
-
-(defn- days-specificity [pattern]
-  (cond
-    (sequential? pattern)              2
-    (#{"weekdays" "weekends"} pattern) 1
-    :else                              0))   ; "daily"
 
 (defn- abs-interval
   "Absolute [start end) datetimes for a rule firing on date `d`. `end <= start`
@@ -94,10 +67,10 @@
 (defn- strip-candidates [strips dates]
   (for [strip strips
         ^LocalDate d dates
-        :when (days-match? (:days strip) (day-name d))]
+        :when (cal/date-matches? (:days strip) d)]
     (let [[s e] (abs-interval d (:start strip) (:end strip))]
       {:start s :end e :content (:content strip)
-       :layer 0 :spec (days-specificity (:days strip)) :priority (:priority strip 0)
+       :layer 0 :spec (cal/specificity (:days strip)) :priority (:priority strip 0)
        :rule (:strip_id strip)})))
 
 (defn- override-matches?
@@ -106,7 +79,7 @@
   [scope ^LocalDate d]
   (if (:date scope)
     (= d (->date (:date scope)))
-    (and (days-match? (:days scope) (day-name d))
+    (and (cal/date-matches? (:days scope) d)
          (or (nil? (:effective_start scope))
              (not (.isBefore d (->date (:effective_start scope)))))
          (or (nil? (:effective_end scope))
@@ -118,7 +91,7 @@
         :let [scope (:scope ovr)]
         :when (override-matches? scope d)]
     (let [[s e] (abs-interval d (:start ovr) (:end ovr))
-          spec  (if (:date scope) 3 (days-specificity (:days scope)))]
+          spec  (if (:date scope) 3 (cal/specificity (:days scope)))]
       {:start s :end e :content (:content ovr)
        :layer 1 :spec spec :priority (:priority ovr 0)
        :rule (:override_id ovr)})))
