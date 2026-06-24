@@ -122,11 +122,22 @@ no `default_content`), `overall_status` rollup.
   → catalog `genres` lookup are judgment calls with no upstream reference;
   reconcile if tunabrain ever ships a checker.
 
-### Phase 4 — Storage
-Persist the system of record (mirroring `scheduling/strategy.clj`'s executor
-pattern): a `grids` table (one frozen, versioned Grid per channel+quarter,
-carrying Tunabrain's `grid_id`) and an `overrides` table (per channel+month,
-carrying `overrides_id`). New migrations under `resources/migrations/`.
+### Phase 4 — Storage ✅ DONE
+Persist the system of record in `scheduling/storage.clj` (mirroring
+`scheduling/strategy.clj`'s executor + JSON-column pattern): a `grids` table
+(one frozen Grid per channel+quarter+year, versioned and immutable — re-freezing
+inserts a new version and supersedes the prior, carrying Tunabrain's `grid_id`
+and the FeasibilityReport snapshot) and an `overrides` table (per channel+month,
+versioned, carrying `overrides_id`). Stored Grid/Override JSON is validated
+against the contracts before insert and round-trips exactly.
+- **Done:** migration `20260624-002-grids` (+ down), `…scheduling.storage`
+  (`freeze-grid!`/`current-grid`/`get-grid`/`list-grids`,
+  `store-overrides!`/`current-overrides`/`list-overrides`), and
+  `storage_test.clj` (9 tests over an in-memory H2-backed executor: read-back,
+  versioning/supersede, key independence, validation rejection, feasibility
+  snapshot, empty-override sets). 41 scheduling tests / 179 assertions green.
+- Columns `cal_year`/`cal_month` avoid reserved-word clashes (H2); tests fold
+  H2 identifiers to lower case to mirror Postgres.
 
 ### Phase 5 — Tunabrain client + orchestration
 - Add `propose-quarterly-grid!`, `repair-quarterly-grid!`,
