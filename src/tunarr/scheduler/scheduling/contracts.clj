@@ -49,21 +49,30 @@
    [:enum "daily" "weekdays" "weekends"]
    [:vector DayName]])
 
+(def SelectionStrategy
+  "How Pseudovision picks concrete content within a slot. Mirrors grid.py's
+   SelectionStrategy literal and DailySlot.media_selection_strategy."
+  [:enum "random" "sequential" "specific"])
+
+;; Optionality below mirrors the Pydantic models in tunabrain
+;; src/tunabrain/scheduling/grid.py: a field is `{:optional true}` where the
+;; Pydantic field has a default, and `[:maybe …]` where its type is `X | None`.
+;; Required (Pydantic `...`) fields stay mandatory.
+
 ;; ---------------------------------------------------------------------------
 ;; Content — the "what plays" payload shared by strips and overrides
 ;; ---------------------------------------------------------------------------
 
 (def Content
   "media_id conventions: `series:<id>`, `movie:<id>`, `random:<category>`.
-   `strategy` is the media-selection strategy resolved by Pseudovision at air
-   time (e.g. \"sequential\", \"random\")."
+   Only `media_id` is required; the rest carry Pydantic defaults."
   [:map
    [:media_id :string]
-   [:strategy :string]
-   [:marathon :boolean]
-   [:category_filters [:vector :string]]
-   [:label [:maybe :string]]
-   [:notes [:vector :string]]])
+   [:strategy {:optional true} SelectionStrategy]
+   [:marathon {:optional true} :boolean]
+   [:category_filters {:optional true} [:vector :string]]
+   [:label {:optional true} [:maybe :string]]
+   [:notes {:optional true} [:vector :string]]])
 
 ;; ---------------------------------------------------------------------------
 ;; CatalogProfile — the summarized shape of a channel's library (§2.1)
@@ -73,35 +82,35 @@
   [:map
    [:media_id :string]
    [:title :string]
-   [:genres [:vector :string]]
-   [:episode_count :int]
-   [:available_episode_count :int]
-   [:avg_runtime_minutes number?]
-   [:tags [:vector :string]]])
+   [:genres {:optional true} [:vector :string]]
+   [:episode_count [:int {:min 0}]]
+   [:available_episode_count [:int {:min 0}]]
+   [:avg_runtime_minutes {:optional true} [:maybe number?]]
+   [:tags {:optional true} [:vector :string]]])
 
 (def GenreProfile
   [:map
    [:genre :string]
-   [:show_count :int]
-   [:episode_count :int]])
+   [:show_count [:int {:min 0}]]
+   [:episode_count [:int {:min 0}]]])
 
 (def RuntimeBucket
   [:map
    [:label :string]
-   [:min_minutes number?]
-   [:max_minutes number?]
-   [:item_count :int]])
+   [:min_minutes [:int {:min 0}]]
+   [:max_minutes [:int {:min 0}]]
+   [:item_count [:int {:min 0}]]])
 
 (def CatalogProfile
   [:map
-   [:channel_scope :string]
-   [:total_items :int]
-   [:total_episodes :int]
-   [:movie_count :int]
-   [:shows [:vector ShowProfile]]
-   [:genres [:vector GenreProfile]]
-   [:runtime_histogram [:vector RuntimeBucket]]
-   [:generated_at IsoDateTime]])
+   [:channel_scope {:optional true} [:maybe :string]]
+   [:total_items [:int {:min 0}]]
+   [:total_episodes [:int {:min 0}]]
+   [:movie_count {:optional true} [:int {:min 0}]]
+   [:shows {:optional true} [:vector ShowProfile]]
+   [:genres {:optional true} [:vector GenreProfile]]
+   [:runtime_histogram {:optional true} [:vector RuntimeBucket]]
+   [:generated_at {:optional true} [:maybe IsoDateTime]]])
 
 ;; ---------------------------------------------------------------------------
 ;; Grid — the frozen weekly skeleton + recurring strips (§2.2)
@@ -113,13 +122,13 @@
    [:start ClockTime]
    [:end ClockTime]
    [:role :string]
-   [:genre_focus [:vector :string]]
-   [:rationale :string]])
+   [:genre_focus {:optional true} [:vector :string]]
+   [:rationale {:optional true} [:maybe :string]]])
 
 (def DaypartSkeleton
   [:map
    [:channel :string]
-   [:blocks [:vector DaypartBlock]]])
+   [:blocks {:optional true} [:vector DaypartBlock]]])
 
 (def GridStrip
   [:map
@@ -128,31 +137,32 @@
    [:start ClockTime]
    [:end ClockTime]
    [:content Content]
-   [:priority :int]
-   [:daypart :string]])
+   [:priority {:optional true} :int]
+   [:daypart {:optional true} [:maybe :string]]])
 
 (def Grid
   [:map
    [:channel :string]
-   [:broadcast_day_start ClockTime]
-   [:skeleton DaypartSkeleton]
-   [:strips [:vector GridStrip]]
-   [:default_content [:maybe Content]]])
+   [:broadcast_day_start {:optional true} ClockTime]
+   [:skeleton {:optional true} [:maybe DaypartSkeleton]]
+   [:strips {:optional true} [:vector GridStrip]]
+   [:default_content {:optional true} [:maybe Content]]])
 
 ;; ---------------------------------------------------------------------------
 ;; Override — sparse monthly deltas (§2.3)
 ;; ---------------------------------------------------------------------------
 
 (def OverrideScope
-  "Exactly one of: a single date, or a recurring day-pattern bounded to a window.
-   The maps are closed so the two shapes stay mutually exclusive."
+  "Exactly one of: a single date, or a recurring day-pattern. The recurring
+   window bounds are optional (unbounded when omitted); the maps are closed so
+   the two shapes stay mutually exclusive (mirrors grid.py's validator)."
   [:or
    [:map {:closed true}
     [:date IsoDate]]
    [:map {:closed true}
     [:days DaysPattern]
-    [:effective_start IsoDate]
-    [:effective_end IsoDate]]])
+    [:effective_start {:optional true} IsoDate]
+    [:effective_end {:optional true} IsoDate]]])
 
 (def ScheduleOverride
   "An Override in the spec; named ScheduleOverride here to avoid colliding with
@@ -163,9 +173,9 @@
    [:start ClockTime]
    [:end ClockTime]
    [:content Content]
-   [:mode :string]
-   [:priority :int]
-   [:note [:maybe :string]]])
+   [:mode {:optional true} [:enum "replace"]]
+   [:priority {:optional true} :int]
+   [:note {:optional true} [:maybe :string]]])
 
 ;; ---------------------------------------------------------------------------
 ;; FeasibilityReport — repair feedback to Tunabrain (§2.4)
@@ -178,11 +188,11 @@
   [:map
    [:rule_id :string]
    [:media_id :string]
-   [:slots_required :int]
-   [:episodes_available :int]
-   [:headroom_ratio number?]
+   [:slots_required [:int {:min 0}]]
+   [:episodes_available [:int {:min 0}]]
+   [:headroom_ratio {:optional true} [:maybe number?]]
    [:status StripFeasibilityStatus]
-   [:message :string]])
+   [:message {:optional true} :string]])
 
 (def FeasibilityStatus
   [:enum "ok" "warnings" "blocked"])
@@ -192,10 +202,10 @@
    [:horizon_start IsoDate]
    [:horizon_end IsoDate]
    [:overall_status FeasibilityStatus]
-   [:strip_findings [:vector StripFeasibility]]
-   [:overlaps [:vector :string]]
-   [:uncovered_intervals [:vector :string]]
-   [:notes [:vector :string]]])
+   [:strip_findings {:optional true} [:vector StripFeasibility]]
+   [:overlaps {:optional true} [:vector :string]]
+   [:uncovered_intervals {:optional true} [:vector :string]]
+   [:notes {:optional true} [:vector :string]]])
 
 ;; ---------------------------------------------------------------------------
 ;; DailySlot — the expander's concrete dated output (§2.5)
@@ -216,7 +226,8 @@
 
 (def registry
   "Convenience map of contract-name → schema, for tests and lookups."
-  {:Content           Content
+  {:SelectionStrategy SelectionStrategy
+   :Content           Content
    :ShowProfile       ShowProfile
    :GenreProfile      GenreProfile
    :RuntimeBucket     RuntimeBucket

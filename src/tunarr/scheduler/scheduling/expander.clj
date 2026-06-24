@@ -18,8 +18,8 @@
      2. Sweep        — between consecutive interval boundaries, the
         highest-precedence candidate that *fully covers* the elementary interval
         wins; otherwise fill with default_content (or leave a gap).
-     3. Merge        — adjacent elementary intervals won by the same candidate
-        (or both by default) are coalesced.
+     3. Merge        — adjacent elementary intervals won by the same rule (by
+        rule_id, or both by default) are coalesced.
      4. Emit         — DailySlots sorted by start, clipped to
         [range_start, range_end).
 
@@ -97,15 +97,20 @@
         :when (days-match? (:days strip) (day-name d))]
     (let [[s e] (abs-interval d (:start strip) (:end strip))]
       {:start s :end e :content (:content strip)
-       :layer 0 :spec (days-specificity (:days strip)) :priority (:priority strip)
+       :layer 0 :spec (days-specificity (:days strip)) :priority (:priority strip 0)
        :rule (:strip_id strip)})))
 
-(defn- override-matches? [scope ^LocalDate d]
+(defn- override-matches?
+  "Whether an override scope fires on date `d`. Recurring window bounds are
+   optional — absent `effective_start`/`effective_end` means unbounded."
+  [scope ^LocalDate d]
   (if (:date scope)
     (= d (->date (:date scope)))
     (and (days-match? (:days scope) (day-name d))
-         (not (.isBefore d (->date (:effective_start scope))))
-         (not (.isAfter  d (->date (:effective_end scope)))))))
+         (or (nil? (:effective_start scope))
+             (not (.isBefore d (->date (:effective_start scope)))))
+         (or (nil? (:effective_end scope))
+             (not (.isAfter d (->date (:effective_end scope))))))))
 
 (defn- override-candidates [overrides dates]
   (for [ovr overrides
@@ -115,7 +120,7 @@
     (let [[s e] (abs-interval d (:start ovr) (:end ovr))
           spec  (if (:date scope) 3 (days-specificity (:days scope)))]
       {:start s :end e :content (:content ovr)
-       :layer 1 :spec spec :priority (:priority ovr)
+       :layer 1 :spec spec :priority (:priority ovr 0)
        :rule (:override_id ovr)})))
 
 (defn- materialize
@@ -163,14 +168,15 @@
 (defn- segments
   "Per elementary interval, the winning candidate's content (or default). Gaps
    (no winner, no default) are dropped. Each kept segment carries a merge `:key`
-   — the winner's unique precedence tuple, or `:default` — so adjacent segments
-   from the same source coalesce."
+   — the winner's `rule_id`, or `::default` — so adjacent intervals won by the
+   same rule coalesce (matching the reference expander; an all-day daily strip
+   thus collapses across midnight)."
   [candidates default lo hi]
   (for [[a b] (partition 2 1 (boundaries candidates lo hi))
         :let [w (winner candidates a b)
               content (if w (:content w) default)]
         :when content]
-    {:start a :end b :content content :key (if w (:prec w) :default)}))
+    {:start a :end b :content content :key (if w (:rule w) ::default)}))
 
 (defn- merge-adjacent [segs]
   (reduce (fn [acc seg]
@@ -192,7 +198,9 @@
     {:start_time (.format ^LocalDateTime (:start seg) slot-formatter)
      :end_time   (.format ^LocalDateTime (:end seg) slot-formatter)
      :media_id   (:media_id c)
-     :media_selection_strategy (:strategy c)
+     ;; Content fields carry Pydantic defaults; mirror them so a hand-authored
+     ;; grid that omits them still produces conformant slots.
+     :media_selection_strategy (:strategy c "sequential")
      :category_filters (vec (:category_filters c))
      :notes      (vec (:notes c))}))
 

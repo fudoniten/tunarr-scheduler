@@ -124,10 +124,11 @@
     (is (c/valid? c/OverrideScope {:days "weekends"
                                    :effective_start "2026-01-01"
                                    :effective_end "2026-01-31"})))
+  (testing "recurring window bounds are optional (unbounded)"
+    (is (c/valid? c/OverrideScope {:days ["fri"]}))
+    (is (c/valid? c/OverrideScope {:days "weekends" :effective_start "2026-01-01"})))
   (testing "rejects mixing the two shapes"
-    (is (not (c/valid? c/OverrideScope {:date "2026-01-10" :days "weekends"}))))
-  (testing "rejects an incomplete recurring window"
-    (is (not (c/valid? c/OverrideScope {:days "weekends" :effective_start "2026-01-01"})))))
+    (is (not (c/valid? c/OverrideScope {:date "2026-01-10" :days "weekends"})))))
 
 (deftest clock-time-and-cross-midnight
   (testing "valid HH:MM"
