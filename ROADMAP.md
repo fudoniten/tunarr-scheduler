@@ -130,7 +130,7 @@ inserts a new version and supersedes the prior, carrying Tunabrain's `grid_id`
 and the FeasibilityReport snapshot) and an `overrides` table (per channel+month,
 versioned, carrying `overrides_id`). Stored Grid/Override JSON is validated
 against the contracts before insert and round-trips exactly.
-- **Done:** migration `20260624-002-grids` (+ down), `…scheduling.storage`
+- **Done:** migration `20260625-001-grids` (+ down), `…scheduling.storage`
   (`freeze-grid!`/`current-grid`/`get-grid`/`list-grids`,
   `store-overrides!`/`current-overrides`/`list-overrides`), and
   `storage_test.clj` (9 tests over an in-memory H2-backed executor: read-back,
@@ -139,11 +139,15 @@ against the contracts before insert and round-trips exactly.
 - Columns `cal_year`/`cal_month` avoid reserved-word clashes (H2); tests fold
   H2 identifiers to lower case to mirror Postgres.
 
-### Phase 5 — Tunabrain client + orchestration
-- Add `propose-quarterly-grid!`, `repair-quarterly-grid!`,
-  `propose-monthly-overrides!` to `tunarr.scheduler.tunabrain` (reusing
-  `json-post!`).
-- Rework `scheduling/tasks.clj`:
+### Phase 5 — Tunabrain client + orchestration 🟡 CLIENT DONE
+- **Done:** `propose-quarterly-grid!`, `repair-quarterly-grid!`,
+  `propose-monthly-overrides!` added to `tunarr.scheduler.tunabrain` (reusing
+  `json-post!`), with pure request builders (`quarterly-grid-request`,
+  `repair-grid-request`, `monthly-overrides-request`) per handoff §5.1–5.3 and
+  lenient contract-validation of responses. `tunabrain_scheduling_test.clj`
+  (10 tests) covers the builders and the wrappers with the network stubbed.
+- **Remaining (blocked on Phase 2 — CatalogProfile from Pseudovision):** rework
+  `scheduling/tasks.clj`:
   - **Quarterly:** profile → propose → feasibility → bounded repair loop
     (max ~3) → freeze + store.
   - **Monthly:** propose-monthly-overrides (frozen grid + month profile +
@@ -151,7 +155,7 @@ against the contracts before insert and round-trips exactly.
   - **Weekly:** `expand(...)` → push `DailySlot[]` to Pseudovision. **No
     Tunabrain call.**
   - **Daily:** horizon extension (unchanged).
-- Repoint `http/api/scheduling.clj` handlers at the new orchestration.
+  Repoint `http/api/scheduling.clj` handlers at the new orchestration.
 
 ### Phase 6 — GUI checkpoints (can follow)
 Human review on the small artifacts: approve the `DaypartSkeleton` and the

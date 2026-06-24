@@ -42,7 +42,11 @@
     (let [db (jdbc/get-datasource {:dbtype "h2:mem" :dbname (str "store-" (random-uuid))
                                    :DB_CLOSE_DELAY "-1" :DATABASE_TO_LOWER "TRUE"})]
       (setup-schema db)
-      (let [ex (executor/create-executor db)]
+      ;; A single worker serializes jobs on one connection, so the version-read
+      ;; and the supersede+insert in freeze-grid! see each other's writes
+      ;; deterministically (multiple H2 connections to the same in-mem DB can lag
+      ;; under parallel test load).
+      (let [ex (executor/create-executor db :worker-count 1)]
         (binding [*ex* ex]
           (try (t) (finally (executor/close! ex))))))))
 
