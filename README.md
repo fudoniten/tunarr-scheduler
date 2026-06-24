@@ -186,7 +186,7 @@ Payloads are JSON documents.
 * Implement bumper generation with TTS
 * Set up automated daily schedule regeneration
 
-See [TODO.md](TODO.md) for the complete roadmap.
+See [ROADMAP.md](ROADMAP.md) for the complete roadmap.
 
 ## Related Documentation
 
