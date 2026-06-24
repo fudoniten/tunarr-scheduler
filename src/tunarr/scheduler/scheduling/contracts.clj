@@ -20,11 +20,6 @@
   (:require [malli.core  :as m]
             [malli.error :as me]))
 
-;; `Override` is one of the canonical contract names, but Clojure auto-imports
-;; java.lang.Override into every namespace. Drop that class mapping so the
-;; schema var below can bind to the spec's name rather than a renamed alias.
-(ns-unmap *ns* 'Override)
-
 ;; ---------------------------------------------------------------------------
 ;; Primitives
 ;; ---------------------------------------------------------------------------
@@ -159,7 +154,9 @@
     [:effective_start IsoDate]
     [:effective_end IsoDate]]])
 
-(def Override
+(def ScheduleOverride
+  "An Override in the spec; named ScheduleOverride here to avoid colliding with
+   the auto-imported java.lang.Override."
   [:map
    [:override_id :string]
    [:scope OverrideScope]
@@ -229,7 +226,7 @@
    :GridStrip         GridStrip
    :Grid              Grid
    :OverrideScope     OverrideScope
-   :Override          Override
+   :Override          ScheduleOverride
    :StripFeasibility  StripFeasibility
    :FeasibilityReport FeasibilityReport
    :DailySlot         DailySlot})

@@ -102,7 +102,7 @@
   (testing "Content"           (check c/Content content-example))
   (testing "CatalogProfile"    (check c/CatalogProfile catalog-profile-example))
   (testing "Grid"              (check c/Grid grid-example))
-  (testing "Override"          (check c/Override override-example))
+  (testing "Override"          (check c/ScheduleOverride override-example))
   (testing "FeasibilityReport" (check c/FeasibilityReport feasibility-report-example))
   (testing "DailySlot"         (check c/DailySlot daily-slot-example)))
 

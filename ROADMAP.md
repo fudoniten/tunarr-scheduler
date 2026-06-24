@@ -76,7 +76,7 @@ push concrete slots ◄───────┘
 Build order follows the deterministic spine first — a hand-authored grid can be
 expanded and pushed to a screen before any LLM or Pseudovision-aggregate work.
 
-### Phase 0 — Contracts ⏳ IN PROGRESS
+### Phase 0 — Contracts ✅ DONE
 Mirror the four+1 Tunabrain contracts as Clojure/Malli schemas with exact
 snake_case JSON field names: `Content`, `CatalogProfile` (+ `ShowProfile`,
 `GenreProfile`, `RuntimeBucket`), `Grid` (+ `GridStrip`, `DaypartSkeleton`,
@@ -84,17 +84,21 @@ snake_case JSON field names: `Content`, `CatalogProfile` (+ `ShowProfile`,
 (+ `StripFeasibility`), `DailySlot`.
 - **Deliverable:** `tunarr.scheduler.scheduling.contracts` ns + round-trip tests.
 
-### Phase 1 — Deterministic expander 🔜 (build first after contracts)
-Port `expand(grid, overrides, range_start, range_end) → DailySlot[]` as a **pure
-function**: materialize (with the leading `range_start − 1 day` for overnight
-strips), boundary sweep with precedence tuple
-`(layer_rank, scope_specificity, priority, definition_order)`, merge adjacent
-same-rule intervals, emit sorted+clipped slots, `default_content` fill.
-- **Deliverable:** `…scheduling.expander` + every case from
-  `tests/test_grid_expander.py` ported as Clojure tests (the golden spec).
-- **Milestone:** hand-author a Grid JSON, expand a week, push to Pseudovision,
-  watch TV. No Tunabrain, no aggregate endpoint yet.
-- Replaces the stub `scheduling/engine.clj::schedule-week!`.
+### Phase 1 — Deterministic expander ✅ DONE (golden port pending)
+`expand(grid, overrides, range_start, range_end) → DailySlot[]` implemented as a
+**pure function** in `scheduling/expander.clj`: materialize (with the leading
+`range_start − 1 day` for overnight strips), boundary sweep with precedence
+tuple `(layer_rank, scope_specificity, priority, definition_order)`, merge
+adjacent same-winner intervals, emit sorted+clipped slots, `default_content`
+fill.
+- **Done:** `…scheduling.expander` + `expander_test.clj` covering the spec's
+  enumerated cases (determinism, week-to-week identity, partial override,
+  specificity cascade, cross-midnight, default fill, empty grid, priority ties,
+  interior-boundary re-merge). 15 tests / 105 assertions green.
+- **Remaining:** port tunabrain `tests/test_grid_expander.py` verbatim to catch
+  any upstream case not reproduced here; then wire the
+  hand-author-grid → expand-a-week → push milestone once DailySlot ingestion is
+  settled. Still to retire the stub `scheduling/engine.clj::schedule-week!`.
 
 ### Phase 2 — CatalogProfile assembly
 Assemble a per-channel `CatalogProfile`. **Decision: source runtimes and
