@@ -4,6 +4,7 @@
    Provides integration with Pseudovision's native scheduling engine,
    tag management, and streaming capabilities."
   (:require [clj-http.client :as http]
+            [cheshire.core :as json]
             [tunarr.scheduler.backends.protocol :as proto]
             [taoensso.timbre :as log]))
 
@@ -580,6 +581,39 @@
   (request! :delete
             (api-url config (str "/api/ffmpeg/profiles/" profile-id))
             {}))
+
+;; ---------------------------------------------------------------------------
+;; Layered-grid scheduling: catalog aggregate + daily-slot ingestion
+;;
+;; Pseudovision normalises all JSON keys to kebab-case in both directions, so
+;; these speak kebab-case on the wire. Case conversion to/from the snake_case
+;; scheduling contracts lives in tunarr.scheduler.scheduling.integration.
+;; ---------------------------------------------------------------------------
+
+(defn get-catalog-aggregate
+  "GET /api/catalog/aggregate — the deterministic library rollup behind a
+   CatalogProfile (kebab-case). Both query params are optional:
+     :channel — integer id, channel number, or exact channel name (scopes the
+                profile); omitted ⇒ the full library.
+     :tag     — explicit tag filter (e.g. \"channel:comedy\"); overrides the
+                channel-name inference when both are given."
+  [config & [{:keys [channel tag]}]]
+  (request! :get
+            (api-url config "/api/catalog/aggregate")
+            {:query-params (cond-> {}
+                             channel (assoc "channel" (str channel))
+                             tag     (assoc "tag" tag))}))
+
+(defn push-daily-slots!
+  "POST /api/channels/:channel-id/daily-slots — ingest a kebab-case DailySlot
+   vector. Pseudovision clears existing non-manual events in the slots' date
+   range first, so the push is idempotent for that range. Returns the
+   DailySlotIngestResult ({:ingested :skipped :errors :channel-id})."
+  [config channel-id slots]
+  (request! :post
+            (api-url config (str "/api/channels/" channel-id "/daily-slots"))
+            {:content-type :json
+             :body (json/generate-string slots)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Health & Version

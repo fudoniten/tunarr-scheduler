@@ -22,6 +22,14 @@
 
 (defn year-of [date] (.getYear (->date date)))
 
+(defn quarter-range
+  "Half-open [start, end) LocalDates spanning a quarter (\"Q1\"..\"Q4\") of a
+   year — the natural feasibility/expansion horizon for a quarterly grid."
+  [quarter year]
+  (let [q     (Integer/parseInt (subs quarter 1))
+        start (LocalDate/of (int year) (inc (* 3 (dec q))) 1)]
+    [start (.plusMonths start 3)]))
+
 (defn month-of
   "The \"YYYY-MM\" key for a date."
   [date]

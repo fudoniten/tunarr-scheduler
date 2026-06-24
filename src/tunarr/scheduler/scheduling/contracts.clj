@@ -98,7 +98,8 @@
   [:map
    [:label :string]
    [:min_minutes [:int {:min 0}]]
-   [:max_minutes [:int {:min 0}]]
+   ;; nullable: the open-ended top bucket (e.g. "120min+") has no max.
+   [:max_minutes [:maybe [:int {:min 0}]]]
    [:item_count [:int {:min 0}]]])
 
 (def CatalogProfile

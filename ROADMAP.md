@@ -102,10 +102,13 @@ fill.
   DailySlot ingestion is settled; retire the stub
   `scheduling/engine.clj::schedule-week!`.
 
-### Phase 2 — CatalogProfile assembly
-Assemble a per-channel `CatalogProfile`. **Decision: source runtimes and
-eligibility from Pseudovision** (see "Open decisions" below). Add a
-`get-catalog-aggregate` client fn; assemble/slice per channel.
+### Phase 2 — CatalogProfile assembly ✅ DONE
+Sourced from Pseudovision's `GET /api/catalog/aggregate`. Pseudovision speaks
+kebab-case; Tunabrain + the internal contracts speak snake_case, so the
+`scheduling/integration.clj` boundary owns the deep kebab↔snake conversion.
+`integration/fetch-catalog-profile` fetches, converts, and validates against
+`contracts/CatalogProfile`. (Contract tweak: `RuntimeBucket.max_minutes` is now
+nullable for the open-ended top bucket.) Tested in `integration_test.clj`.
 
 ### Phase 3 — Feasibility checker ✅ DONE
 Pure `(grid, catalog-profile, horizon-start, horizon-end) → FeasibilityReport`
@@ -139,23 +142,29 @@ against the contracts before insert and round-trips exactly.
 - Columns `cal_year`/`cal_month` avoid reserved-word clashes (H2); tests fold
   H2 identifiers to lower case to mirror Postgres.
 
-### Phase 5 — Tunabrain client + orchestration 🟡 CLIENT DONE
-- **Done:** `propose-quarterly-grid!`, `repair-quarterly-grid!`,
-  `propose-monthly-overrides!` added to `tunarr.scheduler.tunabrain` (reusing
-  `json-post!`), with pure request builders (`quarterly-grid-request`,
-  `repair-grid-request`, `monthly-overrides-request`) per handoff §5.1–5.3 and
-  lenient contract-validation of responses. `tunabrain_scheduling_test.clj`
-  (10 tests) covers the builders and the wrappers with the network stubbed.
-- **Remaining (blocked on Phase 2 — CatalogProfile from Pseudovision):** rework
-  `scheduling/tasks.clj`:
-  - **Quarterly:** profile → propose → feasibility → bounded repair loop
-    (max ~3) → freeze + store.
-  - **Monthly:** propose-monthly-overrides (frozen grid + month profile +
-    operator `planned_events`) → store.
-  - **Weekly:** `expand(...)` → push `DailySlot[]` to Pseudovision. **No
-    Tunabrain call.**
-  - **Daily:** horizon extension (unchanged).
-  Repoint `http/api/scheduling.clj` handlers at the new orchestration.
+### Phase 5 — Tunabrain client + orchestration ✅ DONE
+- **Client:** `propose-quarterly-grid!`, `repair-quarterly-grid!`,
+  `propose-monthly-overrides!` in `tunarr.scheduler.tunabrain` (reusing
+  `json-post!`), with pure request builders per handoff §5.1–5.3 and lenient
+  contract-validation of responses (`tunabrain_scheduling_test.clj`).
+- **Orchestration** `scheduling/orchestration.clj`:
+  - **Quarterly** `run-quarterly!`: fetch CatalogProfile → propose →
+    `feasibility/check` over the quarter → bounded repair loop (default 3) →
+    freeze + store with the feasibility snapshot. Pulls operator guidance
+    (`quarterly_theme`/`strategic_guidance`) into the proposal.
+  - **Monthly** `run-monthly!`: propose-monthly-overrides against the frozen
+    grid (with `monthly_theme`/`planned_events`/`strategic_guidance` guidance) →
+    store. Empty override sets are normal.
+  - The three external calls (profile fetch + two proposals) are injected via the
+    components map (defaulting to the real impls), so tests stub without global
+    redefs. `orchestration_test.clj` (7 tests).
+  - **Weekly** publish lives in `integration/publish-week!` (expand stored grid +
+    overrides → kebab-case → `POST /daily-slots`; no Tunabrain call).
+  - **Daily** horizon extension is unchanged (old `tasks.clj`).
+- **Remaining:** repoint `http/api/scheduling.clj` cron handlers at the new
+  orchestration (needs the per-channel `{:name :description}` list +
+  channel→pv-id resolution wired from config/ctx) and retire the old batch
+  `tasks.clj`/`templates.clj` path.
 
 ### Phase 6 — UI access + operator input ✅ DONE (non-gating)
 Per the product call, generation is **not** gated on human approval; instead the

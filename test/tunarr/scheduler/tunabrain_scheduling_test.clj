@@ -21,7 +21,7 @@
 ;; Request builders (pure)
 ;; ---------------------------------------------------------------------------
 
-(deftest quarterly-grid-request-shape
+(deftest ^:eftest/synchronized quarterly-grid-request-shape
   (let [req (tb/quarterly-grid-request
              {:channel channel :quarter "Q1" :year 2026
               :catalog-profile catalog-profile :quarterly-theme "New year, classic laughs"
@@ -39,7 +39,7 @@
       (is (= "balanced" (:cost_tier req)))
       (is (contains? req :strategic_guidance)))))
 
-(deftest repair-grid-request-shape
+(deftest ^:eftest/synchronized repair-grid-request-shape
   (let [report {:horizon_start "2026-01-01" :horizon_end "2026-04-01"
                 :overall_status "blocked" :strip_findings [] :overlaps []
                 :uncovered_intervals [] :notes []}
@@ -51,7 +51,7 @@
     (is (= report (:feasibility_report req)))
     (is (= "balanced" (:cost_tier req)))))
 
-(deftest monthly-overrides-request-shape
+(deftest ^:eftest/synchronized monthly-overrides-request-shape
   (let [req (tb/monthly-overrides-request
              {:channel channel :month "2026-01" :grid a-grid
               :catalog-profile catalog-profile
@@ -73,7 +73,7 @@
     (reset! capture {:path path :payload payload})
     response))
 
-(deftest propose-quarterly-grid-posts-and-returns
+(deftest ^:eftest/synchronized propose-quarterly-grid-posts-and-returns
   (let [capture (atom nil)
         resp {:grid_id "g1" :status "ok" :grid a-grid :skeleton nil :warnings []
               :cost_estimate {} :suggested_next_steps []}]
@@ -85,7 +85,7 @@
         (is (= "Q1" (get-in @capture [:payload :quarter])))
         (is (= resp out))))))
 
-(deftest repair-quarterly-grid-posts-and-returns
+(deftest ^:eftest/synchronized repair-quarterly-grid-posts-and-returns
   (let [capture (atom nil)
         resp {:grid_id "g2" :status "ok" :grid a-grid :changes [] :cost_estimate {}}]
     (with-redefs [tb/json-post! (stub-post capture resp)]
@@ -95,7 +95,7 @@
         (is (= "/api/scheduling/repair-quarterly-grid" (:path @capture)))
         (is (= a-grid (:grid out)))))))
 
-(deftest propose-monthly-overrides-posts-and-returns
+(deftest ^:eftest/synchronized propose-monthly-overrides-posts-and-returns
   (let [capture (atom nil)
         resp {:overrides_id "o1" :status "ok" :month "2026-01" :overrides []
               :warnings [] :cost_estimate {} :suggested_next_steps []}]
@@ -107,7 +107,7 @@
         (testing "an empty overrides list is accepted as normal"
           (is (= [] (:overrides out))))))))
 
-(deftest missing-grid-in-response-throws
+(deftest ^:eftest/synchronized missing-grid-in-response-throws
   (with-redefs [tb/json-post! (stub-post (atom nil) {:grid_id "g" :status "ok" :grid nil})]
     (is (thrown? clojure.lang.ExceptionInfo
                  (tb/propose-quarterly-grid! ::client
