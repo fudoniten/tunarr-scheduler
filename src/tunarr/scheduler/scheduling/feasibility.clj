@@ -71,9 +71,15 @@
 
 (defn- category-episode-count [catalog category]
   (when category
-    (some #(when (= (str/lower-case (:genre %)) (str/lower-case category))
-             (:episode_count %))
-          (:genres catalog))))
+    (or
+      ;; Tag-based lookup (primary)
+      (some #(when (= (str/lower-case (:tag %)) (str/lower-case category))
+               (:episode_count %))
+            (:tag_aggregates catalog))
+      ;; Genre-based fallback (backward compat)
+      (some #(when (= (str/lower-case (:genre %)) (str/lower-case category))
+               (:episode_count %))
+            (:genres catalog)))))
 
 (defn- headroom [available required]
   (when (pos? required) (double (/ available required))))

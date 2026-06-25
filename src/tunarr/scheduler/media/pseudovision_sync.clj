@@ -58,17 +58,26 @@
    
    Returns:
      {:synced true/false, :tags [...], :error ...}"
-  [pv-config pv-item-id catalog catalog-item-id]
+  [pv-config pv-item-id catalog item]
   (try
-    (let [tags (catalog/get-media-tags catalog catalog-item-id)
-          tag-strings (map name tags)]  ; Convert keywords to strings
-      (if (seq tag-strings)
+    (let [;; Base tags from catalog
+          base-tags (catalog/get-media-tags catalog (::media/id item))
+          ;; Derived tags from first-class fields
+          genre-tags (map #(str "genre:" (name %)) (::media/genres item))
+          channel-tags (map #(str "channel:" (name %)) (::media/channel-names item))
+          kid-tag (when (::media/kid-friendly? item) ["kid-friendly"])
+          ;; Merge all tags (deduplicated)
+          all-tags (vec (distinct (concat (map name base-tags)
+                                          genre-tags
+                                          channel-tags
+                                          kid-tag)))]
+      (if (seq all-tags)
         (do
-          (pv/add-tags! pv-config pv-item-id tag-strings)
-          (log/debug "Synced tags to Pseudovision" 
+          (pv/add-tags! pv-config pv-item-id all-tags)
+          (log/debug "Synced tags to Pseudovision"
                     {:pv-item-id pv-item-id
-                     :tags tag-strings})
-          {:synced true :tags tag-strings})
+                     :tags all-tags})
+          {:synced true :tags all-tags})
         (do
           (log/debug "No tags to sync" {:pv-item-id pv-item-id})
           {:synced false :tags []})))
@@ -83,7 +92,7 @@
   [catalog pv-config id-map item]
   (let [jf-id (get item :jellyfin-id)]
     (if-let [pv-item (get id-map jf-id)]
-      (let [result (sync-item-tags! pv-config (:id pv-item) catalog (:id item))]
+      (let [result (sync-item-tags! pv-config (:id pv-item) catalog item)]
         {:synced? (boolean (:synced result))
          :error (when (:error result)
                   {:jellyfin-id jf-id :error (:error result)})})
