@@ -90,7 +90,7 @@
 
    Returns {:synced? bool :error error-map-or-nil}."
   [catalog pv-config id-map item]
-  (let [jf-id (get item :jellyfin-id)]
+  (let [jf-id (::media/id item)]
     (if-let [pv-item (get id-map jf-id)]
       (let [result (sync-item-tags! pv-config (:id pv-item) catalog item)]
         {:synced? (boolean (:synced result))
@@ -98,7 +98,7 @@
                   {:jellyfin-id jf-id :error (:error result)})})
       (do
         (log/warn "No Pseudovision item found for Jellyfin ID"
-                  {:jellyfin-id jf-id :title (:title item)})
+                  {:jellyfin-id jf-id :title (::media/name item)})
         {:synced? false
          :error {:jellyfin-id jf-id :error "No matching Pseudovision media item"}}))))
 
