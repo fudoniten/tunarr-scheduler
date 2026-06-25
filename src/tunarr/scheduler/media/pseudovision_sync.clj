@@ -70,14 +70,20 @@
           all-tags (vec (distinct (concat (map name base-tags)
                                           genre-tags
                                           channel-tags
-                                          kid-tag)))]
-      (if (seq all-tags)
+                                          kid-tag)))
+          ;; Clean: remove nils and empty strings that would fail TagName schema
+          clean-tags (filterv (fn [t] (and (string? t) (seq t))) all-tags)]
+      (if (seq clean-tags)
         (do
-          (pv/add-tags! pv-config pv-item-id all-tags)
+          (log/info "Syncing tags to Pseudovision"
+                    {:pv-item-id pv-item-id
+                     :tags clean-tags
+                     :all-tags all-tags})
+          (pv/add-tags! pv-config pv-item-id clean-tags)
           (log/debug "Synced tags to Pseudovision"
                     {:pv-item-id pv-item-id
-                     :tags all-tags})
-          {:synced true :tags all-tags})
+                     :tags clean-tags})
+          {:synced true :tags clean-tags})
         (do
           (log/debug "No tags to sync" {:pv-item-id pv-item-id})
           {:synced false :tags []})))
