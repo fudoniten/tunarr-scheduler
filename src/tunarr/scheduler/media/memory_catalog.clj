@@ -175,6 +175,13 @@
   (get-media-categories [_ media-id]
     (or (get-in @state [:categories media-id]) {}))
 
+  (get-media-categories-with-rationale [_ media-id]
+    (or (get-in @state [:categories-with-rationale media-id])
+        (reduce-kv (fn [acc cat vals]
+                     (assoc acc cat (mapv (fn [v] {:value v :rationale ""}) vals)))
+                   {}
+                   (or (get-in @state [:categories media-id]) {}))))
+
   (get-media-category-values [self media-id category]
     (get (catalog/get-media-categories self media-id) category []))
 

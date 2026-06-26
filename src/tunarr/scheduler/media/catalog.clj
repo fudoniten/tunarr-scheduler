@@ -75,6 +75,7 @@
   (add-media-category-values! [catalog media-id category values])
   (set-media-category-values! [catalog media-id category values])
   (get-media-categories [catalog media-id])
+  (get-media-categories-with-rationale [catalog media-id])
   (delete-media-category-value! [catalog media-id category value])
   (delete-media-category-values! [catalog media-id category])
   (get-episodes-by-series [catalog series-id])
@@ -231,6 +232,13 @@
   :ret  (s/map-of ::media/category-name
                   (s/coll-of ::media/category-value)))
 
+(s/fdef get-media-categories-with-rationale
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id)
+  :ret  (s/map-of ::media/category-name
+                  (s/coll-of (s/keys :req-un [::media/category-value
+                                              ::media/rationale]))))
+
 (s/fdef delete-media-category-value!
   :args (s/cat :catalog  ::catalog
                :media-id ::media/id
@@ -302,6 +310,7 @@
 (instrument 'add-media-category-values!)
 (instrument 'set-media-category-values!)
 (instrument 'get-media-categories)
+(instrument 'get-media-categories-with-rationale)
 (instrument 'delete-media-category-value!)
 (instrument 'delete-media-category-values!)
 (instrument 'get-episodes-by-series)

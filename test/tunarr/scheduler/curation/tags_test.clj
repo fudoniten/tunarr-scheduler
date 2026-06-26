@@ -48,6 +48,7 @@
   (add-media-category-values! [_ media-id category values] nil)
   (set-media-category-values! [_ media-id category values] nil)
   (get-media-categories [_ media-id] {})
+  (get-media-categories-with-rationale [_ media-id] {})
   (delete-media-category-value! [_ media-id category value] nil)
   (delete-media-category-values! [_ media-id category] nil))
 

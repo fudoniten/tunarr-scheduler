@@ -309,6 +309,12 @@
       (where [:= :media_id media-id])
       (group-by :category)))
 
+(defn sql:get-media-categories-with-rationale [media-id]
+  (-> (select :category :category_value :rationale)
+      (from :media_categorization)
+      (where [:= :media_id media-id])
+      (order-by :category :category_value)))
+
 (defn sql:delete-media-category-value! [media-id category value]
   (-> (delete-from :media_categorization)
       (where [:= :media_id media-id]
@@ -764,6 +770,16 @@
           (map (fn [{:keys [category values]}]
                  [(keyword category) (map keyword values)]))
           (sql:fetch! executor (sql:get-media-categories media-id))))
+
+  (get-media-categories-with-rationale [_ media-id]
+    (reduce (fn [acc {:keys [media_categorization/category
+                             media_categorization/category_value
+                             media_categorization/rationale]}]
+              (update acc (keyword category) (fnil conj [])
+                      {:value (keyword category_value)
+                       :rationale (or rationale "")}))
+            {}
+            (sql:fetch! executor (sql:get-media-categories-with-rationale media-id))))
 
   (delete-media-category-value! [_ media-id category value]
     (sql:exec! executor (sql:delete-media-category-value! media-id category value)))

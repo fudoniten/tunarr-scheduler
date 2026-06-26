@@ -145,15 +145,19 @@
         {:status 500 :body {:error (.getMessage e)}}))))
 
 (defn get-media-categories-handler
-  "Get all dimension categories for a specific media item."
+  "Get all dimension categories for a specific media item, including rationales."
   [{:keys [catalog]}]
   (fn [req]
     (try
       (let [media-id (get-in req [:parameters :path :media-id])
-            categories (catalog/get-media-categories catalog media-id)]
+            categories (catalog/get-media-categories-with-rationale catalog media-id)]
         {:status 200 :body {:categories (into {}
-                                            (map (fn [[k v]]
-                                                   [(clojure.core/name k) (mapv clojure.core/name v)]))
+                                            (map (fn [[k entries]]
+                                                   [(clojure.core/name k)
+                                                    (mapv (fn [{:keys [value rationale]}]
+                                                            {:value     (clojure.core/name value)
+                                                             :rationale rationale})
+                                                          entries)]))
                                             categories)}})
       (catch Exception e
         (log/error e "Error fetching media categories")

@@ -83,6 +83,16 @@
     (swap! state assoc-in [:category-values media-id category] values))
   (get-media-categories [_ media-id]
     (get-in @state [:category-values media-id] {}))
+  (get-media-categories-with-rationale [_ media-id]
+    (reduce-kv (fn [acc cat vals]
+                 (assoc acc cat (mapv (fn [v]
+                                       (if (map? v)
+                                         {:value (::media/category-value v)
+                                          :rationale (or (::media/rationale v) "")}
+                                         {:value v :rationale ""}))
+                                     vals)))
+               {}
+               (get-in @state [:category-values media-id] {})))
   (delete-media-category-value! [_ media-id category value]
     (swap! state update-in [:category-values media-id category]
            (fn [vals] (remove #(= % value) vals))))

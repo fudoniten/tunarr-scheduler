@@ -264,9 +264,14 @@
   [:map
    [:values [:vector DimensionValueInfo]]])
 
+(def CategoryValueWithRationale
+  [:map
+   [:value :string]
+   [:rationale :string]])
+
 (def MediaCategoriesResponse
   [:map
-   [:categories [:map-of :string [:vector :string]]]])
+   [:categories [:map-of :string [:vector CategoryValueWithRationale]]]])
 
 ;; ---------------------------------------------------------------------------
 ;; Strategy
