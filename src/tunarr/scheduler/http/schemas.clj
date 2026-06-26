@@ -240,6 +240,35 @@
    [:channels [:vector ChannelInfo]]])
 
 ;; ---------------------------------------------------------------------------
+;; Dimensions
+;; ---------------------------------------------------------------------------
+
+(def DimensionName
+  [:string {:min 1 :description "Dimension name (e.g. 'channel', 'genre', 'age-suitability')"}])
+
+(def DimensionInfo
+  [:map
+   [:name :string]
+   [:value-count {:optional true} [:maybe :int]]])
+
+(def DimensionValueInfo
+  [:map
+   [:value :string]
+   [:usage-count {:optional true} [:maybe :int]]])
+
+(def DimensionListResponse
+  [:map
+   [:dimensions [:vector DimensionInfo]]])
+
+(def DimensionValueListResponse
+  [:map
+   [:values [:vector DimensionValueInfo]]])
+
+(def MediaCategoriesResponse
+  [:map
+   [:categories [:map-of :string [:vector :string]]]])
+
+;; ---------------------------------------------------------------------------
 ;; Strategy
 ;; ---------------------------------------------------------------------------
 

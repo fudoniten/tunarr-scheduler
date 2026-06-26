@@ -80,7 +80,11 @@
   (get-effective-tags [catalog media-id])
   (get-effective-categories [catalog media-id])
   (get-library-id [catalog library])
-  (enrich-media-with-timestamps [catalog media]))
+  (enrich-media-with-timestamps [catalog media])
+
+  ;; NEW: Browse dimensions across the catalog
+  (get-all-dimensions [catalog])
+  (get-dimension-values [catalog dimension]))
 
 (defmulti initialize-catalog! :type)
 
@@ -259,6 +263,19 @@
   :ret  (s/map-of ::media/category-name
                   (s/coll-of ::media/category-value)))
 
+(s/fdef get-all-dimensions
+  :args (s/cat :catalog ::catalog)
+  :ret  (s/coll-of [:map
+                    [:name ::media/category-name]
+                    [:value-count int?]]))
+
+(s/fdef get-dimension-values
+  :args (s/cat :catalog ::catalog
+               :dimension ::media/category-name)
+  :ret  (s/coll-of [:map
+                    [:value ::media/category-value]
+                    [:usage-count int?]]))
+
 (instrument 'add-media)
 (instrument 'add-media-batch)
 (instrument 'get-media)
@@ -289,3 +306,5 @@
 (instrument 'get-episode)
 (instrument 'get-effective-tags)
 (instrument 'get-effective-categories)
+(instrument 'get-all-dimensions)
+(instrument 'get-dimension-values)

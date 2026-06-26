@@ -235,16 +235,41 @@
                          500 {:body s/APIError}}
              :handler   (browse/list-channels-handler ctx)}}]
 
-    ;; DEPRECATED: Hardcoded channel endpoint. Use /api/tags/:tag/media with channel:NAME.
-    ["/api/catalog/channels/:channel-name/media"
-     {:tags       ["browse"]
-      :parameters {:path [:map [:channel-name s/ChannelName]]}
-      :get        {:summary   "DEPRECATED: Use /api/tags/:tag/media with channel:NAME. Old hardcoded channel filter."
-                   :responses {200 {:body s/MediaListResponse}
-                               500 {:body s/APIError}}
-                   :handler   (browse/get-media-by-channel-handler ctx)}}]
+     ;; DEPRECATED: Hardcoded channel endpoint. Use /api/tags/:tag/media with channel:NAME.
+     ["/api/catalog/channels/:channel-name/media"
+      {:tags       ["browse"]
+       :parameters {:path [:map [:channel-name s/ChannelName]]}
+       :get        {:summary   "DEPRECATED: Use /api/tags/:tag/media with channel:NAME. Old hardcoded channel filter."
+                    :responses {200 {:body s/MediaListResponse}
+                                500 {:body s/APIError}}
+                    :handler   (browse/get-media-by-channel-handler ctx)}}]
 
-   ;; ── Channels ────────────────────────────────────────────────────────────
+    ;; NEW: Dimension browsing endpoints
+    ["/api/dimensions"
+     {:tags ["browse"]
+      :get  {:summary   "List all dimensions with value counts"
+             :responses {200 {:body s/DimensionListResponse}
+                         500 {:body s/APIError}}
+             :handler   (browse/list-dimensions-handler ctx)}}]
+
+    ["/api/dimensions/:dimension/values"
+     {:tags       ["browse"]
+      :parameters {:path [:map [:dimension s/DimensionName]]}
+      :get        {:summary   "List all values for a dimension with usage counts"
+                   :responses {200 {:body s/DimensionValueListResponse}
+                               500 {:body s/APIError}}
+                   :handler   (browse/get-dimension-values-handler ctx)}}]
+
+    ["/api/media/:media-id/categories"
+     {:tags       ["media"]
+      :parameters {:path [:map [:media-id s/MediaId]]}
+      :get        {:summary   "Get all dimension categories for a media item"
+                   :responses {200 {:body s/MediaCategoriesResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (browse/get-media-categories-handler ctx)}}]
+
+    ;; ── Channels ────────────────────────────────────────────────────────────
    ["/api/channels/sync-pseudovision"
     {:tags ["channels"]
      :post {:summary   "Sync all channels to Pseudovision"

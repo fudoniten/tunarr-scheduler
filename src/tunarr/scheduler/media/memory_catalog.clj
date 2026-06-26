@@ -172,6 +172,37 @@
                         (or (::media/tags (get-in @state [:media pid])) []))]
       (vec (distinct (concat own-tags parent-tags)))))
 
+  (get-media-categories [_ media-id]
+    (or (get-in @state [:categories media-id]) {}))
+
+  (get-media-category-values [self media-id category]
+    (get (catalog/get-media-categories self media-id) category []))
+
+  (add-media-category-value! [_ media-id category value rationale]
+    (swap! state update-in [:categories media-id category]
+           #(distinct (conj (or % []) value)))
+    nil)
+
+  (add-media-category-values! [_ media-id category values]
+    (swap! state update-in [:categories media-id category]
+           #(distinct (concat (or % []) (map ::media/category-value values))))
+    nil)
+
+  (set-media-category-values! [_ media-id category values]
+    (swap! state assoc-in [:categories media-id category]
+           (distinct (map ::media/category-value values)))
+    nil)
+
+  (delete-media-category-value! [_ media-id category value]
+    (swap! state update-in [:categories media-id category]
+           #(remove #{value} (or % [])))
+    nil)
+
+  (delete-media-category-values! [_ media-id category]
+    (swap! state update-in [:categories media-id]
+           #(dissoc % category))
+    nil)
+
   (get-effective-categories [_ media-id]
     (let [item (get-in @state [:media media-id])
           own-cats (or (get-in @state [:categories media-id]) {})
@@ -180,6 +211,28 @@
       (if (seq parent-cats)
         (merge parent-cats own-cats)
         own-cats)))
+
+  (get-all-dimensions [_]
+    (->> (get @state :categories {})
+         vals
+         (mapcat keys)
+         distinct
+         (map (fn [dim]
+                {:name dim
+                 :value-count (count (distinct
+                                       (mapcat (fn [cats]
+                                                 (get cats dim []))
+                                               (vals (get @state :categories {})))))}))))
+
+  (get-dimension-values [_ dimension]
+    (->> (get @state :categories {})
+         vals
+         (mapcat #(get % dimension []))
+         distinct
+         (map (fn [val]
+                {:value val
+                 :usage-count (count (filter #(some #{val} (get-in % [dimension]))
+                                              (vals (get @state :categories {}))))}))))
 
   (close-catalog! [_]
     (reset! state {:media {}})

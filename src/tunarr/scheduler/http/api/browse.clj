@@ -56,8 +56,8 @@
 
 (defn ^:deprecated list-channels-handler
   "DEPRECATED: Hardcoded channel list. Channels are dimensions now.
-   Use list-tags-handler or get-media-by-tag-handler with channel:NAME tag.
-   See DIMENSION_CLEANUP.md for removal timeline."
+    Use list-tags-handler or get-media-by-tag-handler with channel:NAME tag.
+    See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [_]
     (try
@@ -68,8 +68,8 @@
 
 (defn ^:deprecated get-media-by-channel-handler
   "DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
-   Use get-media-by-tag-handler with the channel:NAME tag.
-   See DIMENSION_CLEANUP.md for removal timeline."
+    Use get-media-by-tag-handler with the channel:NAME tag.
+    See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [req]
     (try
@@ -86,8 +86,8 @@
 
 (defn ^:deprecated list-genres-handler
   "DEPRECATED: Hardcoded genre list. Genres are dimensions now.
-   Use list-tags-handler or get-media-by-tag-handler with genre:NAME tag.
-   See DIMENSION_CLEANUP.md for removal timeline."
+    Use list-tags-handler or get-media-by-tag-handler with genre:NAME tag.
+    See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [_]
     (try
@@ -99,8 +99,8 @@
 
 (defn ^:deprecated get-media-by-genre-handler
   "DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
-   Use get-media-by-tag-handler with the genre:NAME tag.
-   See DIMENSION_CLEANUP.md for removal timeline."
+    Use get-media-by-tag-handler with the genre:NAME tag.
+    See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [req]
     (try
@@ -109,4 +109,52 @@
         {:status 200 :body {:media (mapv serialize-time-fields media)}})
       (catch Exception e
         (log/error e "Error fetching media by genre")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+;; ---------------------------------------------------------------------------
+;; Dimension handlers
+;; ---------------------------------------------------------------------------
+
+(defn list-dimensions-handler
+  "List all dimensions with their value counts."
+  [{:keys [catalog]}]
+  (fn [_]
+    (try
+      (let [dims (catalog/get-all-dimensions catalog)]
+        {:status 200 :body {:dimensions (mapv (fn [{:keys [name value-count]}]
+                                               {:name (clojure.core/name name)
+                                                :value-count value-count})
+                                             dims)}})
+      (catch Exception e
+        (log/error e "Error listing dimensions")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn get-dimension-values-handler
+  "List all values for a given dimension with usage counts."
+  [{:keys [catalog]}]
+  (fn [req]
+    (try
+      (let [dimension (get-in req [:parameters :path :dimension])
+            values    (catalog/get-dimension-values catalog (keyword dimension))]
+        {:status 200 :body {:values (mapv (fn [{:keys [value usage-count]}]
+                                           {:value (clojure.core/name value)
+                                            :usage-count usage-count})
+                                         values)}})
+      (catch Exception e
+        (log/error e "Error fetching dimension values")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn get-media-categories-handler
+  "Get all dimension categories for a specific media item."
+  [{:keys [catalog]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            categories (catalog/get-media-categories catalog media-id)]
+        {:status 200 :body {:categories (into {}
+                                            (map (fn [[k v]]
+                                                   [(clojure.core/name k) (mapv clojure.core/name v)]))
+                                            categories)}})
+      (catch Exception e
+        (log/error e "Error fetching media categories")
         {:status 500 :body {:error (.getMessage e)}}))))

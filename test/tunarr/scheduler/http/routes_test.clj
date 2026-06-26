@@ -87,7 +87,28 @@
     (swap! state update-in [:category-values media-id category]
            (fn [vals] (remove #(= % value) vals))))
   (delete-media-category-values! [_ media-id category]
-    (swap! state update-in [:category-values media-id] dissoc category)))
+    (swap! state update-in [:category-values media-id] dissoc category))
+  (get-all-dimensions [_]
+    (let [cats (:category-values @state {})]
+      (->> (mapcat keys (vals cats))
+           distinct
+           (map (fn [dim]
+                  {:name dim
+                   :value-count (count (distinct (mapcat #(get % dim []) (vals cats))))})))))
+  (get-dimension-values [_ dimension]
+    (let [cats (:category-values @state {})]
+      (->> (vals cats)
+           (mapcat #(get % dimension []))
+           distinct
+           (map (fn [val]
+                  {:value val
+                   :usage-count (count (filter #(some #{val} (get % dimension [])) (vals cats)))})))))
+  (get-effective-categories [_ media-id]
+    (get-in @state [:category-values media-id] {}))
+  (get-library-id [_ library]
+    (get-in @state [:library-ids library]))
+  (enrich-media-with-timestamps [_ media]
+    media))
 
 ;; Mock collection implementation
 (def mock-collection

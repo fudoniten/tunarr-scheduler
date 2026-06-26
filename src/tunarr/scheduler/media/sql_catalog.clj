@@ -320,6 +320,23 @@
       (where [:= :media_id media-id]
              [:= :category (name category)])))
 
+(defn sql:get-all-dimensions
+  "List all unique dimension (category) names with their value counts."
+  []
+  (-> (select :category
+              [[:count [:distinct :category_value]] :value-count])
+      (from :media_categorization)
+      (group-by :category)))
+
+(defn sql:get-dimension-values
+  "List all unique values for a given dimension, with usage counts."
+  [dimension]
+  (-> (select :category_value
+              [[:count :*] :usage-count])
+      (from :media_categorization)
+      (where [:= :category (name dimension)])
+      (group-by :category_value)))
+
 (defn tag-exists?
   [executor tag]
   (some #(= tag (:tag/name %))
@@ -729,6 +746,18 @@
 
   (delete-media-category-values! [_ media-id category]
     (sql:exec! executor (sql:delete-media-category-values! media-id category)))
+
+  (get-all-dimensions [_]
+    (map (fn [{:keys [category value-count]}]
+           {:name (keyword category)
+            :value-count value-count})
+         (sql:fetch! executor (sql:get-all-dimensions))))
+
+  (get-dimension-values [_ dimension]
+    (map (fn [{:keys [category_value usage-count]}]
+           {:value (keyword category_value)
+            :usage-count usage-count})
+         (sql:fetch! executor (sql:get-dimension-values dimension))))
 
   (get-episodes-by-series [this series-id]
     (->> (sql:fetch! executor (sql:get-episodes-by-series series-id))
