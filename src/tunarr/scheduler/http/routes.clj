@@ -93,6 +93,53 @@
                               500 {:body s/APIError}}
                   :handler   (media/get-media-by-id-handler ctx)}}]
 
+   ["/api/media-item/:media-id/process/:process/reset"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId] [:process s/ProcessActionName]]}
+     :delete     {:summary   "Reset the last-run timestamp for a process on a media item, allowing it to be re-processed"
+                  :responses {200 {:body s/ProcessResetResponse}
+                              400 {:body s/APIError}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/delete-media-process-timestamp-handler ctx)}}]
+
+   ["/api/media-item/:media-id/retag"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :post       {:summary   "Retag a single media item via Tunabrain"
+                  :responses {202 {:body s/MediaActionResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/retag-media-item-handler ctx)}}]
+
+   ["/api/media-item/:media-id/recategorize"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :post       {:summary   "Recategorize a single media item via Tunabrain"
+                  :responses {202 {:body s/MediaActionResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/recategorize-media-item-handler ctx)}}]
+
+   ["/api/media-item/:media-id/sync-pseudovision"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :post       {:summary   "Sync a single media item's tags to Pseudovision"
+                  :responses {200 {:body s/MediaActionResponse}
+                              400 {:body s/APIError}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/sync-media-item-pseudovision-handler ctx)}}]
+
+   ["/api/media/:library/process/:process/reset"
+    {:tags       ["media"]
+     :parameters {:path [:map [:library s/LibraryName] [:process s/ProcessActionName]]}
+     :delete     {:summary   "Clear last-run timestamps for a process across all media in a library"
+                  :responses {200 {:body s/ProcessResetResponse}
+                              400 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/delete-library-process-timestamps-handler ctx)}}]
+
    ["/api/media/:library/rescan"
     {:tags       ["media"]
      :parameters {:path [:map [:library s/LibraryName]]}

@@ -3,6 +3,7 @@
   (:require [taoensso.timbre :as log]
             [clojure.walk :as walk]
             [tunarr.scheduler.jobs.runner :as jobs]
+            [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.sync :as media-sync]
             [tunarr.scheduler.media.pseudovision-sync :as pv-sync]
             [tunarr.scheduler.media.pseudovision-migration :as pv-migration]
@@ -10,6 +11,7 @@
             [tunarr.scheduler.backends.pseudovision.client :as pv-client]
             [tunarr.scheduler.curation.core :as curate]
             [tunarr.scheduler.curation.tags :as curation-tags]
+            [tunarr.scheduler.jobs.throttler :as throttler]
             [tunarr.scheduler.media.catalog :as catalog])
   (:import [java.time LocalDate Instant]))
 
@@ -405,4 +407,122 @@
           {:status 404 :body {:error (str "Media not found: " media-id)}}))
       (catch Exception e
         (log/error e "Error fetching media by ID")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+;; ---------------------------------------------------------------------------
+;; Process timestamp reset
+;; ---------------------------------------------------------------------------
+
+(def ^:private valid-processes
+  #{"retag" "recategorize" "episode-tagging"})
+
+(defn- process-param->keyword
+  "Convert a process query parameter to the internal keyword used in
+   media_process_timestamp. Returns nil for unknown process names."
+  [s]
+  (case s
+    "retag"          :process/tagging
+    "recategorize"   :process/categorize
+    "episode-tagging" :process/episode-tagging
+    nil))
+
+(defn delete-media-process-timestamp-handler
+  "Delete the last-run timestamp for a specific process on a single media item,
+   allowing the process to run again on next invocation."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            process  (get-in req [:parameters :path :process])]
+        (if-let [process-kw (process-param->keyword process)]
+          (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+            (do (catalog/delete-process-timestamp! catalog (::media/id media) process-kw)
+                {:status 200 :body {:media-id (::media/id media) :process process :reset true}})
+            {:status 404 :body {:error (str "Media not found: " media-id)}})
+          {:status 400 :body {:error (str "Unknown process: " process
+                                          ". Valid processes: " (pr-str valid-processes))}}))
+      (catch Exception e
+        (log/error e "Error deleting process timestamp")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn delete-library-process-timestamps-handler
+  "Clear last-run timestamps for a single process across all media in a library."
+  [{:keys [catalog]}]
+  (fn [req]
+    (try
+      (let [library (get-in req [:parameters :path :library])
+            process (get-in req [:parameters :path :process])]
+        (if-let [process-kw (process-param->keyword process)]
+          (do (catalog/delete-library-process-timestamps! catalog (keyword library) process-kw)
+              {:status 200 :body {:library library :process process :reset true}})
+          {:status 400 :body {:error (str "Unknown process: " process
+                                          ". Valid processes: " (pr-str valid-processes))}}))
+      (catch Exception e
+        (log/error e "Error clearing library process timestamps")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+;; ---------------------------------------------------------------------------
+;; Per-item curation actions
+;; ---------------------------------------------------------------------------
+
+(defn retag-media-item-handler
+  "Retag a single media item via Tunabrain (async throttled)."
+  [{:keys [catalog tunabrain throttler pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (do
+            (throttler/submit! throttler
+                               curate/retag-media!
+                               (curate/process-callback catalog media :process/tagging)
+                               [tunabrain catalog media])
+            {:status 202 :body {:media-id (::media/id media) :action "retag" :submitted true}})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error submitting per-item retag")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn recategorize-media-item-handler
+  "Recategorize a single media item via Tunabrain (async throttled)."
+  [{:keys [catalog tunabrain throttler curation-config pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id   (get-in req [:parameters :path :media-id])
+            categories (get curation-config :categories)]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (do
+            (throttler/submit! throttler
+                               curate/recategorize-media!
+                               (curate/process-callback catalog media :process/categorize)
+                               [tunabrain catalog media categories])
+            {:status 202 :body {:media-id (::media/id media) :action "recategorize" :submitted true}})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error submitting per-item recategorize")
+        {:status 500 :body {:error (.getMessage e)}}))))
+
+(defn sync-media-item-pseudovision-handler
+  "Sync a single media item's tags to Pseudovision."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (if-not pseudovision
+        {:status 400 :body {:error "Pseudovision is not configured"}}
+        (let [media-id (get-in req [:parameters :path :media-id])]
+          (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+            (let [pv-config  (pv-client/get-config pseudovision)
+                  catalog-id (::media/id media)
+                  pv-item    (try (pv-client/get-media-item pv-config catalog-id)
+                                  (catch Exception _ nil))
+                  pv-item-id (or (:id pv-item) catalog-id)
+                  result     (pv-sync/sync-item-tags! pv-config pv-item-id catalog media)]
+              {:status 200 :body {:media-id catalog-id
+                                  :action "sync-pseudovision"
+                                  :synced (:synced result)
+                                  :tags (:tags result)
+                                  :error (:error result)}})
+            {:status 404 :body {:error (str "Media not found: " media-id)}})))
+      (catch Exception e
+        (log/error e "Error syncing item to Pseudovision")
         {:status 500 :body {:error (.getMessage e)}}))))
