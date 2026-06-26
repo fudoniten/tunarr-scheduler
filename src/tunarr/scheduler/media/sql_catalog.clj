@@ -350,6 +350,20 @@
       (on-conflict :media_id :process)
       (do-update-set {:last_run_at (keyword "excluded" "last_run_at")})))
 
+(defn sql:delete-process-timestamp
+  [media-id process]
+  (-> (delete-from :media_process_timestamp)
+      (where [:= :media_id media-id]
+             [:= :process (name process)])))
+
+(defn sql:delete-library-process-timestamps
+  [library-id process]
+  (-> (delete-from :media_process_timestamp)
+      (where [:= :process (name process)]
+             [:in :media_id (-> (select :id)
+                                (from :media)
+                                (where [:= :library_id library-id]))])))
+
 (defn optional [pred lst]
   (if pred lst []))
 
@@ -715,6 +729,16 @@
 
   (update-process-timestamp! [_ media-id process]
     (sql:exec! executor (sql:update-process-timestamp media-id process)))
+
+  (delete-process-timestamp! [_ media-id process]
+    (sql:exec! executor (sql:delete-process-timestamp media-id process)))
+
+  (delete-library-process-timestamps! [_ library process]
+    (if-let [library-id (some-> (sql:fetch! executor (sql:get-library-id library))
+                                first
+                                :library/id)]
+      (sql:exec! executor (sql:delete-library-process-timestamps library-id process))
+      (throw (ex-info (format "library not found: %s" (name library)) {}))))
 
   (close-catalog! [_] (executor/close! executor))
 

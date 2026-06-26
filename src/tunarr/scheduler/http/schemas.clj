@@ -436,6 +436,26 @@
 ;; Query parameters
 ;; ---------------------------------------------------------------------------
 
+(def ProcessActionName
+  [:enum {:description "Process name for timestamp reset"}
+   "retag" "recategorize" "episode-tagging"])
+
+(def ProcessResetResponse
+  [:map
+   [:process :string]
+   [:reset :boolean]
+   [:media-id {:optional true} [:maybe :string]]
+   [:library {:optional true} [:maybe :string]]])
+
+(def MediaActionResponse
+  [:map
+   [:media-id :string]
+   [:action :string]
+   [:submitted {:optional true} [:maybe :boolean]]
+   [:synced {:optional true} [:maybe :boolean]]
+   [:tags {:optional true} [:maybe [:vector :string]]]
+   [:error {:optional true} [:maybe :string]]])
+
 (def ForceQuery
   [:map
    [:force {:optional true} [:enum "true" "false"]]])

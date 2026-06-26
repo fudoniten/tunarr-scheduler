@@ -67,6 +67,8 @@
   (rename-tag! [catalog tag new-tag])
   (batch-rename-tags! [catalog tag-pairs])
   (update-process-timestamp! [catalog media-id process])
+  (delete-process-timestamp! [catalog media-id process])
+  (delete-library-process-timestamps! [catalog library process])
   (close-catalog! [catalog])
   (get-media-category-values [catalog media-id category])
   (add-media-category-value! [catalog media-id category value rationale])
