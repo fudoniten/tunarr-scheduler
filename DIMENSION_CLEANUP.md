@@ -287,21 +287,38 @@ Example pattern:
 | `CatalogProfile.tag_aggregates` | ✅ Current | Comes from `metadata_tags` |
 | `push-daily-slots!` (`category_filters`) | ✅ Current | Uses string tags |
 
-### PV Open Questions
+### PV Open Questions (answered during Phase 0)
 
-1. Should PV drop `metadata_genres` and treat genres as regular tags?
-2. Should PV add a `dimensions` endpoint or keep the tag-based model?
-3. Should `CatalogProfile.genres` be deprecated in favor of `tag_aggregates`?
+1. ✅ **Should PV drop `metadata_genres` and treat genres as regular tags?**
+   Yes. `show-genres` and `list-genre-aggregates` are deprecated. Genres should
+   be represented as `genre:*` tags in `metadata_tags`.
+
+2. ✅ **Should PV add a `dimensions` endpoint or keep the tag-based model?**
+   Keep the tag-based model. Dimensions are flattened to prefixed tags at the
+   TS boundary before pushing to PV. PV does not need dimension awareness.
+
+3. ✅ **Should `CatalogProfile.genres` be deprecated in favor of `tag_aggregates`?**
+   Yes. `CatalogProfile.genres` and `GenreProfile` are deprecated. Use
+   `CatalogProfile.tag_aggregates` with `genre:*` prefix instead.
 
 ---
 
 ## Recommended Phased Cleanup
 
-### Phase 0: Audit + Mark ✅ IN PROGRESS
-- [ ] Mark all obsolete API endpoints as DEPRECATED with documentation
-- [ ] Mark all obsolete code with `^:deprecated` metadata and docstrings
-- [ ] Trace endpoint → handler → service → protocol → SQL for each deprecated
-  path
+### Phase 0: Audit + Mark ✅ DONE
+- [x] Mark all obsolete API endpoints as DEPRECATED with documentation
+  - Tunarr Scheduler: 4 browse endpoints + retag endpoint
+  - Pseudovision: catalog profile fields + metadata_genres table references
+  - Tunabrain: /tags, /channel-mapping, /schedule endpoints
+- [x] Mark all obsolete code with `^:deprecated` metadata and docstrings
+  - TS: browse handlers, media specs, catalog protocol, SQL catalog, memory catalog
+  - PV: catalog.clj queries, schema definitions
+  - Tunabrain: routes, models, tagging chain, channel mapping chain
+- [x] Trace endpoint → handler → service → protocol → SQL for each deprecated path
+- [x] Note inter-service calls to deprecated endpoints
+  - TS `tunabrain.clj`: `request-tags!` calls deprecated `/tags`
+  - TS `tunabrain.clj`: `request-tag-triage!` calls deprecated `/tag-governance/triage`
+  - TS `tunabrain.clj`: `request-tag-audit!` calls deprecated `/tags/audit`
 
 ### Phase 1: Fix the sync ✅ DONE
 - [x] Update `pseudovision_sync.clj` to read `media_categorization` instead of
