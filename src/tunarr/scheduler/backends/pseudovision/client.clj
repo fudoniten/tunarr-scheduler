@@ -85,7 +85,7 @@
   (request! :post
             (api-url config (str "/api/media-items/" media-item-id "/tags"))
             {:content-type :json
-             :json-params {:tags tags}}))
+             :body (json/generate-string tags)}))
 
 (defn get-tags
   "Get all tags for a media item.
