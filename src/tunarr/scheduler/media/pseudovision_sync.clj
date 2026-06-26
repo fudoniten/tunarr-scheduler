@@ -1,8 +1,13 @@
 (ns tunarr.scheduler.media.pseudovision-sync
   "Sync catalog tags and metadata to Pseudovision.
-   
-   Replaces the Jellyfin tag sync - instead of pushing tags to Jellyfin
-   (for ErsatzTV to read), we now push directly to Pseudovision's tag API."
+
+   Tags are sourced from two places:
+   1. The free-form `media_tags` table (base tags).
+   2. The dimension-based `media_categorization` table, which is flattened
+      into prefixed strings like `dimension:value` before pushing.
+
+   This replaces the old hardcoded derivation from `genres`, `channels`,
+   and `kid_friendly` fields — those are now just dimensions like any other."
   (:require [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
@@ -60,17 +65,17 @@
      {:synced true/false, :tags [...], :error ...}"
   [pv-config pv-item-id catalog item]
   (try
-    (let [;; Base tags from catalog
+    (let [;; Base tags from the free-form media_tags table
           base-tags (catalog/get-media-tags catalog (::media/id item))
-          ;; Derived tags from first-class fields
-          genre-tags (map #(str "genre:" (name %)) (::media/genres item))
-          channel-tags (map #(str "channel:" (name %)) (::media/channel-names item))
-          kid-tag (when (::media/kid-friendly? item) ["kid-friendly"])
+          ;; Dimension values from media_categorization, flattened to
+          ;; prefixed strings: {:channel [:comedy]} -> ["channel:comedy"]
+          dimension-tags
+          (mapcat (fn [[dim values]]
+                    (map #(str (name dim) ":" (name %)) values))
+                  (catalog/get-media-categories catalog (::media/id item)))
           ;; Merge all tags (deduplicated)
           all-tags (vec (distinct (concat (map name base-tags)
-                                          genre-tags
-                                          channel-tags
-                                          kid-tag)))
+                                          dimension-tags)))
           ;; Clean: remove nils and empty strings that would fail TagName schema
           clean-tags (filterv (fn [t] (and (string? t) (seq t))) all-tags)]
       (if (seq clean-tags)
