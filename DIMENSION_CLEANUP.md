@@ -112,7 +112,7 @@ readers know the intent.
 
 | Route | Status | Old Worldview? | Replacement |
 |-------|--------|----------------|-------------|
-| `POST /tags` | **DEPRECATED** | Flat tag generation; not dimension-aware | Use `POST /categorize` for dimensions, or push dimensions directly |
+| `POST /tags` | ✅ **Current** | Free-form tag generation | Use `POST /categorize` for dimensions |
 | `POST /channel-mapping` | **DEPRECATED** | Hardcoded channel mapping | Channels are dimensions; use `POST /categorize` with `channel` dimension |
 | `POST /schedule` | ✅ **Current** | Uses autonomous agent internally | — |
 | `POST /categorize` | ✅ Current | Dimension-based categorization | — |
@@ -125,6 +125,12 @@ repair-quarterly-grid, propose-monthly-overrides) are called by Tunarr Scheduler
 but **do not exist yet** in the current Tunabrain branch. The TS code will 404.
 Use `/schedule` (which uses the autonomous agent) until the layered grid
 endpoints are implemented.
+
+**Tag vs. Dimension distinction:**
+- **Tags** (`/tags`) = free-form metadata. Still valid for arbitrary keywords.
+- **Dimensions** (`/categorize`) = structured, controlled vocabulary. For scheduling.
+- **Tag governance** (`/tag-governance/*`, `/tags/audit`) = keeps free-form tag namespace clean.
+- **What we deprecated** = hardcoded first-class fields (`genres`, `channels`, `kid_friendly`) that were privileged as special database structures instead of being treated as dimensions or tags.
 
 ---
 
@@ -292,14 +298,16 @@ Example pattern:
 - `ReasoningSummary` — agent reasoning
 - `BumperRequest/Response` — bumper generation
 
-**❌ Deprecated models (flat tag / hardcoded channel):**
-- `TaggingRequest/Response` — flat tag generation
-- `TagSample` — flat tag metadata
+**❌ Deprecated models (hardcoded channel):**
 - `ChannelMappingRequest/Response` — hardcoded channel mapping
 - `ChannelMapping` — hardcoded channel mapping result
-- `TagDecision` — flat tag governance action
-- `TagTriageRequest/Response` — flat tag triage
-- `TagAuditRequest/Response/Result` — flat tag audit
+
+**✅ Current models (tag governance — free-form tags need governance):**
+- `TaggingRequest/Response` — free-form tag generation
+- `TagSample` — tag governance metadata
+- `TagDecision` — tag governance action
+- `TagTriageRequest/Response` — tag governance triage
+- `TagAuditRequest/Response/Result` — tag audit
 
 ---
 
@@ -344,9 +352,11 @@ Example pattern:
   - Tunabrain: routes, models, tagging chain, channel mapping chain
 - [x] Trace endpoint → handler → service → protocol → SQL for each deprecated path
 - [x] Note inter-service calls to deprecated endpoints
-  - TS `tunabrain.clj`: `request-tags!` calls deprecated `/tags`
-  - TS `tunabrain.clj`: `request-tag-triage!` calls deprecated `/tag-governance/triage`
-  - TS `tunabrain.clj`: `request-tag-audit!` calls deprecated `/tags/audit`
+  - TS `tunabrain.clj`: `request-tags!` calls `/tags` (free-form tags, still valid)
+  - TS `tunabrain.clj`: `request-tag-triage!` calls `/tag-governance/triage` (tag governance, still valid)
+  - TS `tunabrain.clj`: `request-tag-audit!` calls `/tags/audit` (tag audit, still valid)
+  - TS `tunabrain.clj`: `request-categorization!` calls `/categorize` (dimensions, current)
+  - **All tag/dimension endpoints are valid. Only `/channel-mapping` is truly deprecated.**
 
 ### Phase 1: Fix the sync ✅ DONE
 - [x] Update `pseudovision_sync.clj` to read `media_categorization` instead of
