@@ -114,11 +114,17 @@ readers know the intent.
 |-------|--------|----------------|-------------|
 | `POST /tags` | **DEPRECATED** | Flat tag generation; not dimension-aware | Use `POST /categorize` for dimensions, or push dimensions directly |
 | `POST /channel-mapping` | **DEPRECATED** | Hardcoded channel mapping | Channels are dimensions; use `POST /categorize` with `channel` dimension |
-| `POST /schedule` | **DEPRECATED** | Old batch scheduling | `POST /api/scheduling/propose-quarterly-grid` |
+| `POST /schedule` | ✅ **Current** | Uses autonomous agent internally | — |
 | `POST /categorize` | ✅ Current | Dimension-based categorization | — |
-| `POST /api/scheduling/*` | ✅ Current | Layered grid contracts | — |
+| `POST /api/scheduling/*` | ⚠️ **Not implemented** | Layered grid contracts planned | Currently use `/schedule` instead |
 | `POST /bumpers` | ✅ Current | Bumper generation | — |
 | `POST /tag-governance/*` | ✅ Current | Tag audit/triage | — |
+
+**Important:** The `/api/scheduling/*` endpoints (propose-quarterly-grid,
+repair-quarterly-grid, propose-monthly-overrides) are called by Tunarr Scheduler
+but **do not exist yet** in the current Tunabrain branch. The TS code will 404.
+Use `/schedule` (which uses the autonomous agent) until the layered grid
+endpoints are implemented.
 
 ---
 
@@ -258,11 +264,11 @@ Example pattern:
 |----------|--------|-------------|-------|
 | `POST /tags` | ❌ Obsolete | ✅ Yes | Old flat-tag generation; TS `retag-media!` calls it |
 | `POST /channel-mapping` | ❌ Obsolete | ❌ No | Hardcoded channel mapping |
-| `POST /schedule` | ❌ Obsolete | ❌ No | Superseded by `/api/scheduling/*` |
+| `POST /schedule` | ✅ **Current** | ✅ Yes | Autonomous agent; the active scheduling API |
 | `POST /categorize` | ✅ Current | ✅ Yes | Dimension-based categorization |
 | `POST /bumpers` | ✅ Current | ✅ Yes | Bumper generation |
 | `POST /tag-governance/*` | ✅ Current | ✅ Yes | Tag audit/triage |
-| `POST /api/scheduling/*` | ✅ Current | ✅ Yes | Layered grid scheduling |
+| `POST /api/scheduling/*` | ⚠️ **Not implemented** | ✅ Yes (TS calls it) | Layered grid planned but not in current branch |
 
 ### `MediaItem` Model Fields
 
@@ -272,6 +278,28 @@ Example pattern:
 | `current_tags` | ✅ Current | Freeform tags |
 | `duration_minutes` | ✅ Current | Scalar metadata |
 | `rating` | ✅ Current | Scalar metadata (could become a dimension) |
+
+### Tunabrain Model Status Summary
+
+**✅ Current models (NOT deprecated):**
+- `MediaItem` — core media model (only `genres` field is deprecated)
+- `Channel` — channel definition
+- `DimensionSelection` — dimension values
+- `CategoryDefinition` — dimension schema
+- `CategorizationRequest/Response` — dimension-based categorization
+- `DailySlot` — concrete scheduling slot
+- `ScheduleRequest/Response` — scheduling (used by current `/schedule` endpoint)
+- `ReasoningSummary` — agent reasoning
+- `BumperRequest/Response` — bumper generation
+
+**❌ Deprecated models (flat tag / hardcoded channel):**
+- `TaggingRequest/Response` — flat tag generation
+- `TagSample` — flat tag metadata
+- `ChannelMappingRequest/Response` — hardcoded channel mapping
+- `ChannelMapping` — hardcoded channel mapping result
+- `TagDecision` — flat tag governance action
+- `TagTriageRequest/Response` — flat tag triage
+- `TagAuditRequest/Response/Result` — flat tag audit
 
 ---
 
