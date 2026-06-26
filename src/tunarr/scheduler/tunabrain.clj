@@ -111,8 +111,14 @@
                         {:url url :path path}
                         e))))))
 
+;; DEPRECATED: Calls Tunabrain /tags which is deprecated. Flat tag generation
+;; is not dimension-aware. Use request-categorization! (/categorize) instead.
+;; See DIMENSION_CLEANUP.md for the full migration plan.
 (defn request-tags!
-  "Fetch tags for a media item from tunabrain.
+  "DEPRECATED: Fetch flat tags for a media item from tunabrain.
+
+  Calls the deprecated /tags endpoint which is not dimension-aware.
+  Use request-categorization! (/categorize) instead.
 
   Payload should include the media data and any existing tags so the upstream
   service can deduplicate as needed."
@@ -149,11 +155,15 @@
                     {:endpoint (:endpoint client)
                      :media-name (::media/name media)}))))
 
+;; NOTE: Calls Tunabrain /tags/episode-special-flag. This is a constrained
+;; vocabulary endpoint (christmas, crossover, musical) and is not the same as
+;; the deprecated flat-tag /tags endpoint. It may be migrated to a dimension
+;; model in the future.
 (defn request-episode-special-flags!
   "Fetch special episode flags from tunabrain using constrained vocabulary.
-   
-  This is lightweight, cost-optimized tagging for episodes. Returns only
-  flags from the allowed vocabulary (e.g., :christmas, :crossover, :musical)."
+
+   This is lightweight, cost-optimized tagging for episodes. Returns only
+   flags from the allowed vocabulary (e.g., :christmas, :crossover, :musical)."
   [client media & {:keys [parent-title existing-flags]
                    :or   {existing-flags []}}]
   (log/debug (format "===== FLAGGING EPISODE:\\n%s\\n" (with-out-str (pprint media))))
@@ -202,8 +212,15 @@
                     {:endpoint (:endpoint client)
                      :media-name (::media/name media)}))))
 
+;; NOTE: Calls Tunabrain /tag-governance/triage which is marked deprecated
+;; in Tunabrain. Tag governance is still useful for hygiene but may be
+;; migrated to a dimension-aware governance model in the future.
+;; See DIMENSION_CLEANUP.md for the full migration plan.
 (defn request-tag-triage!
   "Request governance recommendations for a collection of tags.
+
+  Calls the deprecated /tag-governance/triage endpoint. Tag governance is
+  still useful for hygiene but may be migrated to a dimension-aware model.
 
   Accepts a list of tag samples (maps with `:tag`, `:usage_count`, and
   `:example_titles`) and optional target limit and debug flags that mirror the
@@ -227,8 +244,15 @@
                     {:endpoint (:endpoint client)
                      :tags-count (count tag-samples)}))))
 
+;; NOTE: Calls Tunabrain /tags/audit which is marked deprecated in Tunabrain.
+;; Tag governance is still useful for hygiene but may be migrated to a
+;; dimension-aware governance model in the future.
+;; See DIMENSION_CLEANUP.md for the full migration plan.
 (defn request-tag-audit!
   "Audit a list of tags for suitability and get removal recommendations.
+
+  Calls the deprecated /tags/audit endpoint. Tag governance is still
+  useful for hygiene but may be migrated to a dimension-aware model.
 
   Accepts a list of tags (strings or keywords) and returns a list of
   `{:tag ... :reason ...}` maps recommended for removal (see tunabrain
