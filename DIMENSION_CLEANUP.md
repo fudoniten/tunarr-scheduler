@@ -47,6 +47,117 @@ flattening all dimension values to `dimension:value` strings before pushing.
 
 ---
 
+## Cleanup Methodology
+
+We proceed in two passes before any removal:
+
+### Pass 1: Audit and Mark API Endpoints
+
+For each service (Tunarr Scheduler, Pseudovision, Tunabrain), list every HTTP
+endpoint that is part of the public API. Mark as **DEPRECATED** any endpoint
+that:
+
+- Returns or accepts hardcoded first-class fields (`genres`, `channels`,
+  `kid_friendly`) instead of dimensions or tags
+- Encourages the old worldview (e.g., "channel" as a thing, not a dimension
+  value)
+- Is superseded by a dimension-based or tag-based equivalent
+
+For each deprecated endpoint, document:
+- **Why it's deprecated** — the old worldview it enforces
+- **What replaces it** — the dimension-aware or tag-based alternative
+- **Backwards compatibility plan** — return 410 Gone, or 301 redirect, or keep
+  with `Deprecation` header
+
+### Pass 2: Mark Code as Deprecated
+
+Trace backwards from deprecated endpoints to every function, spec, protocol
+method, and SQL query that is part of their implementation. Mark each with:
+
+- **`^:deprecated` metadata** in Clojure
+- **Docstring note** explaining why and what replaces it
+- **Inline comment** linking to the phased cleanup plan
+
+We do **not** delete code in this pass — only mark it so the compiler and
+readers know the intent.
+
+---
+
+## Pass 1: API Endpoint Audit
+
+### Tunarr Scheduler
+
+| Route | Status | Old Worldview? | Replacement |
+|-------|--------|----------------|-------------|
+| `GET /api/genres` | **DEPRECATED** | Lists `genre` as a first-class concept | Use `GET /api/tags` with `tag=genre:*` or query dimensions |
+| `GET /api/genres/:genre/media` | **DEPRECATED** | Filters by `genre` as a hardcoded field | Use catalog with dimension filter or tag-based query |
+| `GET /api/catalog/channels/:channel-name/media` | **DEPRECATED** | Treats `channel` as a concrete entity | Use `GET /api/media` with `channel:NAME` tag filter |
+| `POST /api/media/:library/retag` | **DEPRECATED** | `/tags` endpoint in Tunabrain is obsolete; flat tags are not the dimension model | Use `POST /api/media/:library/recategorize` instead |
+| `POST /api/media/:library/recategorize` | ✅ Current | Dimension-based via `/categorize` | — |
+| `POST /api/media/:library/sync-pseudovision-tags` | ✅ Current | Pushes all dimensions + tags | — |
+| `POST /api/media/tags/audit` | ✅ Current | Tag governance | — |
+| `POST /api/media/tags/triage` | ✅ Current | Tag governance | — |
+| `POST /api/channels/:channel-id/schedule` | ✅ Current | Layered grid scheduling | — |
+
+### Pseudovision
+
+| Route | Status | Old Worldview? | Replacement |
+|-------|--------|----------------|-------------|
+| `GET /api/catalog/aggregate` | ✅ Current | Already supports `?tag=` filter | — |
+| `CatalogProfile.genres` field | **DEPRECATED** | Hardcoded genre aggregation | Use `tag_aggregates` with `genre:*` prefix |
+| `metadata_genres` table | **DEPRECATED** | Hardcoded genre storage | Treat genres as tags; derive `genre:*` tags at ingest |
+| `POST /api/media-items/:id/tags` | ✅ Current | Tag storage; no hardcoded concepts | — |
+
+### Tunabrain
+
+| Route | Status | Old Worldview? | Replacement |
+|-------|--------|----------------|-------------|
+| `POST /tags` | **DEPRECATED** | Flat tag generation; not dimension-aware | Use `POST /categorize` for dimensions, or push dimensions directly |
+| `POST /channel-mapping` | **DEPRECATED** | Hardcoded channel mapping | Channels are dimensions; use `POST /categorize` with `channel` dimension |
+| `POST /schedule` | **DEPRECATED** | Old batch scheduling | `POST /api/scheduling/propose-quarterly-grid` |
+| `POST /categorize` | ✅ Current | Dimension-based categorization | — |
+| `POST /api/scheduling/*` | ✅ Current | Layered grid contracts | — |
+| `POST /bumpers` | ✅ Current | Bumper generation | — |
+| `POST /tag-governance/*` | ✅ Current | Tag audit/triage | — |
+
+---
+
+## Pass 2: Code Deprecation Marks
+
+### Clojure: `^:deprecated` + Docstring
+
+Example pattern:
+
+```clojure
+(defn ^:deprecated get-media-by-genre
+  "DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
+   Use `get-media-by-dimension` or tag-based filtering instead.
+   See DIMENSION_CLEANUP.md Phase 3 for removal timeline."
+  [catalog genre]
+  ...)
+```
+
+### Protocol Methods
+
+```clojure
+(defprotocol Catalog
+  (get-channels [catalog])
+  ^:deprecated "DEPRECATED: Hardcoded channel list. Use `get-media-categories` with `channel` dimension."
+  ...)
+```
+
+### SQL Queries
+
+```clojure
+(defn ^:deprecated sql:get-genres
+  "DEPRECATED: Queries the `genre` table. Genres are dimensions in `media_categorization` now.
+   Use `sql:get-media-categories` or `sql:get-tag-samples` instead."
+  []
+  (-> (select :name) (from :genre) (order-by :name)))
+```
+
+---
+
 ## Known Bugs / Regressions
 
 ### 🔴 High Priority
@@ -54,10 +165,10 @@ flattening all dimension values to `dimension:value` strings before pushing.
 #### Pseudovision collection import still sets `::kid-friendly?`
 - **File:** `src/tunarr/scheduler/media/pseudovision_collection.clj:52`
 - **Issue:** When importing from PV, it sets `::media/kid-friendly? false` on
-every item. This field should be removed entirely; if PV has an age-suitability
-dimension, it should be read as that.
+  every item. This field should be removed entirely; if PV has an age-suitability
+  dimension, it should be read as that.
 - **Action:** Remove the `assoc` and update the field map to not include
-`kid_friendly`.
+  `kid_friendly`.
 
 ---
 
@@ -125,7 +236,7 @@ dimension, it should be read as that.
 | `GET /api/genres` | ❌ Obsolete | Hardcoded genre list |
 | `GET /api/genres/:genre/media` | ❌ Obsolete | Hardcoded genre filter |
 | `GET /api/catalog/channels/:channel-name/media` | ❌ Obsolete | Hardcoded channel filter |
-| `POST /api/media/:library/retag` | ✅ Current | Flat-tag endpoint (via Tunabrain `/tags`) |
+| `POST /api/media/:library/retag` | ❌ Obsolete | Flat-tag endpoint (via Tunabrain `/tags`) |
 | `POST /api/media/:library/recategorize` | ✅ Current | Dimension endpoint (via Tunabrain `/categorize`) |
 | `POST /api/media/:library/sync-pseudovision-tags` | ✅ Current | Fixed in commit `f9e5478` |
 
@@ -185,6 +296,12 @@ dimension, it should be read as that.
 ---
 
 ## Recommended Phased Cleanup
+
+### Phase 0: Audit + Mark ✅ IN PROGRESS
+- [ ] Mark all obsolete API endpoints as DEPRECATED with documentation
+- [ ] Mark all obsolete code with `^:deprecated` metadata and docstrings
+- [ ] Trace endpoint → handler → service → protocol → SQL for each deprecated
+  path
 
 ### Phase 1: Fix the sync ✅ DONE
 - [x] Update `pseudovision_sync.clj` to read `media_categorization` instead of
