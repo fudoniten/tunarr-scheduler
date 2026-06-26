@@ -102,17 +102,17 @@
                               500 {:body s/APIError}}
                   :handler   (media/rescan-handler ctx)}}]
 
-   ["/api/media/:library/retag"
-    {:tags       ["media"]
-     :parameters {:path  [:map [:library s/LibraryName]]
-                  :query [:map 
-                          [:force {:optional true} [:enum "true" "false"]]
-                          [:kind {:optional true} :string]]}
-     :post       {:summary   "Trigger async LLM retagging job. Supports optional ?force=true and ?kind=<type> parameters."
-                  :responses {202 {:body s/JobSubmitResponse}
-                              400 {:body s/APIError}
-                              500 {:body s/APIError}}
-                  :handler   (media/retag-handler ctx)}}]
+    ["/api/media/:library/retag"
+     {:tags       ["media"]
+      :parameters {:path  [:map [:library s/LibraryName]]
+                   :query [:map 
+                           [:force {:optional true} [:enum "true" "false"]]
+                           [:kind {:optional true} :string]]}
+      :post       {:summary   "DEPRECATED: Use /api/media/:library/recategorize instead. Old flat-tag retagging via Tunabrain /tags."
+                   :responses {202 {:body s/JobSubmitResponse}
+                               400 {:body s/APIError}
+                               500 {:body s/APIError}}
+                   :handler   (media/retag-handler ctx)}}]
 
    ["/api/media/:library/add-taglines"
     {:tags       ["media"]
@@ -210,35 +210,39 @@
                               500 {:body s/APIError}}
                   :handler   (browse/get-media-by-tag-handler ctx)}}]
 
-   ["/api/genres"
-    {:tags ["browse"]
-     :get  {:summary   "List all genres"
-            :responses {200 {:body s/GenreListResponse}
-                        500 {:body s/APIError}}
-            :handler   (browse/list-genres-handler ctx)}}]
+    ;; DEPRECATED: Hardcoded genre endpoints. Use /api/tags with genre:NAME.
+    ["/api/genres"
+     {:tags ["browse"]
+      :get  {:summary   "DEPRECATED: Use /api/tags with genre:NAME filter. Old hardcoded genre list."
+             :responses {200 {:body s/GenreListResponse}
+                         500 {:body s/APIError}}
+             :handler   (browse/list-genres-handler ctx)}}]
 
-   ["/api/genres/:genre/media"
-    {:tags       ["browse"]
-     :parameters {:path [:map [:genre s/GenreName]]}
-     :get        {:summary   "List media items with a given genre"
-                  :responses {200 {:body s/MediaListResponse}
-                              500 {:body s/APIError}}
-                  :handler   (browse/get-media-by-genre-handler ctx)}}]
+    ;; DEPRECATED: Hardcoded genre endpoint. Use /api/tags/:tag/media with genre:NAME.
+    ["/api/genres/:genre/media"
+     {:tags       ["browse"]
+      :parameters {:path [:map [:genre s/GenreName]]}
+      :get        {:summary   "DEPRECATED: Use /api/tags/:tag/media with genre:NAME. Old hardcoded genre filter."
+                   :responses {200 {:body s/MediaListResponse}
+                               500 {:body s/APIError}}
+                   :handler   (browse/get-media-by-genre-handler ctx)}}]
 
-   ["/api/catalog/channels"
-    {:tags ["browse"]
-     :get  {:summary   "List all channels in the catalog"
-            :responses {200 {:body s/ChannelListResponse}
-                        500 {:body s/APIError}}
-            :handler   (browse/list-channels-handler ctx)}}]
+    ;; DEPRECATED: Hardcoded channel endpoints. Use /api/tags with channel:NAME.
+    ["/api/catalog/channels"
+     {:tags ["browse"]
+      :get  {:summary   "DEPRECATED: Use /api/tags with channel:NAME filter. Old hardcoded channel list."
+             :responses {200 {:body s/ChannelListResponse}
+                         500 {:body s/APIError}}
+             :handler   (browse/list-channels-handler ctx)}}]
 
-   ["/api/catalog/channels/:channel-name/media"
-    {:tags       ["browse"]
-     :parameters {:path [:map [:channel-name s/ChannelName]]}
-     :get        {:summary   "List media items assigned to a given channel"
-                  :responses {200 {:body s/MediaListResponse}
-                              500 {:body s/APIError}}
-                  :handler   (browse/get-media-by-channel-handler ctx)}}]
+    ;; DEPRECATED: Hardcoded channel endpoint. Use /api/tags/:tag/media with channel:NAME.
+    ["/api/catalog/channels/:channel-name/media"
+     {:tags       ["browse"]
+      :parameters {:path [:map [:channel-name s/ChannelName]]}
+      :get        {:summary   "DEPRECATED: Use /api/tags/:tag/media with channel:NAME. Old hardcoded channel filter."
+                   :responses {200 {:body s/MediaListResponse}
+                               500 {:body s/APIError}}
+                   :handler   (browse/get-media-by-channel-handler ctx)}}]
 
    ;; ── Channels ────────────────────────────────────────────────────────────
    ["/api/channels/sync-pseudovision"

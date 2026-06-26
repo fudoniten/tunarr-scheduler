@@ -73,12 +73,21 @@
   (add-media-tags! [_ media-id tags]
     (update-media! state media-id #(update % ::media/tags conj-distinct tags))
     nil)
+  ;; DEPRECATED: Hardcoded channel assignment. Channels are dimensions now.
+  ;; Use dimension-based storage or add-media-tags! with "channel:NAME" instead.
+  ;; See DIMENSION_CLEANUP.md Phase 3.
   (add-media-channels! [_ media-id channels]
     (update-media! state media-id #(update % ::media/channels conj-distinct channels))
     nil)
+  ;; DEPRECATED: Hardcoded genre assignment. Genres are dimensions now.
+  ;; Use dimension-based storage or add-media-tags! with "genre:NAME" instead.
+  ;; See DIMENSION_CLEANUP.md Phase 3.
   (add-media-genres! [_ media-id genres]
     (update-media! state media-id #(update % ::media/genres conj-distinct genres))
     nil)
+  ;; DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
+  ;; Use get-media-by-tag with "channel:NAME" tag instead.
+  ;; See DIMENSION_CLEANUP.md Phase 3.
   (get-media-by-channel [_ channel]
     (->> (get @state :media {})
          vals
@@ -89,6 +98,9 @@
          vals
          (filter #(some #{tag} (::media/tags %)))
          vec))
+  ;; DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
+  ;; Use get-media-by-tag with "genre:NAME" tag instead.
+  ;; See DIMENSION_CLEANUP.md Phase 3.
   (get-media-by-genre [_ genre]
     (->> (get @state :media {})
          vals
@@ -100,6 +112,9 @@
          (mapcat ::media/tags)
          distinct
          vec))
+  ;; DEPRECATED: Hardcoded channel list. Channels are dimensions now.
+  ;; Use get-media-categories or tag-based queries instead.
+  ;; See DIMENSION_CLEANUP.md Phase 3.
   (get-channels [_]
     (->> (get @state :media {})
          vals
@@ -107,6 +122,9 @@
          (remove nil?)
          distinct
          (mapv (fn [ch] {:name (name ch)}))))
+  ;; DEPRECATED: Hardcoded genre list. Genres are dimensions now.
+  ;; Use get-media-categories or tag-based queries instead.
+  ;; See DIMENSION_CLEANUP.md Phase 3.
   (get-genres [_]
     (->> (get @state :media {})
          vals

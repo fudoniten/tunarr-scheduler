@@ -4,6 +4,9 @@
 
 (s/def ::tag keyword?)
 (s/def ::tags (s/coll-of ::tag))
+
+;; DEPRECATED: Hardcoded channel concepts. Channels are a dimension now.
+;; Use ::category-name with value "channel" instead.
 (s/def ::channel-name keyword?)
 (s/def ::channel-fullname string?)
 (s/def ::channel-description string?)
@@ -14,9 +17,15 @@
                           ::channel-id
                           ::channel-description])))
 (s/def ::channel-names (s/coll-of ::channel-name))
+
+;; DEPRECATED: Hardcoded boolean. Use a dimension like "age-suitability" instead.
 (s/def ::kid-friendly? boolean?)
+
+;; DEPRECATED: Hardcoded genre concept. Genres are a dimension now.
+;; Use ::category-name with value "genre" instead.
 (s/def ::genre keyword)
 
+;; Dimension model (current)
 (s/def ::category-name keyword?)
 (s/def ::category-value keyword?)
 
@@ -51,11 +60,16 @@
 (s/def ::season-number (s/nilable pos-int?))
 (s/def ::episode-number (s/nilable pos-int?))
 
+;; DEPRECATED: Hardcoded classification bundle. Use dimensions in
+;; media_categorization instead of ::channel-names and ::kid-friendly?.
 (s/def ::classification
   (s/keys :req [::tags
                 ::channel-names
                 ::kid-friendly?]))
 
+;; DEPRECATED: Uses hardcoded ::genres, ::channel-names, ::kid-friendly?.
+;; These should be replaced by dimensions in ::category-name / ::category-value.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (s/def ::metadata
   (s/keys :req [::name
                 ::overview

@@ -166,6 +166,9 @@
       (values (map (fn [tag] [media-id (name tag)]) tags))
       (on-conflict :tag :media_id) (do-nothing)))
 
+;; DEPRECATED: Hardcoded genre table. Genres are dimensions in media_categorization now.
+;; Use sql:add-media-category-values! with "genre" category instead.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (defn sql:insert-genres
   [genres]
   (-> (insert-into :genre)
@@ -174,6 +177,9 @@
       (on-conflict :name)
       (do-nothing)))
 
+;; DEPRECATED: Hardcoded media_genres table. Genres are dimensions now.
+;; Use sql:add-media-category-values! with "genre" category instead.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (defn sql:insert-media-genres
   [media-id genres]
   (-> (insert-into :media_genres)
@@ -181,15 +187,18 @@
       (values (map (fn [genre] [media-id (name genre)]) genres))
       (on-conflict :media_id :genre) (do-nothing)))
 
+;; DEPRECATED: Hardcoded channel table. Channels are dimensions in media_categorization now.
+;; Use sql:add-media-category-values! with "channel" category instead.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (defn sql:insert-channels
   [channels]
   (-> (insert-into :channel)
       (columns :name :full_name :id :description)
       (values (map (fn [[channel {:keys [::media/channel-id
-                                         ::media/channel-fullname
-                                         ::media/channel-description]}]]
+                                          ::media/channel-fullname
+                                          ::media/channel-description]}]]
                      [(name channel) channel-fullname channel-id channel-description])
-                   channels))
+                    channels))
       (on-conflict :name) (do-update-set :name :full_name :id :description)))
 
 (defn sql:insert-libraries
@@ -204,6 +213,9 @@
 
 (instrument 'sql:insert-channels)
 
+;; DEPRECATED: Hardcoded media_channels table. Channels are dimensions now.
+;; Use sql:add-media-category-values! with "channel" category instead.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (defn sql:insert-media-channels
   [media-id channels]
   (-> (insert-into :media_channels)
@@ -236,12 +248,18 @@
       (from :tag)
       (where [:= :name (name tag)])))
 
+;; DEPRECATED: Hardcoded channel table. Channels are dimensions now.
+;; Use get-media-categories or tag-based queries instead.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (defn sql:get-channels
   []
   (-> (select :name :full_name :id :description)
       (from :channel)
       (order-by :name)))
 
+;; DEPRECATED: Hardcoded genre table. Genres are dimensions now.
+;; Use get-media-categories or tag-based queries instead.
+;; See DIMENSION_CLEANUP.md Phase 3.
 (defn sql:get-genres
   []
   (-> (select :name) (from :genre) (order-by :name)))
@@ -567,11 +585,15 @@
   (get-tags [_]
     (map (comp keyword :tag/name) (sql:fetch! executor (sql:get-tags))))
 
+  ;; DEPRECATED: Hardcoded channel list. Channels are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (get-channels [_]
     (map (fn [{:keys [channel/name channel/full_name channel/id channel/description]}]
            {:name name :full-name full_name :id id :description description})
          (sql:fetch! executor (sql:get-channels))))
 
+  ;; DEPRECATED: Hardcoded genre list. Genres are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (get-genres [_]
     (map (comp keyword :genre/name) (sql:fetch! executor (sql:get-genres))))
 
@@ -609,18 +631,26 @@
             ::media/last-run     (.toInstant last_run_at)})
          (sql:fetch! executor (sql:get-media-processes-by-id id))))
 
+  ;; DEPRECATED: Hardcoded channel update. Channels are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (update-channels! [_ channels]
     (sql:exec! executor (sql:insert-channels channels)))
 
   (update-libraries! [_ libraries]
     (sql:exec! executor (sql:insert-libraries libraries)))
 
+  ;; DEPRECATED: Hardcoded channel assignment. Channels are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (add-media-channels! [_ media-id channels]
     (sql:exec! executor (sql:insert-media-channels media-id channels)))
 
+  ;; DEPRECATED: Hardcoded genre assignment. Genres are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (add-media-genres! [_ media-id genres]
     (sql:exec! executor (sql:insert-media-genres media-id genres)))
 
+  ;; DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (get-media-by-channel [this channel]
     (->> (sql:fetch! executor
                      (-> (sql:get-media)
@@ -635,6 +665,8 @@
          (map row->media)
          (catalog/enrich-media-with-timestamps this)))
 
+  ;; DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
+  ;; See protocol note in media/catalog.clj.
   (get-media-by-genre [this genre]
     (->> (sql:fetch! executor
                      (-> (sql:get-media)

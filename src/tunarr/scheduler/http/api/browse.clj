@@ -54,8 +54,10 @@
 ;; Channel handlers
 ;; ---------------------------------------------------------------------------
 
-(defn list-channels-handler
-  "List all channels in the catalog."
+(defn ^:deprecated list-channels-handler
+  "DEPRECATED: Hardcoded channel list. Channels are dimensions now.
+   Use list-tags-handler or get-media-by-tag-handler with channel:NAME tag.
+   See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [_]
     (try
@@ -64,8 +66,10 @@
         (log/error e "Error listing channels")
         {:status 500 :body {:error (.getMessage e)}}))))
 
-(defn get-media-by-channel-handler
-  "List all media items assigned to a given channel."
+(defn ^:deprecated get-media-by-channel-handler
+  "DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
+   Use get-media-by-tag-handler with the channel:NAME tag.
+   See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [req]
     (try
@@ -80,8 +84,10 @@
 ;; Genre handlers
 ;; ---------------------------------------------------------------------------
 
-(defn list-genres-handler
-  "List all genres in the catalog."
+(defn ^:deprecated list-genres-handler
+  "DEPRECATED: Hardcoded genre list. Genres are dimensions now.
+   Use list-tags-handler or get-media-by-tag-handler with genre:NAME tag.
+   See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [_]
     (try
@@ -91,8 +97,10 @@
         (log/error e "Error listing genres")
         {:status 500 :body {:error (.getMessage e)}}))))
 
-(defn get-media-by-genre-handler
-  "List all media items with a given genre."
+(defn ^:deprecated get-media-by-genre-handler
+  "DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
+   Use get-media-by-tag-handler with the genre:NAME tag.
+   See DIMENSION_CLEANUP.md for removal timeline."
   [{:keys [catalog]}]
   (fn [req]
     (try
