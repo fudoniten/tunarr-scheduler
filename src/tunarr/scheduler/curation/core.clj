@@ -4,6 +4,7 @@
             [tunarr.scheduler.jobs.runner :as runner]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.curation.dimensions :as dimensions]
             [tunarr.scheduler.curation.episode-tags :as episode-tags]
             [taoensso.timbre :as log]
             [clojure.spec.alpha :as s]
@@ -240,8 +241,19 @@
                                                          :categories categories)]
     (let [{:keys [dimensions]} response]
       (when (s/valid? ::categorization dimensions)
-        (doseq [[category selections] dimensions]
-          (catalog/set-media-category-values! catalog id category selections))))))
+        ;; Guard against hallucinated values: the LLM is occasionally creative
+        ;; and returns values outside the configured vocabulary (e.g. typos
+        ;; like `spectum`, or invented values like `thriller`). Validate the
+        ;; response against the same `categories` we sent before persisting.
+        (let [allowed (dimensions/config->allowed-values {:categories categories})
+              {valid-dimensions :dimensions rejected :rejected}
+              (dimensions/filter-dimensions allowed dimensions)]
+          (doseq [{:keys [dimension value]} rejected]
+            (log/warn (format "rejecting invalid categorization value for %s: %s:%s (not in configured vocabulary)"
+                              name (clojure.core/name dimension) (clojure.core/name value))))
+          (doseq [[category selections] valid-dimensions
+                  :when (seq selections)]
+            (catalog/set-media-category-values! catalog id category selections)))))))
 
 (defn categorize-library-media!
   [brain catalog library throttler & {:keys [threshold categories force

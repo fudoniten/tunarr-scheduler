@@ -241,6 +241,14 @@
                               500 {:body s/APIError}}
                   :handler   (media/triage-tags-handler ctx)}}]
 
+   ["/api/dimensions/clean"
+    {:tags       ["media"]
+     :parameters {:query s/DimensionCleanupQuery}
+     :post       {:summary   "Trigger async job that removes dimension values outside the configured controlled vocabulary across all media. Reports without deleting when ?dry-run=true."
+                  :responses {202 {:body s/JobSubmitResponse}
+                              500 {:body s/APIError}}
+                  :handler   (media/clean-dimensions-handler ctx)}}]
+
    ;; ── Browse ──────────────────────────────────────────────────────────────
    ["/api/tags"
     {:tags ["browse"]

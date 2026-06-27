@@ -11,6 +11,7 @@
             [tunarr.scheduler.backends.pseudovision.client :as pv-client]
             [tunarr.scheduler.curation.core :as curate]
             [tunarr.scheduler.curation.tags :as curation-tags]
+            [tunarr.scheduler.curation.dimensions :as dimensions]
             [tunarr.scheduler.jobs.throttler :as throttler]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.http.util :as util])
@@ -366,6 +367,26 @@
         {:status 202 :body {:job job}})
       (catch Exception e
         (log/error e "Error submitting tag triage job")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn clean-dimensions-handler
+  "Trigger an async job that removes dimension (category) values outside the
+   configured controlled vocabulary across all media. With ?dry-run=true, the
+   invalid values are only reported in the job result; nothing is deleted."
+  [{:keys [job-runner catalog curation-config]}]
+  (fn [req]
+    (try
+      (let [dry-run (= "true" (get-in req [:parameters :query :dry-run]))
+            allowed (dimensions/config->allowed-values curation-config)
+            job     (jobs/submit! job-runner
+                                  {:type :media/dimension-cleanup
+                                   :metadata {:dry-run dry-run}}
+                                  (fn [_report-progress]
+                                    (dimensions/clean-catalog! catalog allowed
+                                                               :dry-run dry-run)))]
+        {:status 202 :body {:job job}})
+      (catch Exception e
+        (log/error e "Error submitting dimension cleanup job")
         {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-library-media-handler
