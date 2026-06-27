@@ -193,6 +193,28 @@
                           #"library not found"
                           (catalog/get-media-by-library *test-catalog* :nonexistent)))))
 
+(deftest search-media-by-library-id-test
+  (testing "filters by case-insensitive substring match against name"
+    (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
+    (catalog/add-media-batch! *test-catalog* [sample-movie sample-series])
+
+    (let [library-id (catalog/get-library-id *test-catalog* :test-library)]
+      (is (= ["movie-1"]
+             (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "movie"}))))
+      (is (= ["series-1"]
+             (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "SERIES"}))))
+      (is (= #{"movie-1" "series-1"}
+             (set (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "test"})))))
+      (is (empty? (catalog/search-media-by-library-id *test-catalog* library-id {:q "nonexistent-text"})))))
+
+  (testing "filters by overview match too"
+    (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
+    (catalog/add-media-batch! *test-catalog* [sample-movie sample-series])
+
+    (let [library-id (catalog/get-library-id *test-catalog* :test-library)]
+      (is (= ["movie-1"]
+             (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "A test movie"})))))))
+
 ;; Tag management tests
 (deftest add-media-tags-test
   (testing "add tags to existing media"

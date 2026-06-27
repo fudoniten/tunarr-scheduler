@@ -460,9 +460,10 @@
   [:map
    [:force {:optional true} [:enum "true" "false"]]])
 
-(def KindQuery
+(def MediaListQuery
   [:map
-   [:kind {:optional true} :string]])
+   [:kind {:optional true} :string]
+   [:q    {:optional true} :string]])
 
 (def TagAuditQuery
   [:map

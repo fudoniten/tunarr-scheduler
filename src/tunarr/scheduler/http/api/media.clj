@@ -391,8 +391,9 @@
 
 (defn get-library-media-handler
   "Get all media items in a library with process timestamps.
-   
-   Supports optional ?kind=<type> query parameter to filter by item_kind."
+
+   Supports optional ?kind=<type> query parameter to filter by item_kind,
+   and ?q=<text> to filter by a case-insensitive name/overview match."
   [{:keys [catalog]}]
   (fn [req]
     (try
@@ -400,10 +401,11 @@
             library-kw (keyword library)
             library-id (catalog/get-library-id catalog library-kw)
             kind-param (get-in req [:parameters :query :kind])
-            kind (when kind-param (keyword kind-param))]
+            kind (when kind-param (keyword kind-param))
+            q (get-in req [:parameters :query :q])]
         (if library-id
-          (let [media (if kind
-                        (catalog/get-media-by-kind catalog library-kw kind)
+          (let [media (if (or kind q)
+                        (catalog/search-media-by-library-id catalog library-id {:kind kind :q q})
                         (catalog/get-media-by-library-id catalog library-id))
                 counts (when-not kind (catalog/count-media-by-kind catalog library-kw))]
             {:status 200

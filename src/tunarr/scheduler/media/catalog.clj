@@ -14,6 +14,11 @@
   (get-media-by-kind [catalog library-name kind])  ; NEW: Filter by item_kind
   (get-filler-items [catalog library-name])        ; NEW: Convenience for filler
   (count-media-by-kind [catalog library-name])     ; NEW: Count by kind
+
+  ;; Filter top-level media (movies/series) in a library by an optional
+  ;; item_kind and/or a case-insensitive substring match against name/overview.
+  ;; opts is a map with optional :kind and :q keys.
+  (search-media-by-library-id [catalog library-id opts])
   (get-tags [catalog])
 
   ;; DEPRECATED: Hardcoded channel concept. Channels are a dimension now.
@@ -125,6 +130,12 @@
 (s/fdef get-media-by-library
   :args (s/cat :catalog ::catalog
                :library ::media/library-name)
+  :ret  (s/coll-of ::media/metadata))
+
+(s/fdef search-media-by-library-id
+  :args (s/cat :catalog    ::catalog
+               :library-id ::media/library-id
+               :opts       map?)
   :ret  (s/coll-of ::media/metadata))
 
 (s/fdef get-tags
@@ -289,6 +300,7 @@
 (instrument 'get-media)
 (instrument 'get-media-by-id)
 (instrument 'get-media-by-library-id)
+(instrument 'search-media-by-library-id)
 (instrument 'get-media-by-library)
 (instrument 'add-media-tags)
 (instrument 'set-media-tags)

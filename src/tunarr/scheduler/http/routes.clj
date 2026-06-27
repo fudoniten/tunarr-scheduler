@@ -77,8 +77,8 @@
    ["/api/library/:library/media"
     {:tags       ["media"]
      :parameters {:path [:map [:library s/LibraryName]]
-                  :query s/KindQuery}
-     :get        {:summary   "Get all media items in a library with process timestamps. Supports optional ?kind parameter to filter by media kind (e.g., filler)."
+                  :query s/MediaListQuery}
+     :get        {:summary   "Get all media items in a library with process timestamps. Supports optional ?kind parameter to filter by media kind (e.g., filler), and ?q to filter by a case-insensitive name/overview match."
                   :responses {200 {:body s/MediaListResponse}
                               404 {:body s/APIError}
                               500 {:body s/APIError}}

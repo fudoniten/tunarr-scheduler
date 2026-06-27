@@ -534,6 +534,16 @@
   (-> (sql:get-media)
       (where [:in :media.media_type ["movie" "series"]])))
 
+(defn sql:search-top-level-media
+  "Top-level media (movies/series) in a library, optionally filtered by
+   item_kind and/or a case-insensitive substring match against name/overview."
+  [library-id {:keys [kind q]}]
+  (cond-> (-> (sql:get-top-level-media)
+              (where [:= :media/library_id library-id]))
+    kind (where [:= :media/item_kind (name kind)])
+    q    (where [:or [:ilike :media/name (str "%" q "%")]
+                     [:ilike :media/overview (str "%" q "%")]])))
+
 (defn sql:get-episodes-by-series
   [series-id]
   (-> (sql:get-media)
@@ -600,9 +610,14 @@
                (catalog/enrich-media-with-timestamps this)))
       (throw (ex-info (format "library not found: %s" library-name) {}))))
 
-  ;; NEW: Convenience function for filler items  
+  ;; NEW: Convenience function for filler items
   (get-filler-items [this library-name]
     (catalog/get-media-by-kind this library-name :filler))
+
+  (search-media-by-library-id [this library-id opts]
+    (->> (sql:fetch! executor (sql:search-top-level-media library-id opts))
+         (map row->media)
+         (catalog/enrich-media-with-timestamps this)))
 
   ;; NEW: Count media by kind
   (count-media-by-kind [_ library-name]
