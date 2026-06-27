@@ -19,7 +19,8 @@
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media :as media]
             [clojure.string]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log]
+            [tunarr.scheduler.http.util :as util]))
 
 ;; ---------------------------------------------------------------------------
 ;; Media Item Classification
@@ -303,7 +304,7 @@
                                  library report-progress))
       (catch Exception e
         (log/error e "Failed to sync from Pseudovision")
-        {:synced 0 :skipped 0 :errors [{:error (.getMessage e)}]}))))
+        {:synced 0 :skipped 0 :errors [{:error (util/error-message e)}]}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Migration Helper
@@ -380,7 +381,7 @@
         result))
     (catch Exception e
       (log/error e "Migration failed")
-      {:migrated 0 :skipped 0 :errors [{:error (.getMessage e)}]})))
+      {:migrated 0 :skipped 0 :errors [{:error (util/error-message e)}]})))
 
 (comment
   ;; Usage example:

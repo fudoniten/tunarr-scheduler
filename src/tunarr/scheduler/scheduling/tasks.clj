@@ -22,7 +22,8 @@
             [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.orchestration :as orch]
             [tunarr.scheduler.scheduling.plans :as plans]
-            [tunarr.scheduler.backends.pseudovision.client :as pv]))
+            [tunarr.scheduler.backends.pseudovision.client :as pv]
+            [tunarr.scheduler.http.util :as util]))
 
 (def ^:private default-horizon 14)
 
@@ -63,7 +64,7 @@
                    (catch Exception e
                      (log/error e "task: failed to extend horizon"
                                 {:channel channel-key :channel-id pv-id})
-                     {:error (.getMessage e)})))])))))
+                     {:error (util/error-message e)})))])))))
 
 (defn run-weekly!
   "Expand each channel's frozen grid + overrides for the coming week and push the
@@ -89,7 +90,7 @@
                    (integ/publish-week! executor conf channel pv-id (str start) (str end))
                    (catch Exception e
                      (log/error e "task: weekly publish failed" {:channel channel-key})
-                     {:error (.getMessage e)})))])))))
+                     {:error (util/error-message e)})))])))))
 
 (defn- components [{:keys [tunabrain pseudovision catalog]}]
   {:executor (:executor catalog)
@@ -110,7 +111,7 @@
              (try (orch/run-monthly! comps (channel-spec cfg) month)
                   (catch Exception e
                     (log/error e "task: monthly overrides failed" {:channel channel-key})
-                    {:error (.getMessage e)}))]))))
+                    {:error (util/error-message e)}))]))))
 
 (defn run-quarterly!
   "Propose → check → repair → freeze the quarterly grid for every channel for the
@@ -128,4 +129,4 @@
              (try (orch/run-quarterly! comps (channel-spec cfg) quarter year)
                   (catch Exception e
                     (log/error e "task: quarterly grid failed" {:channel channel-key})
-                    {:error (.getMessage e)}))]))))
+                    {:error (util/error-message e)}))]))))

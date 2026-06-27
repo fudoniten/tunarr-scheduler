@@ -2,7 +2,8 @@
   "HTTP handlers for channel operations."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.channels.sync :as channel-sync]
-            [tunarr.scheduler.backends.pseudovision.client :as pv-client]))
+            [tunarr.scheduler.backends.pseudovision.client :as pv-client]
+            [tunarr.scheduler.http.util :as util]))
 
 ;; ---------------------------------------------------------------------------
 ;; Handlers
@@ -17,7 +18,7 @@
         {:status 200 :body result})
       (catch Exception e
         (log/error e "Error syncing channels to Pseudovision")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-schedule-handler
   "Get current schedule for a channel from Pseudovision.
@@ -47,4 +48,4 @@
                       :upcoming-events (take 10 events)}})))
       (catch Exception e
         (log/error e "Error getting channel schedule")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))

@@ -8,7 +8,8 @@
    → :executor), as in the strategy handlers."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.scheduling.storage :as storage]
-            [tunarr.scheduler.scheduling.plans :as plans]))
+            [tunarr.scheduler.scheduling.plans :as plans]
+            [tunarr.scheduler.http.util :as util]))
 
 (defn- executor-of [ctx] (:executor (:catalog ctx)))
 
@@ -18,7 +19,7 @@
   `(try ~@body
         (catch Exception e#
           (log/error e# ~msg)
-          {:status 500 :body {:error (.getMessage e#)}})))
+          {:status 500 :body {:error (util/error-message e#)}})))
 
 ;; ---------------------------------------------------------------------------
 ;; Channels with plans

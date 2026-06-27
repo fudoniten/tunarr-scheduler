@@ -2,7 +2,8 @@
   "HTTP middleware for JSON handling, exception handling, and logging."
   (:require [muuntaja.core :as m]
             [cheshire.core :as json]
-            [taoensso.timbre :as log])
+            [taoensso.timbre :as log]
+            [tunarr.scheduler.http.util :as util])
   (:import [com.fasterxml.jackson.databind.module SimpleModule]
            [com.fasterxml.jackson.databind JsonSerializer SerializerProvider]
            [com.fasterxml.jackson.core JsonGenerator]
@@ -59,11 +60,11 @@
         (let [data (ex-data e)]
           (log/error e "Handler exception" data)
           {:status (or (:status data) 500)
-           :body   {:error (.getMessage e)}}))
+           :body   {:error (util/error-message e)}}))
       (catch Exception e
         (log/error e "Unexpected exception")
         {:status 500
-         :body   {:error (.getMessage e)}}))))
+         :body   {:error (util/error-message e)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Request logging

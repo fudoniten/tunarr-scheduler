@@ -12,7 +12,8 @@
             [tunarr.scheduler.curation.core :as curate]
             [tunarr.scheduler.curation.tags :as curation-tags]
             [tunarr.scheduler.jobs.throttler :as throttler]
-            [tunarr.scheduler.media.catalog :as catalog])
+            [tunarr.scheduler.media.catalog :as catalog]
+            [tunarr.scheduler.http.util :as util])
   (:import [java.time LocalDate Instant]))
 
 ;; ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@
           {:status 200 :body {:libraries libraries}}))
       (catch Exception e
         (log/error e "Error listing libraries")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn sync-libraries-handler
   "Sync libraries from Pseudovision into the catalog."
@@ -114,7 +115,7 @@
           {:status 200 :body {:libraries libraries}}))
       (catch Exception e
         (log/error e "Error syncing libraries from Pseudovision")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn rescan-handler
   "Trigger async library rescan job."
@@ -129,7 +130,7 @@
                      (fn [opts] (media-sync/rescan-library! collection catalog opts))))
       (catch Exception e
         (log/error e "Error submitting rescan job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn retag-handler
   "Trigger async LLM retagging job.
@@ -156,7 +157,7 @@
                          :report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting retag job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn tagline-handler
   "Generate taglines for library media with LLM."
@@ -174,7 +175,7 @@
                                  library))))
       (catch Exception e
         (log/error e "Error submitting tagline job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn recategorize-handler
   "Recategorize library media with LLM."
@@ -195,7 +196,7 @@
                         {:force force :report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting recategorize job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn retag-episodes-handler
   "Retag episode special flags with LLM."
@@ -216,7 +217,7 @@
                         {:force force :report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting episode retag job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn pseudovision-sync-handler
   "Sync library tags to Pseudovision (async job)."
@@ -235,7 +236,7 @@
                                                    {:report-progress report-progress}))))
       (catch Exception e
         (log/error e "Error submitting Pseudovision sync job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn migrate-to-pseudovision-handler
   "One-time migration from local catalog to Pseudovision."
@@ -269,7 +270,7 @@
                           "Migration complete"))}))
       (catch Exception e
         (log/error e "Error during Pseudovision migration")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn sync-from-pseudovision-handler
   "Sync media items from Pseudovision to catalog."
@@ -293,10 +294,10 @@
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           {:status (or (:status data) 500)
-           :body {:error (.getMessage e)}}))
+           :body {:error (util/error-message e)}}))
       (catch Exception e
         (log/error e "Error syncing from Pseudovision")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn migrate-catalog-ids-handler
   "Migrate catalog IDs to use Pseudovision format."
@@ -320,10 +321,10 @@
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           {:status (or (:status data) 500)
-           :body {:error (.getMessage e)}}))
+           :body {:error (util/error-message e)}}))
       (catch Exception e
         (log/error e "Error migrating catalog IDs")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn audit-tags-handler
   "Trigger async LLM tag audit job. Tags recommended for removal are deleted
@@ -342,7 +343,7 @@
         {:status 202 :body {:job job}})
       (catch Exception e
         (log/error e "Error submitting tag audit job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn triage-tags-handler
   "Trigger async LLM tag governance triage job. Sends all tags with usage
@@ -365,7 +366,7 @@
         {:status 202 :body {:job job}})
       (catch Exception e
         (log/error e "Error submitting tag triage job")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-library-media-handler
   "Get all media items in a library with process timestamps.
@@ -391,7 +392,7 @@
           {:status 404 :body {:error (str "Library not found: " library)}}))
       (catch Exception e
         (log/error e "Error fetching library media")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-media-by-id-handler
   "Get a specific media item by ID with process timestamps.
@@ -407,7 +408,7 @@
           {:status 404 :body {:error (str "Media not found: " media-id)}}))
       (catch Exception e
         (log/error e "Error fetching media by ID")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Process timestamp reset
@@ -443,7 +444,7 @@
                                           ". Valid processes: " (pr-str valid-processes))}}))
       (catch Exception e
         (log/error e "Error deleting process timestamp")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn delete-library-process-timestamps-handler
   "Clear last-run timestamps for a single process across all media in a library."
@@ -459,7 +460,7 @@
                                           ". Valid processes: " (pr-str valid-processes))}}))
       (catch Exception e
         (log/error e "Error clearing library process timestamps")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-item curation actions
@@ -481,7 +482,7 @@
           {:status 404 :body {:error (str "Media not found: " media-id)}}))
       (catch Exception e
         (log/error e "Error submitting per-item retag")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn recategorize-media-item-handler
   "Recategorize a single media item via Tunabrain (async throttled)."
@@ -500,7 +501,7 @@
           {:status 404 :body {:error (str "Media not found: " media-id)}}))
       (catch Exception e
         (log/error e "Error submitting per-item recategorize")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn sync-media-item-pseudovision-handler
   "Sync a single media item's tags to Pseudovision."
@@ -525,4 +526,4 @@
             {:status 404 :body {:error (str "Media not found: " media-id)}})))
       (catch Exception e
         (log/error e "Error syncing item to Pseudovision")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))

@@ -8,7 +8,8 @@
    component (ctx :catalog → :executor)."
 
   (:require [taoensso.timbre :as log]
-            [tunarr.scheduler.scheduling.strategy :as strategy]))
+            [tunarr.scheduler.scheduling.strategy :as strategy]
+            [tunarr.scheduler.http.util :as util]))
 
 (defn- executor-of
   "Pull the SQL executor out of the catalog component in the handler context."
@@ -32,7 +33,7 @@
            :body {:strategies (vec strategies)}})
         (catch Exception e
           (log/error e "Error listing strategies")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn get-strategy-handler
   "GET /api/strategies/:id — get a single strategy by ID."
@@ -46,7 +47,7 @@
             {:status 404 :body {:error "Strategy not found"}}))
         (catch Exception e
           (log/error e "Error getting strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn get-current-strategy-handler
   "GET /api/strategies/current — get the most recent strategy.
@@ -66,7 +67,7 @@
             {:status 404 :body {:error "No strategies yet"}}))
         (catch Exception e
           (log/error e "Error getting current strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn apply-strategy-handler
   "POST /api/strategies/:id/apply — mark a strategy as applied."
@@ -80,7 +81,7 @@
             {:status 404 :body {:error "Strategy not found"}}))
         (catch Exception e
           (log/error e "Error applying strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn reject-strategy-handler
   "POST /api/strategies/:id/reject — mark a strategy as rejected."
@@ -94,7 +95,7 @@
             {:status 404 :body {:error "Strategy not found"}}))
         (catch Exception e
           (log/error e "Error rejecting strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn delete-strategy-handler
   "DELETE /api/strategies/:id — delete a strategy."
@@ -108,7 +109,7 @@
             {:status 404 :body {:error "Strategy not found"}}))
         (catch Exception e
           (log/error e "Error deleting strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn generate-strategy-handler
   "POST /api/strategies — manually trigger strategy generation.
@@ -127,7 +128,7 @@
             {:status 400 :body {:error (str "Invalid period: " period ". Expected :monthly or :quarterly")}}))
         (catch Exception e
           (log/error e "Error generating strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))
 
 (defn revert-strategy-handler
   "POST /api/strategies/:id/revert — undo a strategy and restore the previous one.
@@ -143,4 +144,4 @@
             {:status 404 :body {:error "Strategy not found"}}))
         (catch Exception e
           (log/error e "Error reverting strategy")
-          {:status 500 :body {:error (.getMessage e)}})))))
+          {:status 500 :body {:error (util/error-message e)}})))))

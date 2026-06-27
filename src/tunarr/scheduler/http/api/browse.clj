@@ -2,7 +2,8 @@
   "HTTP handlers for browsing tags, channels, and genres."
   (:require [taoensso.timbre :as log]
             [clojure.walk :as walk]
-            [tunarr.scheduler.media.catalog :as catalog])
+            [tunarr.scheduler.media.catalog :as catalog]
+            [tunarr.scheduler.http.util :as util])
   (:import [java.time LocalDate Instant]))
 
 ;; ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@
                               samples)}})
       (catch Exception e
         (log/error e "Error listing tags")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-media-by-tag-handler
   "List all media items that have a given tag."
@@ -48,7 +49,7 @@
         {:status 200 :body {:media (mapv serialize-time-fields media)}})
       (catch Exception e
         (log/error e "Error fetching media by tag")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Channel handlers
@@ -64,7 +65,7 @@
       {:status 200 :body {:channels (vec (catalog/get-channels catalog))}}
       (catch Exception e
         (log/error e "Error listing channels")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn ^:deprecated get-media-by-channel-handler
   "DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
@@ -78,7 +79,7 @@
         {:status 200 :body {:media (mapv serialize-time-fields media)}})
       (catch Exception e
         (log/error e "Error fetching media by channel")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Genre handlers
@@ -95,7 +96,7 @@
         {:status 200 :body {:genres (mapv name genres)}})
       (catch Exception e
         (log/error e "Error listing genres")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn ^:deprecated get-media-by-genre-handler
   "DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
@@ -109,7 +110,7 @@
         {:status 200 :body {:media (mapv serialize-time-fields media)}})
       (catch Exception e
         (log/error e "Error fetching media by genre")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Dimension handlers
@@ -127,7 +128,7 @@
                                              dims)}})
       (catch Exception e
         (log/error e "Error listing dimensions")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-dimension-values-handler
   "List all values for a given dimension with usage counts."
@@ -142,7 +143,7 @@
                                          values)}})
       (catch Exception e
         (log/error e "Error fetching dimension values")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-media-categories-handler
   "Get all dimension categories for a specific media item."
@@ -157,4 +158,4 @@
                                             categories)}})
       (catch Exception e
         (log/error e "Error fetching media categories")
-        {:status 500 :body {:error (.getMessage e)}}))))
+        {:status 500 :body {:error (util/error-message e)}}))))
