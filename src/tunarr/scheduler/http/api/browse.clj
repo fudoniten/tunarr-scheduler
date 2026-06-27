@@ -167,7 +167,7 @@
     (let [dimension (get-in req [:parameters :path :dimension])
           value     (get-in req [:parameters :path :value])]
       (try
-        (let [media (catalog/get-media-by-category-value catalog
+        (let [media (catalog/get-media-by-category-value catalog 
                                                          (keyword dimension)
                                                          (keyword value))]
           {:status 200 :body {:media (mapv serialize-time-fields media)}})
