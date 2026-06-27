@@ -761,8 +761,25 @@
 
   (get-media-categories [_ media-id]
     (into {}
-          (map (fn [{:keys [category values]}]
-                 [(keyword category) (map keyword values)]))
+          (map (fn [{:keys [media_categorization/category values] :as row}]
+                 (when (nil? category)
+                   (log/error "Null category in media categories query"
+                             {:media-id media-id
+                              :row row
+                              :keys (keys row)})
+                   (throw (ex-info "Null category value in media_categorization query result"
+                                  {:media-id media-id
+                                   :row row
+                                   :available-keys (keys row)})))
+                 (let [value-vec (->> values
+                                     pgarray->vec
+                                     vec)]
+                   (when (some nil? value-vec)
+                     (throw (ex-info "Null values found in category values array"
+                                    {:media-id media-id
+                                     :category category
+                                     :values value-vec})))
+                   [(keyword category) (mapv keyword value-vec)])))
           (sql:fetch! executor (sql:get-media-categories media-id))))
 
   (delete-media-category-value! [_ media-id category value]
