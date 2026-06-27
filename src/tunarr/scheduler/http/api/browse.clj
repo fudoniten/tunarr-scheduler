@@ -159,3 +159,19 @@
       (catch Exception e
         (log/error e "Error fetching media categories")
         {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn get-media-by-dimension-value-handler
+  "List all media items that have a given dimension category value."
+  [{:keys [catalog]}]
+  (fn [req]
+    (try
+      (let [dimension (get-in req [:parameters :path :dimension])
+            value     (get-in req [:parameters :path :value])
+            media     (catalog/get-media-by-category-value catalog 
+                                                          (keyword dimension)
+                                                          (keyword value))]
+        {:status 200 :body {:media (mapv serialize-time-fields media)}})
+      (catch Exception e
+        (log/error e "Error fetching media by dimension value"
+                  {:dimension dimension :value value})
+        {:status 500 :body {:error (util/error-message e)}}))))

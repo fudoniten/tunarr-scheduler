@@ -705,6 +705,48 @@
          (map row->media)
          (catalog/enrich-media-with-timestamps this)))
 
+  (get-media-by-category-value [this category value]
+    (->> (sql:fetch! executor
+                     (-> (select :media.id
+                                 :media.name
+                                 :media.overview
+                                 :media.community_rating
+                                 :media.critic_rating
+                                 :media.media_type
+                                 :media.production_year
+                                 :media.premiere
+                                 :media.subtitles
+                                 :media.kid_friendly
+                                 :media.library_id
+                                 :media.parent_id
+                                 :media.season_number
+                                 :media.episode_number
+                                 [[:array_agg [:distinct :media_tags.tag]]
+                                  :tags]
+                                 [[:array_agg [:distinct :media_channels.channel]]
+                                  :channels]
+                                 [[:array_agg [:distinct :media_genres.genre]]
+                                  :genres]
+                                 [[:array_agg [:distinct :media_taglines.tagline]]
+                                  :taglines])
+                         (from :media)
+                         (join :media_categorization
+                               [:= :media.id :media_categorization/media_id])
+                         (left-join :media_tags
+                                    [:= :media.id :media_tags.media_id])
+                         (left-join :media_channels
+                                    [:= :media.id :media_channels.media_id])
+                         (left-join :media_genres
+                                    [:= :media.id :media_genres.media_id])
+                         (left-join :media_taglines
+                                    [:= :media.id :media_taglines.media_id])
+                         (where [:and
+                                 [:= :media_categorization/category (name category)]
+                                 [:= :media_categorization/category_value (name value)]])
+                         (group-by :media.id)))
+         (map row->media)
+         (catalog/enrich-media-with-timestamps this)))
+
   (add-media-taglines! [_ media-id taglines]
     (sql:exec! executor (sql:insert-media-taglines media-id taglines)))
 

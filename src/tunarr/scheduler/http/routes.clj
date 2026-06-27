@@ -307,6 +307,16 @@
                                500 {:body s/APIError}}
                    :handler   (browse/get-dimension-values-handler ctx)}}]
 
+    ["/api/dimensions/:dimension/values/:value/media"
+     {:tags       ["browse"]
+      :parameters {:path [:map 
+                          [:dimension s/DimensionName]
+                          [:value :string]]}
+      :get        {:summary   "List all media with a specific dimension value"
+                   :responses {200 {:body s/MediaListResponse}
+                               500 {:body s/APIError}}
+                   :handler   (browse/get-media-by-dimension-value-handler ctx)}}]
+
     ["/api/media/:media-id/categories"
      {:tags       ["media"]
       :parameters {:path [:map [:media-id s/MediaId]]}

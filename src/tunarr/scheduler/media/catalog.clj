@@ -86,7 +86,8 @@
 
   ;; NEW: Browse dimensions across the catalog
   (get-all-dimensions [catalog])
-  (get-dimension-values [catalog dimension]))
+  (get-dimension-values [catalog dimension])
+  (get-media-by-category-value [catalog category value]))
 
 (defmulti initialize-catalog! :type)
 
