@@ -25,6 +25,17 @@
               :seasonal {:december [:holiday]
                          :october [:spooky]}
               :preferences {}}
+ ;; LLM categorization dimensions (controlled vocabulary sent to Tunabrain on
+ ;; /categorize). This is also the source of truth used to validate incoming
+ ;; categorizations and to sweep invalid values from the catalog
+ ;; (see tunarr.scheduler.curation.dimensions and POST /api/dimensions/clean).
+ ;;
+ ;; Do NOT define a `:channel` dimension here. Channels live under the
+ ;; top-level `:channels` key (provided separately, e.g. via a Kubernetes
+ ;; configmap, since they change more often). The `channel` dimension's valid
+ ;; values are derived from `:channels` automatically by
+ ;; `config->allowed-values`. Duplicating them here would create two competing
+ ;; definitions that drift apart.
  :categories {:time-slot {:description "Best time of day to air this content"
                           :values [:daytime :primetime :late-night]}
               :audience {:description "Primary target audience"
