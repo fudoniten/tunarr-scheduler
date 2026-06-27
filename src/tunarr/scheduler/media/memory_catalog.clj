@@ -203,6 +203,17 @@
            #(dissoc % category))
     nil)
 
+  (purge-category-value! [_ category value]
+    (swap! state update :categories
+           (fn [by-media]
+             (into {}
+                   (map (fn [[mid dims]]
+                          [mid (if (contains? dims category)
+                                 (update dims category #(vec (remove #{value} %)))
+                                 dims)]))
+                   by-media)))
+    nil)
+
   (get-effective-categories [_ media-id]
     (let [item (get-in @state [:media media-id])
           own-cats (or (get-in @state [:categories media-id]) {})

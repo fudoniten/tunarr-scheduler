@@ -77,6 +77,11 @@
   (get-media-categories [catalog media-id])
   (delete-media-category-value! [catalog media-id category value])
   (delete-media-category-values! [catalog media-id category])
+
+  ;; Remove a dimension value across ALL media. Used by vocabulary cleanup to
+  ;; purge invalid/hallucinated dimension values catalog-wide (mirrors the
+  ;; global delete-tag!). See tunarr.scheduler.curation.dimensions.
+  (purge-category-value! [catalog category value])
   (get-episodes-by-series [catalog series-id])
   (get-episode [catalog series-id season-number episode-number])
   (get-effective-tags [catalog media-id])

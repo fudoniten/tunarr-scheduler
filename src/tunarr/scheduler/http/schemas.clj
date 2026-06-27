@@ -472,3 +472,7 @@
   [:map
    [:dry-run      {:optional true} [:enum "true" "false"]]
    [:target-limit {:optional true} [:int {:min 1 :description "Approximate number of tags the triage should aim to keep"}]]])
+
+(def DimensionCleanupQuery
+  [:map
+   [:dry-run {:optional true} [:enum "true" "false"]]])

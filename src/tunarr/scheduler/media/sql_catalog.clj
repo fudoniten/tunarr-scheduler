@@ -6,7 +6,7 @@
             [clojure.spec.alpha :as s]
             [clojure.spec.test.alpha :refer [instrument]]
 
-            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing left-join group-by columns do-update-set delete-from order-by] :as sql]
+            [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing join left-join group-by columns do-update-set delete-from order-by] :as sql]
             [next.jdbc :as jdbc]
             [taoensso.timbre :as log])
   (:import java.sql.Array
@@ -319,6 +319,13 @@
   (-> (delete-from :media_categorization)
       (where [:= :media_id media-id]
              [:= :category (name category)])))
+
+(defn sql:purge-category-value!
+  "Delete a (category, value) pair across all media."
+  [category value]
+  (-> (delete-from :media_categorization)
+      (where [:= :category (name category)]
+             [:= :category_value (name value)])))
 
 (defn sql:get-all-dimensions
   "List all unique dimension (category) names with their value counts."
@@ -829,6 +836,9 @@
 
   (delete-media-category-values! [_ media-id category]
     (sql:exec! executor (sql:delete-media-category-values! media-id category)))
+
+  (purge-category-value! [_ category value]
+    (sql:exec! executor (sql:purge-category-value! category value)))
 
   (get-all-dimensions [_]
     (map (fn [{:keys [media_categorization/category value_count]}]
