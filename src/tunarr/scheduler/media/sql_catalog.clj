@@ -772,16 +772,18 @@
     (sql:exec! executor (sql:delete-media-category-values! media-id category)))
 
   (get-all-dimensions [_]
-    (map (fn [{:keys [category value-count]}]
-           {:name (keyword category)
-            :value-count value-count})
-         (sql:fetch! executor (sql:get-all-dimensions))))
+    (->> (sql:fetch! executor (sql:get-all-dimensions))
+         (filter (fn [{:keys [category]}] (some? category)))
+         (map (fn [{:keys [category value-count]}]
+                {:name (keyword category)
+                 :value-count value-count}))))
 
   (get-dimension-values [_ dimension]
-    (map (fn [{:keys [category_value usage-count]}]
-           {:value (keyword category_value)
-            :usage-count usage-count})
-         (sql:fetch! executor (sql:get-dimension-values dimension))))
+    (->> (sql:fetch! executor (sql:get-dimension-values dimension))
+         (filter (fn [{:keys [category_value]}] (some? category_value)))
+         (map (fn [{:keys [category_value usage-count]}]
+                {:value (keyword category_value)
+                 :usage-count usage-count}))))
 
   (get-episodes-by-series [this series-id]
     (->> (sql:fetch! executor (sql:get-episodes-by-series series-id))
