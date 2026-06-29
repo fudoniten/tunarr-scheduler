@@ -437,15 +437,22 @@
    [:task :string]
    [:job Job]])
 
+(def ChannelSelector
+  "A single channel selector value, or a repeatable list of them."
+  [:or [:string {:min 1}] [:vector [:string {:min 1}]]])
+
 (def ChannelFilter
-  "Optional repeatable ?channel=key query param to limit scheduling to specific channels."
+  "Optional repeatable selectors to limit scheduling to specific channels:
+   ?channel=key (by config key name) and/or ?channel_id=uuid (by channel id)."
   [:map
-   [:channel {:optional true} [:or [:string {:min 1}] [:vector [:string {:min 1}]]]]])
+   [:channel    {:optional true} ChannelSelector]
+   [:channel_id {:optional true} ChannelSelector]])
 
 (def DailyTaskQuery
   [:map
-   [:horizon {:optional true} [:int {:min 1 :max 365 :description "Days to schedule ahead"}]]
-   [:channel {:optional true} [:or [:string {:min 1}] [:vector [:string {:min 1}]]]]])
+   [:horizon    {:optional true} [:int {:min 1 :max 365 :description "Days to schedule ahead"}]]
+   [:channel    {:optional true} ChannelSelector]
+   [:channel_id {:optional true} ChannelSelector]])
 
 ;; ---------------------------------------------------------------------------
 ;; Query parameters
