@@ -428,6 +428,13 @@
   [:map {:closed false}
    [:task :string]])
 
+(def SchedulingJobResponse
+  "Response for async scheduling tasks (monthly/quarterly) that return
+   immediately with a job ID for polling."
+  [:map {:closed false}
+   [:task :string]
+   [:job Job]])
+
 (def DailyTaskQuery
   [:map
    [:horizon {:optional true} [:int {:min 1 :max 365 :description "Days to schedule ahead"}]]])

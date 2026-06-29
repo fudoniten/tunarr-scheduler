@@ -3,9 +3,14 @@
 
    These endpoints are intended to be triggered by Kubernetes CronJobs (see
    deploy/k8s) rather than an in-process scheduler. Each runs the corresponding
-   task against the live system components and returns a per-channel summary."
+   task against the live system components and returns a per-channel summary.
+
+   Quarterly and monthly tasks are submitted as async jobs (202 + job ID)
+   because they make heavy LLM calls via Tunabrain that can take several
+   minutes per channel."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.scheduling.tasks :as tasks]
+            [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.http.util :as util]))
 
 (defn daily-handler
@@ -34,22 +39,24 @@
 
 (defn monthly-handler
   "POST /api/scheduling/monthly — propose + store sparse monthly overrides for
-   every channel against their frozen grids."
+   every channel against their frozen grids. Returns 202 with a job ID."
   [ctx]
   (fn [_]
-    (try
-      {:status 200 :body {:task "monthly" :results (tasks/run-monthly! ctx)}}
-      (catch Exception e
-        (log/error e "monthly scheduling task failed")
-        {:status 500 :body {:error (util/error-message e)}}))))
+    (let [job (jobs/submit-job!
+               (:job-runner ctx)
+               {:type :scheduling/monthly}
+               (fn [_report-progress]
+                 (tasks/run-monthly! ctx)))]
+      {:status 202 :body {:task "monthly" :job job}})))
 
 (defn quarterly-handler
   "POST /api/scheduling/quarterly — propose → check → repair → freeze the
-   quarterly grid for every channel."
+   quarterly grid for every channel. Returns 202 with a job ID."
   [ctx]
   (fn [_]
-    (try
-      {:status 200 :body {:task "quarterly" :results (tasks/run-quarterly! ctx)}}
-      (catch Exception e
-        (log/error e "quarterly scheduling task failed")
-        {:status 500 :body {:error (util/error-message e)}}))))
+    (let [job (jobs/submit-job!
+               (:job-runner ctx)
+               {:type :scheduling/quarterly}
+               (fn [_report-progress]
+                 (tasks/run-quarterly! ctx)))]
+      {:status 202 :body {:task "quarterly" :job job}})))
