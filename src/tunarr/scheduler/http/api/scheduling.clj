@@ -12,19 +12,48 @@
    All endpoints accept an optional repeatable ?channel=key query parameter to
    limit the run to specific channels. When omitted, all configured channels
    are processed."
-  (:require [taoensso.timbre :as log]
+  (:require [clojure.string :as str]
+            [taoensso.timbre :as log]
             [tunarr.scheduler.scheduling.tasks :as tasks]
             [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.http.util :as util]))
 
+(defn- requested-keys
+  "Normalize the ?channel param (a string or vector of strings) to a set of
+   requested channel names."
+  [channel-param]
+  (set (if (string? channel-param) [channel-param] channel-param)))
+
 (defn- filter-channels
-  "Return ctx with :channels filtered to only the requested keys, or unchanged
-   when channel-param is nil."
+  "Return ctx with :channels filtered to only the requested channels, or
+   unchanged when channel-param is nil.
+
+   The ?channel query param arrives as a string, but channel config keys are
+   keywords, so match on (name k) rather than the raw key — otherwise a string
+   param never matches a keyword key, the channel map is silently emptied, and
+   the task runs against zero channels (no Tunabrain call)."
   [ctx channel-param]
   (if channel-param
-    (let [ks (if (string? channel-param) #{channel-param} (set channel-param))]
-      (update ctx :channels select-keys ks))
+    (let [requested (requested-keys channel-param)]
+      (update ctx :channels
+              (fn [chs]
+                (into {} (filter (fn [[k _]] (contains? requested (name k)))) chs))))
     ctx))
+
+(defn- unknown-channels
+  "Requested channel names that don't exist in ctx's configured :channels
+   (matched by name). Returns a sorted seq, or nil when all are known."
+  [ctx channel-param]
+  (when channel-param
+    (let [known (set (map name (keys (:channels ctx))))]
+      (seq (sort (remove known (requested-keys channel-param)))))))
+
+(defn- unknown-channel-response
+  "400 body for a ?channel param naming channels that aren't configured."
+  [unknown]
+  {:status 400
+   :body {:error (str "unknown channel(s): " (str/join ", " unknown)
+                      ". Check the configured channel keys.")}})
 
 (defn- parse-channel-param [req]
   (get-in req [:parameters :query :channel]))
@@ -35,10 +64,13 @@
   [ctx]
   (fn [req]
     (try
-      (let [horizon (get-in req [:parameters :query :horizon] 14)
-            ctx'    (filter-channels ctx (parse-channel-param req))
-            results (tasks/run-daily! ctx' :horizon horizon)]
-        {:status 200 :body {:task "daily" :horizon horizon :results results}})
+      (let [channel-param (parse-channel-param req)]
+        (if-let [unknown (unknown-channels ctx channel-param)]
+          (unknown-channel-response unknown)
+          (let [horizon (get-in req [:parameters :query :horizon] 14)
+                ctx'    (filter-channels ctx channel-param)
+                results (tasks/run-daily! ctx' :horizon horizon)]
+            {:status 200 :body {:task "daily" :horizon horizon :results results}})))
       (catch Exception e
         (log/error e "daily scheduling task failed")
         {:status 500 :body {:error (util/error-message e)}}))))
@@ -50,8 +82,11 @@
   [ctx]
   (fn [req]
     (try
-      (let [ctx' (filter-channels ctx (parse-channel-param req))]
-        {:status 200 :body {:task "weekly" :results (tasks/run-weekly! ctx')}})
+      (let [channel-param (parse-channel-param req)]
+        (if-let [unknown (unknown-channels ctx channel-param)]
+          (unknown-channel-response unknown)
+          (let [ctx' (filter-channels ctx channel-param)]
+            {:status 200 :body {:task "weekly" :results (tasks/run-weekly! ctx')}})))
       (catch Exception e
         (log/error e "weekly scheduling task failed")
         {:status 500 :body {:error (util/error-message e)}}))))
@@ -62,13 +97,16 @@
    Optional ?channel=key to limit."
   [ctx]
   (fn [req]
-    (let [ctx' (filter-channels ctx (parse-channel-param req))
-          job  (jobs/submit-job!
-                (:job-runner ctx)
-                {:type :media/scheduling-monthly}
-                (fn [_report-progress]
-                  (tasks/run-monthly! ctx')))]
-      {:status 202 :body {:task "monthly" :job job}})))
+    (let [channel-param (parse-channel-param req)]
+      (if-let [unknown (unknown-channels ctx channel-param)]
+        (unknown-channel-response unknown)
+        (let [ctx' (filter-channels ctx channel-param)
+              job  (jobs/submit-job!
+                    (:job-runner ctx)
+                    {:type :media/scheduling-monthly}
+                    (fn [_report-progress]
+                      (tasks/run-monthly! ctx')))]
+          {:status 202 :body {:task "monthly" :job job}})))))
 
 (defn quarterly-handler
   "POST /api/scheduling/quarterly — propose → check → repair → freeze the
@@ -76,10 +114,13 @@
    Optional ?channel=key to limit."
   [ctx]
   (fn [req]
-    (let [ctx' (filter-channels ctx (parse-channel-param req))
-          job  (jobs/submit-job!
-                (:job-runner ctx)
-                {:type :media/scheduling-quarterly}
-                (fn [_report-progress]
-                  (tasks/run-quarterly! ctx')))]
-      {:status 202 :body {:task "quarterly" :job job}})))
+    (let [channel-param (parse-channel-param req)]
+      (if-let [unknown (unknown-channels ctx channel-param)]
+        (unknown-channel-response unknown)
+        (let [ctx' (filter-channels ctx channel-param)
+              job  (jobs/submit-job!
+                    (:job-runner ctx)
+                    {:type :media/scheduling-quarterly}
+                    (fn [_report-progress]
+                      (tasks/run-quarterly! ctx')))]
+          {:status 202 :body {:task "quarterly" :job job}})))))
