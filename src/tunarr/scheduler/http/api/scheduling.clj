@@ -65,7 +65,7 @@
     (let [ctx' (filter-channels ctx (parse-channel-param req))
           job  (jobs/submit-job!
                 (:job-runner ctx)
-                {:type :scheduling/monthly}
+                {:type :media/scheduling-monthly}
                 (fn [_report-progress]
                   (tasks/run-monthly! ctx')))]
       {:status 202 :body {:task "monthly" :job job}})))
@@ -79,7 +79,7 @@
     (let [ctx' (filter-channels ctx (parse-channel-param req))
           job  (jobs/submit-job!
                 (:job-runner ctx)
-                {:type :scheduling/quarterly}
+                {:type :media/scheduling-quarterly}
                 (fn [_report-progress]
                   (tasks/run-quarterly! ctx')))]
       {:status 202 :body {:task "quarterly" :job job}})))
