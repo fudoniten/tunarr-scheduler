@@ -302,6 +302,20 @@
               {:field label :errors (contracts/humanize schema value)}))
   value)
 
+(defn- normalize-override
+  "Tunabrain emits an override :scope with every scope key present, using null
+   for the keys that don't apply to the chosen shape (a single :date vs. a
+   recurring :days window). Our OverrideScope contract is a closed map so those
+   explicit nulls read as disallowed/invalid keys and storage refuses them. Drop
+   the nil-valued scope keys so the two shapes stay mutually exclusive before
+   validation and storage; a genuinely ambiguous scope (both :date and :days
+   set) is left intact so it still fails validation."
+  [override]
+  (cond-> override
+    (map? (:scope override))
+    (update :scope (fn [scope]
+                     (into {} (remove (comp nil? val)) scope)))))
+
 (defn quarterly-grid-request
   "Build a QuarterlyGridRequest payload (handoff §5.1)."
   [{:keys [channel quarter year catalog-profile quarterly-theme strategic-guidance
@@ -382,9 +396,10 @@
     (when (nil? (:overrides response))
       (throw (ex-info "tunabrain propose-monthly-overrides returned no overrides list"
                       {:response response})))
-    (doseq [o (:overrides response)]
-      (warn-if-invalid contracts/ScheduleOverride o :override))
-    response))
+    (let [overrides (mapv normalize-override (:overrides response))]
+      (doseq [o overrides]
+        (warn-if-invalid contracts/ScheduleOverride o :override))
+      (assoc response :overrides overrides))))
 
 (defn create!
   "Create a tunabrain client from configuration.
