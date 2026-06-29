@@ -60,7 +60,9 @@
    :media/retag-episodes
    :media/pseudovision-sync
    :media/tag-audit
-   :media/tag-triage])
+   :media/tag-triage
+   :media/scheduling-quarterly
+   :media/scheduling-monthly])
 
 ;; NOTE: keep JobType in sync with the job types submitted in
 ;; tunarr.scheduler.http.api.media.
@@ -91,8 +93,8 @@
    [:progress {:optional true} [:maybe [:or JobProgress number?]]]
    [:duration-ms {:optional true} [:maybe :int]]
    [:error    {:optional true} [:maybe [:map {:closed false}
-                                         [:message :string]
-                                         [:type :string]]]]
+                                        [:message :string]
+                                        [:type :string]]]]
    [:created-at {:optional true} [:maybe :string]]
    [:started-at {:optional true} [:maybe :string]]
    [:completed-at {:optional true} [:maybe :string]]])
