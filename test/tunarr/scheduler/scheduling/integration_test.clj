@@ -1,6 +1,7 @@
 (ns tunarr.scheduler.scheduling.integration-test
-  "Tests for the Pseudovision boundary: kebab↔snake conversion, CatalogProfile
-   assembly, and DailySlot publication (with the PV client stubbed)."
+  "Tests for the Pseudovision boundary: kebab↔snake conversion of the catalog
+   aggregate, CatalogProfile assembly, and snake_case DailySlot publication
+   (with the PV client stubbed)."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [next.jdbc :as jdbc]
             [tunarr.scheduler.sql.executor :as executor]
@@ -67,7 +68,9 @@
         (is (nil? (c/humanize c/CatalogProfile profile)))))))
 
 ;; ---------------------------------------------------------------------------
-;; publish-daily-slots! (snake → kebab on the wire)
+;; publish-daily-slots! (snake_case on the wire — the ingest endpoint validates
+;; the snake_case DailySlot field names; converting to kebab-case made every
+;; slot fail with "Missing start_time")
 ;; ---------------------------------------------------------------------------
 
 (def snake-slot
@@ -75,7 +78,7 @@
    :media_id "series:42" :media_selection_strategy "sequential"
    :category_filters ["comedy" "channel:comedy"] :notes ["Season 1 block"]})
 
-(deftest ^:eftest/synchronized publish-converts-slots-to-kebab
+(deftest ^:eftest/synchronized publish-sends-slots-in-snake-case
   (let [capture (atom nil)
         result  {:ingested 1 :skipped 0 :errors [] :channel-id 7}]
     (with-redefs [pv/push-daily-slots! (fn [_cfg channel-id slots]
@@ -84,13 +87,13 @@
       (let [out (integ/publish-daily-slots! ::cfg 7 [snake-slot])]
         (is (= result out))
         (is (= 7 (:channel-id @capture)))
-        (testing "the slot reached the client in kebab-case"
+        (testing "the slot reached the client in snake_case (unconverted)"
           (let [sent (first (:slots @capture))]
-            (is (= "2026-06-24T08:00:00" (:start-time sent)))
-            (is (= "series:42" (:media-id sent)))
-            (is (= "sequential" (:media-selection-strategy sent)))
-            (is (= ["comedy" "channel:comedy"] (:category-filters sent)))
-            (is (not (contains? sent :start_time)))))))))
+            (is (= "2026-06-24T08:00:00" (:start_time sent)))
+            (is (= "series:42" (:media_id sent)))
+            (is (= "sequential" (:media_selection_strategy sent)))
+            (is (= ["comedy" "channel:comedy"] (:category_filters sent)))
+            (is (not (contains? sent :start-time)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; publish-week! (expand stored plan → push)
@@ -135,9 +138,9 @@
         (is (= 7 (:pv-channel-id out)))
         (is (pos? (:slot-count out)))
         (is (= (:slot-count out) (-> out :result :ingested)))
-        (testing "pushed slots are kebab-case"
-          (is (every? #(contains? % :start-time) (:slots @capture)))
-          (is (some #(= "series:42" (:media-id %)) (:slots @capture))))))))
+        (testing "pushed slots are snake_case"
+          (is (every? #(contains? % :start_time) (:slots @capture)))
+          (is (some #(= "series:42" (:media_id %)) (:slots @capture))))))))
 
 (deftest ^:eftest/synchronized publish-week-skips-without-grid
   (with-redefs [pv/push-daily-slots! (fn [& _] (throw (ex-info "should not push" {})))]
