@@ -43,10 +43,17 @@
      :number number
      :description (:description channel-spec)}))
 
+(defn- channel-uuid [ch] (or (:uuid ch) (:channels/uuid ch)))
+(defn- channel-id   [ch] (or (:id ch)   (:channels/id ch)))
+(defn- channel-name [ch] (or (:name ch) (:channels/name ch)))
+(defn- channel-num  [ch] (or (:number ch) (:channels/number ch)))
+
 (defn- find-channel-by-uuid
-  "Find a Pseudovision channel by UUID."
+  "Find a Pseudovision channel by UUID. Compares stringified UUIDs so a parsed
+   java.util.UUID matches the string the API returns. The /api/channels records
+   use plain :uuid keys (table-qualified :channels/uuid accepted defensively)."
   [pv-channels uuid]
-  (first (filter #(= (:uuid %) uuid) pv-channels)))
+  (first (filter #(= (str (channel-uuid %)) (str uuid)) pv-channels)))
 
 (defn sync-channel!
   "Sync a single channel to Pseudovision.
@@ -62,24 +69,24 @@
 
       (if existing
         ;; Channel exists - check if update needed
-        (let [needs-update? (or (not= (:name pv-spec) (:channels/name existing))
-                                (not= (:number pv-spec) (str (:channels/number existing))))]
+        (let [needs-update? (or (not= (:name pv-spec) (channel-name existing))
+                                (not= (:number pv-spec) (str (channel-num existing))))]
           (if needs-update?
             (do
               (log/info "Updating Pseudovision channel"
                         {:channel channel-key :uuid uuid :changes pv-spec})
-              (pv/update-channel! pv-config (:channels/id existing) pv-spec)
-              {:status :updated :channel-id (:channels/id existing)})
+              (pv/update-channel! pv-config (channel-id existing) pv-spec)
+              {:status :updated :channel-id (channel-id existing)})
             (do
               (log/debug "Channel already synced" {:channel channel-key :uuid uuid})
-              {:status :unchanged :channel-id (:channels/id existing)})))
+              {:status :unchanged :channel-id (channel-id existing)})))
 
         ;; Channel doesn't exist - create it
         (do
           (log/info "Creating Pseudovision channel"
                     {:channel channel-key :spec pv-spec})
           (let [created (pv/create-channel! pv-config pv-spec)]
-            {:status :created :channel-id (:channels/id created)}))))
+            {:status :created :channel-id (channel-id created)}))))
 
     (catch Exception e
       (log/error e "Failed to sync channel" {:channel channel-key})

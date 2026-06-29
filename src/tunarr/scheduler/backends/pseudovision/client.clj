@@ -430,20 +430,24 @@
 ;; ---------------------------------------------------------------------------
 
 (defn list-channels
-  "List all channels. Pass {:uuid uuid-str} to filter by UUID.
+  "List all channels (a flat vector of channel records). Pass {:uuid uuid-str}
+   to filter by UUID.
 
-   Like the other list endpoints, /api/channels returns an offset-pagination
-   envelope {:items [...] :pagination {...}} rather than a bare vector, so we
-   unwrap it via fetch-all-pages. Returning the raw envelope here previously
-   caused callers that map over the result (e.g. uuid->pv-id) to iterate the
-   envelope's top-level keys instead of the channel records."
+   Tolerates either response shape: a bare array, or the offset-pagination
+   envelope {:items [...] :pagination {...}} the other list endpoints return.
+   Previously this returned the raw body, so when the endpoint answered with the
+   envelope, callers that map over the result (e.g. uuid->pv-id) iterated the
+   envelope's top-level keys instead of the channel records — yielding an empty
+   index and a spurious :not-found for every channel. A high page limit keeps
+   the channel set (a handful of channels) on a single page."
   [config & [{:keys [uuid]}]]
-  (fetch-all-pages
-   (fn [limit offset]
-     (request! :get
-               (api-url config "/api/channels")
-               {:query-params (cond-> {"limit" limit "offset" offset}
-                                uuid (assoc "uuid" uuid))}))))
+  (let [body (request! :get
+                       (api-url config "/api/channels")
+                       {:query-params (cond-> {"limit" page-size "offset" 0}
+                                        uuid (assoc "uuid" uuid))})]
+    (if (and (map? body) (contains? body :items))
+      (:items body)
+      body)))
 
 (defn get-channel
   "Get channel by ID."

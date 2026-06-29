@@ -37,9 +37,13 @@
    :description (::media/channel-description cfg)})
 
 (defn- uuid->pv-id
-  "Map of Pseudovision channel UUID → integer id."
+  "Map of Pseudovision channel UUID → integer id. The /api/channels records use
+   plain :uuid / :id keys (we also accept table-qualified :channels/* keys
+   defensively, in case the API is ever served with namespaced keys)."
   [pv-conf]
-  (into {} (map (fn [ch] [(str (:channels/uuid ch)) (:channels/id ch)]))
+  (into {} (map (fn [ch]
+                  [(str (or (:uuid ch) (:channels/uuid ch)))
+                   (or (:id ch) (:channels/id ch))]))
         (pv/list-channels pv-conf)))
 
 (defn run-daily!
