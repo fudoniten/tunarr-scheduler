@@ -430,11 +430,20 @@
 ;; ---------------------------------------------------------------------------
 
 (defn list-channels
-  "List all channels. Pass {:uuid uuid-str} to filter by UUID."
+  "List all channels. Pass {:uuid uuid-str} to filter by UUID.
+
+   Like the other list endpoints, /api/channels returns an offset-pagination
+   envelope {:items [...] :pagination {...}} rather than a bare vector, so we
+   unwrap it via fetch-all-pages. Returning the raw envelope here previously
+   caused callers that map over the result (e.g. uuid->pv-id) to iterate the
+   envelope's top-level keys instead of the channel records."
   [config & [{:keys [uuid]}]]
-  (request! :get
-            (api-url config "/api/channels")
-            (cond-> {} uuid (assoc :query-params {"uuid" uuid}))))
+  (fetch-all-pages
+   (fn [limit offset]
+     (request! :get
+               (api-url config "/api/channels")
+               {:query-params (cond-> {"limit" limit "offset" offset}
+                                uuid (assoc "uuid" uuid))}))))
 
 (defn get-channel
   "Get channel by ID."
