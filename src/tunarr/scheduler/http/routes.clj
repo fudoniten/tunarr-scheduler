@@ -419,7 +419,7 @@
     ;; ── Scheduling tasks (triggered by k8s CronJobs) ─────────────────────────
     ["/api/scheduling/daily"
      {:tags ["scheduling"]
-      :post {:summary    "Extend the playout horizon for every channel"
+      :post {:summary    "Extend the playout horizon (all channels or filtered by ?channel=key)"
              :parameters {:query s/DailyTaskQuery}
              :responses  {200 {:body s/SchedulingTaskResponse}
                           500 {:body s/APIError}}
@@ -427,14 +427,16 @@
 
     ["/api/scheduling/weekly"
      {:tags ["scheduling"]
-      :post {:summary   "Re-apply schedule templates to every channel"
-             :responses {200 {:body s/SchedulingTaskResponse}
-                         500 {:body s/APIError}}
-             :handler   (scheduling/weekly-handler ctx)}}]
+      :post {:summary    "Re-apply schedule templates to every channel"
+             :parameters {:query s/ChannelFilter}
+             :responses  {200 {:body s/SchedulingTaskResponse}
+                          500 {:body s/APIError}}
+             :handler    (scheduling/weekly-handler ctx)}}]
 
     ["/api/scheduling/monthly"
      {:tags ["scheduling"]
       :post {:summary    "Propose + store sparse monthly overrides for every channel (async)"
+             :parameters {:query s/ChannelFilter}
              :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/monthly-handler ctx)}}]
@@ -442,6 +444,7 @@
     ["/api/scheduling/quarterly"
      {:tags ["scheduling"]
       :post {:summary    "Propose → check → repair → freeze the quarterly grid per channel (async)"
+             :parameters {:query s/ChannelFilter}
              :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/quarterly-handler ctx)}}]
