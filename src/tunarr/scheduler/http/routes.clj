@@ -434,15 +434,15 @@
 
     ["/api/scheduling/monthly"
      {:tags ["scheduling"]
-      :post {:summary    "Propose + store sparse monthly overrides for every channel"
-             :responses  {200 {:body s/SchedulingTaskResponse}
+      :post {:summary    "Propose + store sparse monthly overrides for every channel (async)"
+             :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/monthly-handler ctx)}}]
 
     ["/api/scheduling/quarterly"
      {:tags ["scheduling"]
-      :post {:summary    "Propose → check → repair → freeze the quarterly grid per channel"
-             :responses  {200 {:body s/SchedulingTaskResponse}
+      :post {:summary    "Propose → check → repair → freeze the quarterly grid per channel (async)"
+             :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/quarterly-handler ctx)}}]
 

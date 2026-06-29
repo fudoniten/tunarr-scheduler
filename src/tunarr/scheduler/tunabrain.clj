@@ -11,6 +11,12 @@
             [clj-http.client :as http]
             [taoensso.timbre :as log]))
 
+(def ^:private scheduling-timeout-ms
+  "Socket timeout for scheduling endpoints that invoke heavy LLM generation on
+   the Tunabrain side (5 minutes). Overrides the client-level :socket-timeout
+   from config.edn for these calls only."
+  300000)
+
 (defrecord TunabrainClient [endpoint http-opts]
   java.io.Closeable
   (close [_]
@@ -67,14 +73,15 @@
         categories))
 
 (defn- json-post!
-  [^TunabrainClient client path payload]
+  [^TunabrainClient client path payload & {:keys [timeout-ms]}]
   (let [url (str (:endpoint client) path)
-        request-opts (merge {:accept :json
-                             :as :text
-                             :headers (cond-> {"Content-Type" "application/json"})
-                             :throw-exceptions false
-                             :body (json/generate-string payload)}
-                            (:http-opts client))]
+        request-opts (cond-> (merge {:accept :json
+                                     :as :text
+                                     :headers (cond-> {"Content-Type" "application/json"})
+                                     :throw-exceptions false
+                                     :body (json/generate-string payload)}
+                                    (:http-opts client))
+                       timeout-ms (assoc :socket-timeout timeout-ms))]
     (log/info (format "connecting to %s, options: %s"
                       url (with-out-str (pprint request-opts))))
     (try
@@ -341,7 +348,8 @@
    :cost_estimate :suggested_next_steps}."
   [client opts]
   (let [response (json-post! client "/api/scheduling/propose-quarterly-grid"
-                             (quarterly-grid-request opts))]
+                             (quarterly-grid-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
     (when (nil? (:grid response))
       (throw (ex-info "tunabrain propose-quarterly-grid returned no grid"
                       {:response response})))
@@ -354,7 +362,8 @@
    QuarterlyGridRepairResponse: {:grid_id :status :grid :changes :cost_estimate}."
   [client opts]
   (let [response (json-post! client "/api/scheduling/repair-quarterly-grid"
-                             (repair-grid-request opts))]
+                             (repair-grid-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
     (when (nil? (:grid response))
       (throw (ex-info "tunabrain repair-quarterly-grid returned no grid"
                       {:response response})))
@@ -368,7 +377,8 @@
    :cost_estimate :suggested_next_steps}. An empty :overrides list is normal."
   [client opts]
   (let [response (json-post! client "/api/scheduling/propose-monthly-overrides"
-                             (monthly-overrides-request opts))]
+                             (monthly-overrides-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
     (when (nil? (:overrides response))
       (throw (ex-info "tunabrain propose-monthly-overrides returned no overrides list"
                       {:response response})))
