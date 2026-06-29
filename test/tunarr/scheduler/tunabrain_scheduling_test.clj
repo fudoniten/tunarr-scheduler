@@ -107,6 +107,29 @@
         (testing "an empty overrides list is accepted as normal"
           (is (= [] (:overrides out))))))))
 
+(deftest ^:eftest/synchronized propose-monthly-overrides-normalizes-scope
+  (testing "explicit-null scope keys from Tunabrain are dropped so the closed
+            OverrideScope contract (and storage) accept the date/days shape"
+    (let [raw {:override_id "ovr-0"
+               ;; Tunabrain emits every scope key, nulling the inapplicable ones.
+               :scope {:date "2026-06-05" :days nil
+                       :effective_start nil :effective_end nil}
+               :start "20:00" :end "22:00"
+               :content {:media_id "movie:abc" :strategy "specific"}
+               :mode "replace" :priority 0 :note "Classic mystery movie night"}
+          resp {:overrides_id "o1" :status "ok" :month "2026-06"
+                :overrides [raw] :warnings [] :cost_estimate {}
+                :suggested_next_steps []}]
+      (with-redefs [tb/json-post! (fn [_client _path _payload & _] resp)]
+        (let [out (tb/propose-monthly-overrides! ::client
+                                                 {:channel channel :month "2026-06" :grid a-grid
+                                                  :catalog-profile catalog-profile})
+              scope (-> out :overrides first :scope)]
+          (is (= {:date "2026-06-05"} scope))
+          (is (not (contains? scope :days)))
+          (is (not (contains? scope :effective_start)))
+          (is (not (contains? scope :effective_end))))))))
+
 (deftest ^:eftest/synchronized missing-grid-in-response-throws
   (with-redefs [tb/json-post! (stub-post (atom nil) {:grid_id "g" :status "ok" :grid nil})]
     (is (thrown? clojure.lang.ExceptionInfo
