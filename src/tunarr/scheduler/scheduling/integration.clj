@@ -46,16 +46,39 @@
 ;; CatalogProfile (Pseudovision → snake_case → Tunabrain / feasibility)
 ;; ---------------------------------------------------------------------------
 
+(defn- warn-unfiltered-profile!
+  "Sanity-check a tag-scoped aggregate against the tag that was requested. Media
+   is mapped to a channel in Pseudovision by a `channel:<slug>` tag, so the
+   scheduler scopes the aggregate with `:tag \"channel:<slug>\"`. When that
+   filter is honoured every show in the profile carries the tag; if Pseudovision
+   silently returns the full library instead, the profile's shows won't. That
+   mismatch is otherwise invisible downstream — Tunabrain just sees a larger
+   candidate set and picks off-channel content — so surface it here. Logging
+   only; the profile is still returned (Pseudovision is the source of truth), and
+   the check is skipped when the aggregate carries no per-show `:shows` to judge."
+  [{:keys [tag]} {:keys [shows total_items]}]
+  (when (and tag (seq shows))
+    (let [tagged   (filter #(some #{tag} (:tags %)) shows)
+          off-pool (- (count shows) (count tagged))]
+      (when (pos? off-pool)
+        (log/warn "catalog profile includes shows missing the requested channel tag — pseudovision may have ignored the filter"
+                  {:requested-tag tag
+                   :total-items total_items
+                   :shows-returned (count shows)
+                   :shows-with-tag (count tagged)
+                   :shows-off-pool off-pool})))))
+
 (defn fetch-catalog-profile
   "Fetch Pseudovision's catalog aggregate and assemble a snake_case
    CatalogProfile. `opts` are the client's :channel / :tag selectors. Logs (but
-   does not reject) a profile that fails contract validation — Pseudovision is
-   the source of truth."
+   does not reject) a profile that fails contract validation, or one that ignored
+   the requested channel/tag filter — Pseudovision is the source of truth."
   [pv-config & [opts]]
   (let [profile (->snake (pv/get-catalog-aggregate pv-config opts))]
     (when-let [errs (contracts/humanize contracts/CatalogProfile profile)]
       (log/warn "catalog profile from pseudovision failed contract validation"
                 {:errors errs}))
+    (warn-unfiltered-profile! opts profile)
     profile))
 
 ;; ---------------------------------------------------------------------------

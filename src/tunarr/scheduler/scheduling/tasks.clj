@@ -36,6 +36,17 @@
   {:name        (::media/channel-fullname cfg)
    :description (::media/channel-description cfg)})
 
+(defn- channel-catalog-tag
+  "The catalog-aggregate filter tag for a channel, `channel:<slug>`. In
+   Pseudovision a media item belongs to a channel by carrying this tag (synced
+   from the `channel` dimension by media.pseudovision-sync), so scoping the
+   aggregate by this tag is what actually narrows the profile to the channel's
+   pool. `channel-key` is the channel's config key — the slug (e.g.
+   :goldenreels), which is the channel dimension's value — not the display-name
+   fullname."
+  [channel-key]
+  (str "channel:" (name channel-key)))
+
 (defn- uuid->pv-id
   "Map of Pseudovision channel UUID → integer id. The /api/channels records use
    plain :uuid / :id keys (we also accept table-qualified :channels/* keys
@@ -112,7 +123,8 @@
     (into {}
           (for [[channel-key cfg] channels]
             [channel-key
-             (try (orch/run-monthly! comps (channel-spec cfg) month)
+             (try (orch/run-monthly! comps (channel-spec cfg) month
+                                     :catalog-tag (channel-catalog-tag channel-key))
                   (catch Exception e
                     (log/error e "task: monthly overrides failed" {:channel channel-key})
                     {:error (util/error-message e)}))]))))
@@ -130,7 +142,8 @@
     (into {}
           (for [[channel-key cfg] channels]
             [channel-key
-             (try (orch/run-quarterly! comps (channel-spec cfg) quarter year)
+             (try (orch/run-quarterly! comps (channel-spec cfg) quarter year
+                                       :catalog-tag (channel-catalog-tag channel-key))
                   (catch Exception e
                     (log/error e "task: quarterly grid failed" {:channel channel-key})
                     {:error (util/error-message e)}))]))))
