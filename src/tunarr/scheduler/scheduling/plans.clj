@@ -7,7 +7,7 @@
    air, plus the operator's guidance."
   (:require [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.expander :as expander])
-  (:import [java.time LocalDate]
+  (:import [java.time LocalDate ZoneId]
            [java.time.format DateTimeFormatter]))
 
 (def ^:private month-fmt (DateTimeFormatter/ofPattern "yyyy-MM"))
@@ -45,7 +45,16 @@
          distinct
          vec)))
 
-(defn today [] (LocalDate/now))
+(defn today
+  "Today's calendar date, resolved in the JVM's default zone — which is set from
+   the `TZ` environment variable. This is the zone the weekly/monthly/quarterly
+   windows and the naive DailySlot wall-clock times are anchored in, and
+   Pseudovision interprets those naive times in *its* `TZ`, so the scheduler and
+   Pseudovision MUST run with the same `TZ` for the days/times to line up. The
+   zone is named explicitly (rather than the implicit `LocalDate/now`) so this
+   dependency is visible; pass a `ZoneId` to override."
+  ([] (today (ZoneId/systemDefault)))
+  ([^ZoneId zone] (LocalDate/now zone)))
 
 ;; ---------------------------------------------------------------------------
 ;; Reads
