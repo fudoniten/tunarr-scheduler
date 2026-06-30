@@ -2,6 +2,7 @@
   "Tests for the Pseudovision boundary: kebab↔snake conversion, CatalogProfile
    assembly, and DailySlot publication (with the PV client stubbed)."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
+            [taoensso.timbre :as log]
             [next.jdbc :as jdbc]
             [tunarr.scheduler.sql.executor :as executor]
             [tunarr.scheduler.scheduling.storage :as storage]
@@ -65,6 +66,45 @@
         (is (= {:channel "Classic Comedy"} @capture))
         (is (= 100 (:total_items profile)))
         (is (nil? (c/humanize c/CatalogProfile profile)))))))
+
+(defn- capture-warnings
+  "Run (f) with timbre warnings captured via a temporary appender; returns the
+   vector of warn arg-lists (each the raw :vargs passed to log/warn)."
+  [f]
+  (let [warnings (atom [])]
+    (log/with-merged-config
+      {:appenders {:capture {:enabled?  true
+                             :min-level :warn
+                             :fn        (fn [{:keys [level vargs]}]
+                                          (when (= :warn level)
+                                            (swap! warnings conj (vec vargs))))}}}
+      (f))
+    @warnings))
+
+(defn- ignored-filter-warned? [warnings]
+  (some (fn [args]
+          (some #(and (string? %) (re-find #"ignored the filter" %)) args))
+        warnings))
+
+(deftest ^:eftest/synchronized fetch-catalog-profile-warns-when-tag-filter-ignored
+  (testing "a tag filter whose shows don't all carry the tag is flagged"
+    ;; pv-catalog-aggregate's lone show carries channel:comedy, not channel:drama
+    (let [warnings (capture-warnings
+                    #(with-redefs [pv/get-catalog-aggregate (fn [_cfg _opts] pv-catalog-aggregate)]
+                       (integ/fetch-catalog-profile ::cfg {:tag "channel:drama"})))]
+      (is (ignored-filter-warned? warnings)
+          "expected a warning when returned shows lack the requested channel tag")))
+  (testing "a tag filter whose shows all carry the tag is not flagged"
+    (let [warnings (capture-warnings
+                    #(with-redefs [pv/get-catalog-aggregate (fn [_cfg _opts] pv-catalog-aggregate)]
+                       (integ/fetch-catalog-profile ::cfg {:tag "channel:comedy"})))]
+      (is (not (ignored-filter-warned? warnings)))))
+  (testing "no shows in the aggregate means nothing to judge — no warning"
+    (let [warnings (capture-warnings
+                    #(with-redefs [pv/get-catalog-aggregate
+                                   (fn [_cfg _opts] (dissoc pv-catalog-aggregate :shows))]
+                       (integ/fetch-catalog-profile ::cfg {:tag "channel:drama"})))]
+      (is (not (ignored-filter-warned? warnings))))))
 
 ;; ---------------------------------------------------------------------------
 ;; publish-daily-slots! (snake → kebab on the wire)
