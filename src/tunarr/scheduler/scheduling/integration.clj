@@ -88,10 +88,22 @@
                     {:channel channel :start (str start) :end (str end)})
           {:channel channel :pv-channel-id pv-channel-id
            :start (str start) :end (str end) :skipped :no-grid})
-      (let [result (publish-daily-slots! pv-config pv-channel-id slots)]
-        (log/info "publish-week!: pushed daily slots"
-                  {:channel channel :pv-channel-id pv-channel-id
-                   :slot-count (count slots) :result result})
+      (let [result    (publish-daily-slots! pv-config pv-channel-id slots)
+            ingested  (:ingested result)
+            skipped   (:skipped result)]
+        ;; Pseudovision returns 200 even when it rejects every slot (each goes
+        ;; into :skipped with an :errors entry), so a publish that ingested
+        ;; nothing is a real failure that would otherwise hide under INFO. Warn,
+        ;; and surface a small de-duped sample of the reasons (the full list can
+        ;; be hundreds long — one per slot).
+        (if (and (some? ingested) (zero? ingested) (pos? (count slots)))
+          (log/warn "publish-week!: pushed daily slots but NONE were ingested"
+                    {:channel channel :pv-channel-id pv-channel-id
+                     :slot-count (count slots) :skipped skipped
+                     :error-sample (vec (take 5 (distinct (:errors result))))})
+          (log/info "publish-week!: pushed daily slots"
+                    {:channel channel :pv-channel-id pv-channel-id
+                     :slot-count (count slots) :result result}))
         {:channel channel :pv-channel-id pv-channel-id
          :start (str start) :end (str end)
          :slot-count (count slots) :result result}))))
