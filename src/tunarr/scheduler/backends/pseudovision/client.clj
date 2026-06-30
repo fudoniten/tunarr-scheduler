@@ -625,10 +625,25 @@
    range first, so the push is idempotent for that range. Returns the
    DailySlotIngestResult ({:ingested :skipped :errors :channel-id})."
   [config channel-id slots]
-  (request! :post
-            (api-url config (str "/api/channels/" channel-id "/daily-slots"))
-            {:content-type :json
-             :body (json/generate-string slots)}))
+  (let [body (json/generate-string slots)
+        url  (api-url config (str "/api/channels/" channel-id "/daily-slots"))]
+    ;; Diagnostic: log exactly what goes on the wire so a rejection like
+    ;; "Missing start_time" can be traced to the request body (key names,
+    ;; value formats, envelope) rather than guessed at. `first-slot` is the
+    ;; raw map (does it even carry :start_time?); `body-sample` is the actual
+    ;; serialized JSON PV parses.
+    (log/info "push-daily-slots!: request"
+              {:url url
+               :channel-id channel-id
+               :slot-count (count slots)
+               :first-slot (first slots)
+               :body-length (count body)
+               :body-sample (subs body 0 (min 800 (count body)))})
+    (let [resp (request! :post url
+                         {:content-type :json
+                          :body body})]
+      (log/info "push-daily-slots!: response" {:channel-id channel-id :response resp})
+      resp)))
 
 ;; ---------------------------------------------------------------------------
 ;; Health & Version
