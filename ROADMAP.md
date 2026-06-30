@@ -159,9 +159,7 @@ against the contracts before insert and round-trips exactly.
     components map (defaulting to the real impls), so tests stub without global
     redefs. `orchestration_test.clj` (7 tests).
   - **Weekly** publish lives in `integration/publish-week!` (expand stored grid +
-    overrides → snake_case `DailySlot[]` → `POST /daily-slots`; no Tunabrain
-    call — that endpoint validates the snake_case field names, so slots are sent
-    unconverted).
+    overrides → kebab-case → `POST /daily-slots`; no Tunabrain call).
   - **Daily** horizon extension is unchanged (old `tasks.clj`).
 - **Cron wiring DONE:** `tasks.clj` rewritten to drive the new pipeline per
   channel — `run-daily!` (horizon), `run-weekly!` (expand + publish via
