@@ -190,7 +190,10 @@
   [executor llm-config channels period]
   (log/info "Generating strategy" {:period period})
   (let [channel-names (map (fn [[k _]] (name k)) channels)
-        now (str (ZonedDateTime/now (ZoneId/of "UTC")))
+        ;; Local wall-clock "now" (JVM default zone = TZ) for the prompt, rather
+        ;; than a hardcoded UTC, so the date the LLM sees matches the operator's
+        ;; (and Pseudovision's) zone.
+        now (str (ZonedDateTime/now (ZoneId/systemDefault)))
         timeframe (case period
                     :monthly "next month"
                     :quarterly "next quarter"

@@ -598,10 +598,9 @@
 ;; ---------------------------------------------------------------------------
 ;; Layered-grid scheduling: catalog aggregate + daily-slot ingestion
 ;;
-;; The catalog-aggregate GET speaks kebab-case on the wire; the daily-slots
-;; ingest POST validates the snake_case DailySlot field names (start_time, …)
-;; and is sent as-is. Case conversion for the aggregate lives in
-;; tunarr.scheduler.scheduling.integration.
+;; Pseudovision normalises all JSON keys to kebab-case in both directions, so
+;; these speak kebab-case on the wire. Case conversion to/from the snake_case
+;; scheduling contracts lives in tunarr.scheduler.scheduling.integration.
 ;; ---------------------------------------------------------------------------
 
 (defn get-catalog-aggregate
@@ -619,9 +618,8 @@
                              tag     (assoc "tag" tag))}))
 
 (defn push-daily-slots!
-  "POST /api/channels/:channel-id/daily-slots — ingest a snake_case DailySlot
-   vector (the contracts/DailySlot shape: start_time, end_time, media_id, …).
-   Pseudovision clears existing non-manual events in the slots' date
+  "POST /api/channels/:channel-id/daily-slots — ingest a kebab-case DailySlot
+   vector. Pseudovision clears existing non-manual events in the slots' date
    range first, so the push is idempotent for that range. Returns the
    DailySlotIngestResult ({:ingested :skipped :errors :channel-id})."
   [config channel-id slots]

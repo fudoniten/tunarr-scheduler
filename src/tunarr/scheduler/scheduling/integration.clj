@@ -8,11 +8,9 @@
    • fetch-catalog-profile — GET the aggregate (kebab-case on the wire),
      convert to a snake_case CatalogProfile (contracts/CatalogProfile) for
      Tunabrain + the feasibility checker.
-   • publish-daily-slots! / publish-week! — POST the expander's snake_case
-     DailySlots to Pseudovision's daily-slots ingest endpoint (the weekly
-     deterministic step; no Tunabrain call). Unlike the catalog aggregate,
-     that endpoint validates snake_case field names (start_time, …), so the
-     slots are sent as-is — see push-daily-slots! in the PV client."
+   • publish-daily-slots! / publish-week! — convert the expander's snake_case
+     DailySlots to kebab-case and POST them to Pseudovision (the weekly
+     deterministic step; no Tunabrain call)."
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [taoensso.timbre :as log]
@@ -65,17 +63,18 @@
 ;; ---------------------------------------------------------------------------
 
 (defn publish-daily-slots!
-  "POST snake_case DailySlots (expander output) to a channel's daily-slots
-   ingest endpoint. `channel-id` is Pseudovision's integer id or a
+  "Convert snake_case DailySlots (expander output) to Pseudovision's kebab-case
+   and POST them to a channel. `channel-id` is Pseudovision's integer id or a
    channel-number string. Returns the DailySlotIngestResult.
 
-   The slots are sent in snake_case (the contracts/DailySlot shape the expander
-   already emits): the ingest endpoint validates `start_time`/`end_time`/… by
-   their snake_case names. (This differs from the catalog-aggregate GET, which
-   is kebab-case — do NOT run ->kebab here, or every slot is rejected with
-   \"Missing start_time\".)"
+   Sent in kebab-case to match the rest of the Pseudovision wire protocol (the
+   catalog-aggregate GET is kebab-case too). NOTE: as of this writing the PV
+   daily-slots ingest endpoint rejects every slot with \"Missing start_time\"
+   regardless of whether keys are sent kebab- or snake-cased — a PV-side defect
+   tracked separately; the request body itself is correct (see push-daily-slots!
+   logging)."
   [pv-config channel-id slots]
-  (pv/push-daily-slots! pv-config channel-id (vec slots)))
+  (pv/push-daily-slots! pv-config channel-id (mapv ->kebab slots)))
 
 (defn publish-week!
   "Expand the channel's stored grid + overrides over [start, end) and push the

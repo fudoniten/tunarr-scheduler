@@ -20,7 +20,10 @@
   ;; Periodic scheduling is driven by external Kubernetes CronJobs that POST to
   ;; /api/scheduling/{daily,weekly,monthly,quarterly} (see deploy/k8s), not by
   ;; an in-process scheduler.
-  :scheduler {:time-zone #or [#env TIME_ZONE "UTC"]
+  ;; :time-zone follows TZ (the same env var Pseudovision uses) so the daytime
+  ;; window and Pseudovision stay in one zone; TIME_ZONE is kept as a legacy
+  ;; override and UTC as the last-resort default.
+  :scheduler {:time-zone #or [#env TZ #env TIME_ZONE "UTC"]
               :daytime-hours {:start 6 :end 20}
               :seasonal {:december [:holiday]
                          :october [:spooky]}
