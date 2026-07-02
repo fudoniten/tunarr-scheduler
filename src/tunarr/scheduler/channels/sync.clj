@@ -118,7 +118,7 @@
        :unchanged (count (get by-status :unchanged))
        :pending (count (get by-status :pending))
        :errors (count (get by-status :error))
-       :details results})))
+        :details (vec results)})))
 
 (defn- channels-from-config
   "Extract channels map from system config."

@@ -47,6 +47,23 @@
    [:git-timestamp {:optional true} [:maybe :string]]
    [:version-tag   {:optional true} [:maybe :string]]])
 
+(def BumperFile
+  [:map
+   [:path :string]
+   [:name :string]
+   [:size :int]
+   [:modified :int]])
+
+(def BumperListResponse
+  [:map
+   [:directory :string]
+   [:count :int]
+   [:files [:vector BumperFile]]])
+
+(def BumperJobResponse
+  [:map
+   [:job :any]])
+
 ;; ---------------------------------------------------------------------------
 ;; Jobs
 ;; ---------------------------------------------------------------------------
@@ -62,7 +79,8 @@
    :media/tag-audit
    :media/tag-triage
    :media/scheduling-quarterly
-   :media/scheduling-monthly])
+   :media/scheduling-monthly
+   :generate-bumpers])
 
 ;; NOTE: keep JobType in sync with the job types submitted in
 ;; tunarr.scheduler.http.api.media.
@@ -188,10 +206,12 @@
 
 (def ChannelSyncResponse
   [:map
-   [:channels-synced {:optional true} :int]
-   [:channels-created {:optional true} :int]
-   [:channels-updated {:optional true} :int]
-   [:message         :string]])
+   [:created   {:optional true} :int]
+   [:updated   {:optional true} :int]
+   [:unchanged {:optional true} :int]
+   [:pending   {:optional true} :int]
+   [:errors    {:optional true} :int]
+   [:details   {:optional true} [:vector [:map {:closed false}]]]])
 
 (def ChannelScheduleInfoResponse
   "Current schedule state for a channel."

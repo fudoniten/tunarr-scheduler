@@ -15,7 +15,8 @@
             [tunarr.scheduler.http.api.browse       :as browse]
             [tunarr.scheduler.http.api.strategy     :as strategy]
             [tunarr.scheduler.http.api.scheduling   :as scheduling]
-            [tunarr.scheduler.http.api.plans        :as plans]))
+            [tunarr.scheduler.http.api.plans        :as plans]
+            [tunarr.scheduler.http.api.bumpers      :as bumpers]))
 
 ;; ---------------------------------------------------------------------------
 ;; Basic handlers
@@ -523,7 +524,7 @@
                                 500 {:body s/APIError}}
                    :handler    (plans/put-guidance-handler ctx)}}]
 
-    ;; ── Jobs ────────────────────────────────────────────────────────────────
+     ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
      {:tags ["jobs"]
       :get  {:summary   "List all async jobs"
@@ -536,7 +537,27 @@
       :get        {:summary   "Get job status and details"
                    :responses {200 {:body s/JobInfoResponse}
                                404 {:body s/APIError}}
-                   :handler   (jobs/get-job-handler ctx)}}]])
+                   :handler   (jobs/get-job-handler ctx)}}]
+
+    ;; ── Bumpers ──────────────────────────────────────────────────────────────
+    ["/api/bumpers"
+     {:tags ["bumpers"]
+      :get  {:summary   "List generated bumpers"
+             :responses {200 {:body s/BumperListResponse}
+                         503 {:body s/APIError}}
+             :handler   (bumpers/list-bumpers-handler ctx)}}]
+
+    ["/api/bumpers/generate"
+     {:tags       ["bumpers"]
+      :parameters {:query [:map
+                           [:channel [:string {:min 1}]]
+                           [:count {:optional true} :string]
+                           [:durations {:optional true} :string]]}
+      :post       {:summary   "Trigger async bumper generation for a channel"
+                   :responses {202 {:body s/BumperJobResponse}
+                               400 {:body s/APIError}
+                               503 {:body s/APIError}}
+                   :handler   (bumpers/generate-bumpers-handler ctx)}}]])
 
 ;; ---------------------------------------------------------------------------
 ;; Handler creation with middleware

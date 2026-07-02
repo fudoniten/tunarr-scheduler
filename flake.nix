@@ -56,10 +56,14 @@
             name = "tunarr-scheduler";
             repo = "registry.kube.sea.fudo.link";
             tags = [ "latest" version.versionTag ];
+            # Keep ffmpeg on PATH so the bumper generation service can resolve
+            # a bare "ffmpeg" invocation (see tunarr.scheduler.bumpers).
+            pathEnv = with pkgs; [ ffmpeg ];
             env = {
               GIT_COMMIT = version.gitCommit;
               GIT_TIMESTAMP = version.gitTimestamp;
               VERSION = version.versionTag;
+              FFMPEG_PATH = "${pkgs.ffmpeg}/bin/ffmpeg";
             };
             entrypoint =
               let tunarrScheduler = self.packages."${system}".tunarrScheduler;

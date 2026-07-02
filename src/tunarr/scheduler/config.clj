@@ -99,6 +99,12 @@
                        (update-key :name ::media/channel-fullname identity))]))
         (get config :channels {})))
 
+(defn- resolve-bumpers-config
+  "Resolve bumper config, applying env-var overrides."
+  [config]
+  (-> (get config :bumpers {})
+      (replace-envvar :music-library-dir "BUMPER_MUSIC_DIR")))
+
 (defn config->system
   "Produce the Integrant system configuration map from the raw config map."
   [config]
@@ -110,45 +116,50 @@
         categories-config (get config :categories {})
         channel-config (resolve-channel-config config)
         backends-config (get config :backends {})
-        pseudovision-config (get config :pseudovision {})]
+        pseudovision-config (get config :pseudovision {})
+        bumpers-config (resolve-bumpers-config config)]
     {:tunarr/logger {:level (get config :log-level :info)}
-     :tunarr/job-runner (get config :jobs {})
-     :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
-     :tunarr/tunabrain (:tunabrain config)
-     :tunarr/llm (get config :llm {:provider :mock})
-     :tunarr/pseudovision pseudovision-config
-     :tunarr/backends backends-config
-     ;; TODO: Add tts, media-source, tunarr-source, scheduler, and bumpers configs when implemented
-     :tunarr/collection collection-config
-     :tunarr/catalog catalog-config
-     :tunarr/curation {:libraries (keys (get collection-config :libraries))
-                       :tunabrain (ig/ref :tunarr/tunabrain)
-                       :catalog   (ig/ref :tunarr/catalog)
-                       :throttler (ig/ref :tunarr/tunabrain-throttler)
-                       :config    (merge curation-config
-                                         {:libraries (keys (:libraries collection-config))
-                                          :channels  channel-config
-                                          :categories categories-config})}
-     :tunarr/config-sync {:channels channel-config
-                          :collection-config collection-config
-                          :catalog (ig/ref :tunarr/catalog)}
-     :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
-                             :tag-config tag-config}
-      :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
-                                     (or (get-in config [:server :port]))
-                                     (parse-port))
-                           :job-runner (ig/ref :tunarr/job-runner)
-                            :tunabrain (ig/ref :tunarr/tunabrain)
-                            :throttler (ig/ref :tunarr/tunabrain-throttler)
-                            :llm (ig/ref :tunarr/llm)
-                            :collection (ig/ref :tunarr/collection)
-                            :catalog (ig/ref :tunarr/catalog)
-                            :backends (ig/ref :tunarr/backends)
-                            :pseudovision (ig/ref :tunarr/pseudovision)
-                            :channels channel-config
-                            :logger (ig/ref :tunarr/logger)
-                            :curation-config (merge curation-config
-                                                    {:channels  channel-config
-                                                     :categories categories-config})
-                            ;; TODO: Add media, tts, bumpers, tunarr refs when implemented
-                            }}))
+      :tunarr/job-runner (get config :jobs {})
+      :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
+      :tunarr/tunabrain (:tunabrain config)
+      :tunarr/pseudovision pseudovision-config
+       :tunarr/backends backends-config
+       :tunarr/llm (get config :llm {:provider :mock})
+        ;; TODO: Add tts, media-source, tunarr-source, scheduler configs when implemented
+        :tunarr/bumpers (assoc bumpers-config
+                                :tunabrain (ig/ref :tunarr/tunabrain)
+                                :jellyfin (:jellyfin config)
+                                :pseudovision-url (get-in config [:pseudovision :base-url]))
+      :tunarr/collection collection-config
+      :tunarr/catalog catalog-config
+      :tunarr/curation {:libraries (keys (get collection-config :libraries))
+                        :tunabrain (ig/ref :tunarr/tunabrain)
+                        :catalog   (ig/ref :tunarr/catalog)
+                        :throttler (ig/ref :tunarr/tunabrain-throttler)
+                        :config    (merge curation-config
+                                          {:libraries (keys (:libraries collection-config))
+                                           :channels  channel-config
+                                           :categories categories-config})}
+      :tunarr/config-sync {:channels channel-config
+                           :collection-config collection-config
+                           :catalog (ig/ref :tunarr/catalog)}
+      :tunarr/normalize-tags {:catalog (ig/ref :tunarr/catalog)
+                              :tag-config tag-config}
+       :tunarr/http-server {:port (-> (System/getenv "TUNARR_SCHEDULER_PORT")
+                                      (or (get-in config [:server :port]))
+                                      (parse-port))
+                            :job-runner (ig/ref :tunarr/job-runner)
+                             :tunabrain (ig/ref :tunarr/tunabrain)
+                             :throttler (ig/ref :tunarr/tunabrain-throttler)
+                             :llm (ig/ref :tunarr/llm)
+                             :collection (ig/ref :tunarr/collection)
+                             :catalog (ig/ref :tunarr/catalog)
+                             :backends (ig/ref :tunarr/backends)
+                             :pseudovision (ig/ref :tunarr/pseudovision)
+                             :channels channel-config
+                             :logger (ig/ref :tunarr/logger)
+                             :curation-config (merge curation-config
+                                                     {:channels  channel-config
+                                                      :categories categories-config})
+                              :bumpers (ig/ref :tunarr/bumpers)
+                             }}))

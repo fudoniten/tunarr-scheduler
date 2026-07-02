@@ -13,9 +13,10 @@
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
              [tunarr.scheduler.tunabrain :as tunabrain]
-            [tunarr.scheduler.llm :as llm]
-            [tunarr.scheduler.backends.protocol :as backend-protocol]
-            [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
+             [tunarr.scheduler.llm :as llm]
+             [tunarr.scheduler.bumpers :as bumpers]
+             [tunarr.scheduler.backends.protocol :as backend-protocol]
+             [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
 
 (defmethod ig/init-key :tunarr/logger [_ {:keys [level]}]
   (log/set-level! level)
@@ -200,14 +201,17 @@
 ;; /api/scheduling/{daily,weekly,monthly,quarterly} (see deploy/k8s), so there
 ;; is no in-process scheduler component.
 
-;; TODO: Implement bumpers service for generating inter-program content
-(defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain tts]}]
-  (log/info "bumpers service initialization disabled (not yet implemented)")
-  nil)
+(defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain music-library-dir output-dir jellyfin pseudovision-url]}]
+  (log/info "initialising bumper service")
+  (bumpers/create-service {:tunabrain tunabrain
+                            :music-library-dir music-library-dir
+                            :output-dir output-dir
+                            :jellyfin jellyfin
+                            :pseudovision-url pseudovision-url}))
 
 (defmethod ig/halt-key! :tunarr/bumpers [_ svc]
-  (log/info "bumpers service shutdown disabled (not yet implemented)")
-  nil)
+  (log/info "shutting down bumper service")
+  (bumpers/close! svc))
 
 (defmethod ig/init-key :tunarr/llm [_ {:keys [provider endpoint api-key model] :as config}]
   (log/info "initialising llm client" {:provider provider :model model})
@@ -228,7 +232,8 @@
                 :backends backends
                 :pseudovision pseudovision
                 :channels channels
-                :curation-config curation-config}))
+                :curation-config curation-config
+                :bumpers bumpers}))
 
 (defmethod ig/halt-key! :tunarr/http-server [_ server]
   (http/stop! server))

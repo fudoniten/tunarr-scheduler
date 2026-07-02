@@ -401,6 +401,35 @@
         (warn-if-invalid contracts/ScheduleOverride o :override))
       (assoc response :overrides overrides))))
 
+(defn generate-bumper!
+  "Ask Tunabrain to generate a bumper image for a channel.
+
+   Returns a map with:
+     :title          — Bumper title
+     :script         — The image-generation prompt (script)
+     :duration       — Target duration in seconds
+     :image-base64   — Base64-encoded PNG image data
+
+   Throws on API error."
+  [client channel-name channel-description duration-secs & {:keys [theme focus-window]}]
+  (let [response (json-post! client "/bumpers"
+                             {:channel {:name channel-name
+                                        :description channel-description}
+                              :schedule_overview ""
+                              :duration_seconds duration-secs
+                              :focus_window (or focus-window "")
+                              :theme (or theme "")
+                              :debug false}
+                             :timeout-ms 120000)]
+    (when (or (nil? (:bumpers response)) (empty? (:bumpers response)))
+      (throw (ex-info "tunabrain /bumpers returned no bumpers"
+                      {:response response})))
+    (let [bumper (first (:bumpers response))]
+      {:title (:title bumper)
+       :script (:script bumper)
+       :duration (:duration_seconds bumper)
+       :image-base64 (:image_base64 bumper)})))
+
 (defn create!
   "Create a tunabrain client from configuration.
 

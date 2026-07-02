@@ -102,7 +102,8 @@
                  (not pv-id)                    :not-found
                  :else
                  (try
-                   (integ/publish-week! executor conf channel pv-id (str start) (str end))
+                    (integ/publish-week! executor conf channel pv-id (str start) (str end)
+                                         :channel-tag (channel-catalog-tag channel-key))
                    (catch Exception e
                      (log/error e "task: weekly publish failed" {:channel channel-key})
                      {:error (util/error-message e)})))])))))

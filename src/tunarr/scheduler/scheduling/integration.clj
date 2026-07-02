@@ -90,28 +90,34 @@
    and POST them to a channel. `channel-id` is Pseudovision's integer id or a
    channel-number string. Returns the DailySlotIngestResult.
 
-   Sent in kebab-case to match the rest of the Pseudovision wire protocol (the
-   catalog-aggregate GET is kebab-case too). NOTE: as of this writing the PV
-   daily-slots ingest endpoint rejects every slot with \"Missing start_time\"
-   regardless of whether keys are sent kebab- or snake-cased — a PV-side defect
-   tracked separately; the request body itself is correct (see push-daily-slots!
-   logging)."
-  [pv-config channel-id slots]
-  (pv/push-daily-slots! pv-config channel-id (mapv ->kebab slots)))
+   If `channel-tag` is supplied, it is prepended to every slot's
+   `:category_filters` so that `random:<genre>` resolution is scoped to the
+   channel's own media pool rather than the entire catalog.
+
+   Sent in kebab-case to match the rest of the Pseudovision wire protocol."
+  [pv-config channel-id slots & {:keys [channel-tag]}]
+  (let [tagged (if channel-tag
+                 (mapv #(update % :category_filters
+                                (fn [f] (vec (cons channel-tag (remove #{channel-tag} f))))) slots)
+                 slots)]
+    (pv/push-daily-slots! pv-config channel-id (mapv ->kebab tagged))))
 
 (defn publish-week!
   "Expand the channel's stored grid + overrides over [start, end) and push the
    resulting DailySlots to Pseudovision. The deterministic weekly step: no
    Tunabrain call. Returns {:channel :pv-channel-id :start :end :slot-count
-   :result}, or {:skipped :no-grid} when no grid is frozen for the window."
-  [ex pv-config channel pv-channel-id start end]
+   :result}, or {:skipped :no-grid} when no grid is frozen for the window.
+
+   `channel-tag` (optional, e.g. \"channel:hua\") is injected into every slot's
+   `:category_filters` so random resolution stays scoped to the channel pool."
+  [ex pv-config channel pv-channel-id start end & {:keys [channel-tag]}]
   (let [{:keys [grid_id slots]} (plans/preview ex channel start end)]
     (if (nil? grid_id)
       (do (log/info "publish-week!: no frozen grid; skipping"
                     {:channel channel :start (str start) :end (str end)})
           {:channel channel :pv-channel-id pv-channel-id
            :start (str start) :end (str end) :skipped :no-grid})
-      (let [result (publish-daily-slots! pv-config pv-channel-id slots)]
+      (let [result (publish-daily-slots! pv-config pv-channel-id slots :channel-tag channel-tag)]
         (log/info "publish-week!: pushed daily slots"
                   {:channel channel :pv-channel-id pv-channel-id
                    :slot-count (count slots) :result result})
