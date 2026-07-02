@@ -106,15 +106,19 @@
                    (- target-secs fade-out)
                    fade-out)
 
+        ;; -stream_loop -1 repeats the audio input so a track shorter than the
+        ;; target still fills the whole bumper; -t is the single duration
+        ;; authority. We deliberately drop -shortest: with a looped (infinite)
+        ;; image and looped audio, -shortest would otherwise let a short track
+        ;; truncate the bumper below target-secs.
         cmd ["ffmpeg" "-y"
              "-loop" "1" "-i" image-path
-             "-i" music-path
+             "-stream_loop" "-1" "-i" music-path
              "-vf" vf
              "-af" af
              "-c:v" "libx264" "-pix_fmt" "yuv420p"
              "-c:a" "aac" "-b:a" "192k"
              "-ar" "48000" "-ac" "2"
-             "-shortest"
              "-t" (str target-secs)
              dest-path]
 
