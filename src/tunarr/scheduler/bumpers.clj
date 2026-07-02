@@ -50,11 +50,6 @@
            (map #(.getAbsolutePath %))
            vec))))
 
-(defn- duration-bucket
-  "Round a target duration to the nearest standard bucket."
-  [target-secs]
-  (apply min-key #(Math/abs (- % target-secs)) default-durations))
-
 (defn- select-music-track
   "Pick a random music track from the library.
    In the future this could be mood-matched; for now it's random."
@@ -414,11 +409,10 @@
 (defn- default-output-dir
   "Return the default bumper output directory.
    Prefers BUMPER_OUTPUT_DIR env var, then falls back to /data/media/bumpers
-   (arr-data mount shared with Jellyfin), then user.dir fallback."
+   (the arr-data mount shared with Jellyfin)."
   []
   (or (System/getenv "BUMPER_OUTPUT_DIR")
-      "/data/media/bumpers"
-      (str (System/getProperty "user.dir") "/tunarr-bumpers")))
+      "/data/media/bumpers"))
 
 (defn create-service
   "Create the bumper generation service from system config.
@@ -448,6 +442,3 @@
   "No-op shutdown — bumper service is stateless."
   [_]
   (log/info "Closing bumper service"))
-
-;; TODO: Implement registration of generated bumpers as Pseudovision media items
-;; TODO: Integrate with job runner for async batch generation
