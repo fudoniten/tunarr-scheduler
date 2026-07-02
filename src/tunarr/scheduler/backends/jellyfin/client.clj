@@ -74,19 +74,30 @@
           (do (log/error "Jellyfin scan trigger failed" {:status status :body body})
               false))))))
 
+(defn- strip-ext
+  "Drop a trailing file extension (e.g. \"foo.mp4\" -> \"foo\")."
+  [s]
+  (str/replace (or s "") #"\.[^./]+$" ""))
+
 (defn find-item-by-name
   "Search for an item in a specific library by its Name field.
-   Returns the first matching item map, or nil."
+   Returns the first matching item map, or nil.
+
+   Jellyfin stores video items with the file extension stripped from :Name, so
+   we search on (and fall back to matching) the extension-less basename while
+   still preferring an exact match when one exists."
   [base-url api-key library-id item-name]
-  (let [{:keys [status body]} (jellyfin-get base-url api-key "/Items"
+  (let [search (strip-ext item-name)
+        {:keys [status body]} (jellyfin-get base-url api-key "/Items"
                                             {:query-params
                                              {:ParentId library-id
-                                              :SearchTerm item-name
+                                              :SearchTerm search
                                               :Limit 10
                                               :Fields "Id,Name,Path"}})]
     (when (= 200 status)
       (let [items (get body :Items [])]
-        (first (filter #(= item-name (:Name %)) items))))))
+        (or (first (filter #(= item-name (:Name %)) items))
+            (first (filter #(= search (strip-ext (:Name %))) items)))))))
 
 (defn create-library
   "Create a new Jellyfin library (virtual folder).

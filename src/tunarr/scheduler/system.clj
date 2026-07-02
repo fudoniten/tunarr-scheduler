@@ -12,11 +12,11 @@
             [tunarr.scheduler.curation.tags :as tag-curator]
             [tunarr.scheduler.curation.core :as curation]
             [tunarr.scheduler.jobs.throttler :as job-throttler]
-             [tunarr.scheduler.tunabrain :as tunabrain]
-             [tunarr.scheduler.llm :as llm]
-             [tunarr.scheduler.bumpers :as bumpers]
-             [tunarr.scheduler.backends.protocol :as backend-protocol]
-             [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
+            [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.llm :as llm]
+            [tunarr.scheduler.bumpers :as bumpers]
+            [tunarr.scheduler.backends.protocol :as backend-protocol]
+            [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
 
 (defmethod ig/init-key :tunarr/logger [_ {:keys [level]}]
   (log/set-level! level)
@@ -204,10 +204,10 @@
 (defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain music-library-dir output-dir jellyfin pseudovision-url]}]
   (log/info "initialising bumper service")
   (bumpers/create-service {:tunabrain tunabrain
-                            :music-library-dir music-library-dir
-                            :output-dir output-dir
-                            :jellyfin jellyfin
-                            :pseudovision-url pseudovision-url}))
+                           :music-library-dir music-library-dir
+                           :output-dir output-dir
+                           :jellyfin jellyfin
+                           :pseudovision-url pseudovision-url}))
 
 (defmethod ig/halt-key! :tunarr/bumpers [_ svc]
   (log/info "shutting down bumper service")
