@@ -524,7 +524,7 @@
                                 500 {:body s/APIError}}
                    :handler    (plans/put-guidance-handler ctx)}}]
 
-     ;; ── Jobs ────────────────────────────────────────────────────────────────
+    ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
      {:tags ["jobs"]
       :get  {:summary   "List all async jobs"

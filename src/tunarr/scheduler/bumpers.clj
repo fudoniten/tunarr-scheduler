@@ -19,9 +19,9 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [taoensso.timbre :as log]
-             [tunarr.scheduler.tunabrain :as tunabrain]
-             [tunarr.scheduler.backends.jellyfin.client :as jellyfin]
-             [tunarr.scheduler.backends.pseudovision.collections :as pv])
+            [tunarr.scheduler.tunabrain :as tunabrain]
+            [tunarr.scheduler.backends.jellyfin.client :as jellyfin]
+            [tunarr.scheduler.backends.pseudovision.collections :as pv])
   (:import [java.util Base64]))
 
 ;; ---------------------------------------------------------------------------
@@ -30,10 +30,11 @@
 
 (def default-durations [5 10 15])
 (def max-bumpers-per-channel 12)
-(def ^:private music-library-dir
-  "Directory containing CC0 music organized by mood subdirectories.
-   Set via :bumpers :music-library-dir in config."
-  "/net/projects/niten/tunarr-scheduler/tools/bumper-music")
+(def ^:private default-music-dir
+  "Fallback directory containing CC0 music organized by mood subdirectories.
+   Lives on the arr-data mount alongside the generated bumpers. Override via
+   the BUMPER_MUSIC_DIR env var or :bumpers :music-library-dir in config."
+  "/data/media/bumper-music")
 
 ;; ---------------------------------------------------------------------------
 ;; Music selection
@@ -203,7 +204,7 @@
   (let [channel-name (:name channel-spec)
         channel-desc (:description channel-spec)
         theme (:theme opts)
-        music-dir (or (:music-library-dir opts) music-library-dir)
+        music-dir (or (:music-library-dir opts) default-music-dir)
 
         ;; Use a channel-specific sub-directory so Jellyfin/PV can organise by channel
         channel-dir (io/file dest-dir (name channel-key))
@@ -432,8 +433,7 @@
       (log/info "Ensured bumper output directory"
                 {:path out-dir :created ok :exists (.exists f)}))
     {:tunabrain tunabrain
-     :music-library-dir (or music-library-dir
-                             (str (System/getProperty "user.dir") "/tools/bumper-music"))
+     :music-library-dir (or music-library-dir default-music-dir)
      :output-dir   out-dir
      :jellyfin     jf-client
      :pseudovision-url pseudovision-url}))
