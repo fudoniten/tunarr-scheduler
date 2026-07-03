@@ -195,7 +195,7 @@
 ;; additionally mark the item dirty; global tag/vocabulary operations, which
 ;; can't enumerate the items they touch, request a reconcile.
 
-(defrecord SyncingCatalog [inner worker]
+(defrecord SyncingCatalog [inner worker executor]
   catalog/Catalog
   ;; --- reads / non-syncing writes: pure delegation ---
   (add-media! [_ media] (catalog/add-media! inner media))
@@ -270,10 +270,17 @@
 
 (defn wrap-catalog
   "Wrap `inner` so tag/category mutations enqueue Pseudovision syncs on
-   `worker`. Returns `inner` unchanged when `worker` is nil."
+   `worker`. Returns `inner` unchanged when `worker` is nil.
+
+   The wrapped record also exposes `:executor` as a pass-through of the
+   inner's `:executor` (when present) so callers that need direct SQL
+   access via keyword lookup — `(:executor catalog)` in scheduling
+   tasks, HTTP handlers, and pseudovision-migration — keep working
+   transparently. The wrapping is otherwise invisible: every Catalog
+   protocol method delegates to `inner`."
   [inner worker]
   (if worker
-    (->SyncingCatalog inner worker)
+    (->SyncingCatalog inner worker (:executor inner))
     inner))
 
 (defn wrapped-worker
