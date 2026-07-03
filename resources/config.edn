@@ -5,9 +5,12 @@
                 ;; Map tunarr-scheduler library names to Pseudovision collection IDs
                 ;; This is optional - if not specified, will create new collections
                 :library-mappings {}}
- :jellyfin {:base-url #or [#env JELLYFIN_URL "http://localhost:8096"]
-            :api-key #or [#env JELLYFIN_API_KEY "change-me"]
-            :library-ids []}
+ ;; Grout — filler-content store. Generated bumpers are staged on the shared
+ ;; mount and uploaded here via the intake API (replacing the old Jellyfin
+ ;; scan → poll → PV-collection registration). Leave :base-url unset (or unset
+ ;; GROUT_URL) to disable upload; generation still runs and stages files.
+ :grout {:base-url #or [#env GROUT_URL nil]}
+ :bumpers {:output-dir #or [#env BUMPER_OUTPUT_DIR #env GROUT_STAGING_DIR "/data/media/grout/staging"]}
  :llm {:provider #or [#env LLM_PROVIDER :mock]
        :model #or [#env LLM_MODEL "gpt-4o"]
        :endpoint #or [#env LLM_ENDPOINT "https://api.openai.com/v1"]

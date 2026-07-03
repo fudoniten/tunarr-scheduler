@@ -17,11 +17,6 @@
 
     :else nil))
 
-(def ^:private default-jellyfin-library
-  "Name of the Jellyfin library that scans bumper files.
-   Override with BUMPER_JELLYFIN_LIBRARY env var."
-  (or (System/getenv "BUMPER_JELLYFIN_LIBRARY") "Bumpers"))
-
 (defn generate-bumpers-handler
   "POST /api/bumpers/generate
 
@@ -74,17 +69,15 @@
                                                       :durations durations-list
                                                       :count target-count})
                                           valid-bumpers (filter some? generated)]
-                                      ;; Batch-register all generated bumpers in Jellyfin + PV
+                                      ;; Upload all generated bumpers to Grout (tagged for PV)
                                       (when (seq valid-bumpers)
                                         (try
-                                          (bumpers/register-bumper-batch!
-                                           (:jellyfin bumpers)
-                                           (:pseudovision-url bumpers)
-                                           (:name channel-spec)
-                                           valid-bumpers
-                                           default-jellyfin-library)
+                                          (bumpers/upload-bumper-batch!
+                                           (:grout bumpers)
+                                           (name channel-key)
+                                           valid-bumpers)
                                           (catch Exception e
-                                            (log/error e "Bumper batch registration failed"
+                                            (log/error e "Bumper batch upload to Grout failed"
                                                        {:channel channel-key :count (count valid-bumpers)}))))
                                       generated)))]
             {:status 202 :body {:job job}}))))))

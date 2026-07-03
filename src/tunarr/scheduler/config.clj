@@ -103,7 +103,17 @@
   "Resolve bumper config, applying env-var overrides."
   [config]
   (-> (get config :bumpers {})
-      (replace-envvar :music-library-dir "BUMPER_MUSIC_DIR")))
+      (replace-envvar :music-library-dir "BUMPER_MUSIC_DIR")
+      (replace-envvar :output-dir "BUMPER_OUTPUT_DIR")))
+
+(defn- resolve-grout-config
+  "Resolve the Grout client config, applying the GROUT_URL env override.
+   Returns nil when no base URL is configured (upload stays disabled)."
+  [config]
+  (let [grout (-> (get config :grout {})
+                  (replace-envvar :base-url "GROUT_URL"))]
+    (when-not (str/blank? (:base-url grout))
+      grout)))
 
 (defn config->system
   "Produce the Integrant system configuration map from the raw config map."
@@ -117,7 +127,8 @@
         channel-config (resolve-channel-config config)
         backends-config (get config :backends {})
         pseudovision-config (get config :pseudovision {})
-        bumpers-config (resolve-bumpers-config config)]
+        bumpers-config (resolve-bumpers-config config)
+        grout-config (resolve-grout-config config)]
     {:tunarr/logger {:level (get config :log-level :info)}
      :tunarr/job-runner (get config :jobs {})
      :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
@@ -128,8 +139,7 @@
      ;; TODO: Add tts, media-source, tunarr-source, scheduler configs when implemented
      :tunarr/bumpers (assoc bumpers-config
                             :tunabrain (ig/ref :tunarr/tunabrain)
-                            :jellyfin (:jellyfin config)
-                            :pseudovision-url (get-in config [:pseudovision :base-url]))
+                            :grout grout-config)
      :tunarr/collection collection-config
      :tunarr/catalog catalog-config
      :tunarr/curation {:libraries (keys (get collection-config :libraries))
