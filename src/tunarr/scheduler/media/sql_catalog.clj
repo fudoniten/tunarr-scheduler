@@ -7,6 +7,7 @@
             [clojure.spec.test.alpha :refer [instrument]]
 
             [honey.sql.helpers :refer [select from where insert-into values on-conflict do-nothing join left-join group-by columns do-update-set delete-from order-by] :as sql]
+            [cheshire.core :as json]
             [next.jdbc :as jdbc]
             [taoensso.timbre :as log])
   (:import java.sql.Array
@@ -343,6 +344,60 @@
       (from :media_categorization)
       (where [:= :category (name dimension)])
       (group-by :category_value)))
+
+;; ---------------------------------------------------------------------------
+;; Per-media grounding context (media_context table)
+;;
+;; `links` is stored as a JSON-encoded array of URL strings (a plain text
+;; column) so the schema stays portable across Postgres and the H2 test DB.
+;; ---------------------------------------------------------------------------
+
+(defn- ->iso
+  "Coerce a SQL timestamp value to an ISO-8601 string, defensively handling the
+   java.sql.Timestamp / java.time types different drivers return."
+  [x]
+  (cond
+    (nil? x)                        nil
+    (instance? java.sql.Timestamp x) (str (.toInstant ^java.sql.Timestamp x))
+    :else                           (str x)))
+
+(defn context-row->map
+  "Convert a media_context row into the internal context map, decoding the
+   JSON-encoded `links` column back into a vector of strings."
+  [{:keys [media_context/text media_context/links media_context/summary
+           media_context/source media_context/operator_edited
+           media_context/updated_at]}]
+  {:text            text
+   :links           (vec (when links (json/parse-string links)))
+   :summary         summary
+   :source          source
+   :operator-edited (boolean operator_edited)
+   :updated-at      (->iso updated_at)})
+
+(defn sql:get-media-context
+  [media-id]
+  (-> (select :media_id :text :links :summary :source :operator_edited :updated_at)
+      (from :media_context)
+      (where [:= :media_id media-id])))
+
+(defn sql:upsert-media-context
+  [media-id {:keys [text links summary source operator-edited]}]
+  (let [row {:media_id        media-id
+             :text            text
+             :links           (json/generate-string (vec (or links [])))
+             :summary         summary
+             :source          source
+             :operator_edited (boolean operator-edited)
+             :updated_at      [:now]}]
+    (-> (insert-into :media_context)
+        (values [row])
+        (on-conflict :media_id)
+        (do-update-set :text :links :summary :source :operator_edited :updated_at))))
+
+(defn sql:delete-media-context
+  [media-id]
+  (-> (delete-from :media_context)
+      (where [:= :media_id media-id])))
 
 (defn tag-exists?
   [executor tag]
@@ -904,6 +959,17 @@
         (merge parent-cats own-cats)
         ;; Non-episode: just own categories
         own-cats)))
+
+  (get-media-context [_ media-id]
+    (some-> (sql:fetch! executor (sql:get-media-context media-id))
+            first
+            context-row->map))
+
+  (set-media-context! [_ media-id context]
+    (sql:exec! executor (sql:upsert-media-context media-id context)))
+
+  (delete-media-context! [_ media-id]
+    (sql:exec! executor (sql:delete-media-context media-id)))
 
   (get-library-id [_ library]
     (some-> (sql:fetch! executor (sql:get-library-id library))

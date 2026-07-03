@@ -33,6 +33,44 @@
   (update-process-timestamp! [_ media-id process]
     (swap! timestamp-log conj {:media-id media-id :process process})))
 
+(defrecord ContextCatalog [state]
+  catalog/Catalog
+  (get-media-context [_ media-id] (get-in @state [media-id]))
+  (set-media-context! [_ media-id context]
+    (swap! state assoc media-id context)))
+
+;; ---------------------------------------------------------------------------
+;; persist-context! — operator-edited context is sticky (handoff §5.3)
+;; ---------------------------------------------------------------------------
+
+(deftest persist-context-stores-auto-captured-context
+  (testing "a response context is stored when the stored context is not operator-edited"
+    (let [state   (atom {})
+          catalog (->ContextCatalog state)]
+      (curate/persist-context! catalog "m1" nil
+                               {:summary "auto" :links [] :source "wikipedia"})
+      (is (= {:summary "auto" :links [] :source "wikipedia" :operator-edited false}
+             (get @state "m1"))
+          "auto-captured context is stored with operator-edited false"))))
+
+(deftest persist-context-does-not-clobber-operator-edits
+  (testing "an operator-edited stored context is left untouched by a re-tag"
+    (let [state   (atom {"m1" {:summary "operator correction" :operator-edited true}})
+          catalog (->ContextCatalog state)]
+      (curate/persist-context! catalog "m1"
+                               {:summary "operator correction" :operator-edited true}
+                               {:summary "fresh wikipedia" :source "wikipedia"})
+      (is (= {:summary "operator correction" :operator-edited true}
+             (get @state "m1"))
+          "operator correction survives — the auto result is discarded"))))
+
+(deftest persist-context-noop-when-no-response-context
+  (testing "nothing is stored when the response carried no context"
+    (let [state   (atom {})
+          catalog (->ContextCatalog state)]
+      (curate/persist-context! catalog "m1" nil nil)
+      (is (= {} @state)))))
+
 (defn- recording-reporter
   "A report-progress fn with the same semantics as the job runner's: maps
    replace the progress state, fns transform it."

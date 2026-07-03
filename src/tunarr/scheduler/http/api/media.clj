@@ -686,6 +686,126 @@
         (log/error e "Error removing dimension value from media item")
         {:status 500 :body {:error (util/error-message e)}}))))
 
+;; ---------------------------------------------------------------------------
+;; Per-item grounding context (view / edit the Tunabrain grounding)
+;;
+;; Tunabrain is stateless: it grounds tagging/categorization on a MediaContext
+;; (a resolved Wikipedia summary, operator notes, or reference links) and
+;; returns whatever it used. The scheduler persists that context per media item
+;; so a bad auto-match is inspectable and correctable. Operator edits here are
+;; marked sticky (operator-edited) so an automatic re-tag will not overwrite
+;; them; the corrected context is sent back on the next retag/recategorize.
+;; ---------------------------------------------------------------------------
+
+(defn- context-response
+  "Build the context response body for a media item."
+  [media-id context]
+  {:media-id media-id
+   :context  context})
+
+(defn get-media-item-context-handler
+  "Return the stored grounding context for a media item (nil when none has been
+   captured yet)."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            {:status 200 :body (context-response catalog-id
+                                                 (catalog/get-media-context catalog catalog-id))})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error fetching media item context")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn set-media-item-context-handler
+  "Replace the stored grounding context for a media item with operator-supplied
+   text / links / summary. Marks the context operator-edited so an automatic
+   re-tag will not clobber it."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            body     (get-in req [:parameters :body])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                context    {:text            (:text body)
+                            :links           (vec (or (:links body) []))
+                            :summary         (:summary body)
+                            :source          "operator"
+                            :operator-edited true}]
+            (catalog/set-media-context! catalog catalog-id context)
+            {:status 200 :body (context-response catalog-id
+                                                 (catalog/get-media-context catalog catalog-id))})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error setting media item context")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn delete-media-item-context-handler
+  "Delete the stored grounding context for a media item entirely. The next
+   retag/recategorize will fall back to Tunabrain's Wikipedia auto-search."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            (catalog/delete-media-context! catalog catalog-id)
+            {:status 200 :body (context-response catalog-id nil)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error deleting media item context")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn add-media-item-context-link-handler
+  "Add a single reference URL to the stored context's link list (merged with
+   any existing links). Marks the context operator-edited."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            link     (get-in req [:parameters :body :link])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                existing   (catalog/get-media-context catalog catalog-id)
+                links      (vec (distinct (conj (vec (:links existing)) link)))
+                context    (assoc existing
+                                  :links links
+                                  :operator-edited true)]
+            (catalog/set-media-context! catalog catalog-id context)
+            {:status 200 :body (context-response catalog-id
+                                                 (catalog/get-media-context catalog catalog-id))})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error adding context link to media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn delete-media-item-context-link-handler
+  "Remove a single reference URL from the stored context's link list. Marks the
+   context operator-edited. A no-op (still 200) when the item has no context or
+   the link is not present."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            link     (get-in req [:parameters :body :link])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                existing   (catalog/get-media-context catalog catalog-id)]
+            (when existing
+              (catalog/set-media-context! catalog catalog-id
+                                          (assoc existing
+                                                 :links (vec (remove #{link} (:links existing)))
+                                                 :operator-edited true)))
+            {:status 200 :body (context-response catalog-id
+                                                 (catalog/get-media-context catalog catalog-id))})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error removing context link from media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
 (defn sync-media-item-pseudovision-handler
   "Sync a single media item's tags to Pseudovision."
   [{:keys [catalog pseudovision]}]

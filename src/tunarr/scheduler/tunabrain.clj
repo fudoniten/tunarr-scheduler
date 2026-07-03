@@ -72,6 +72,33 @@
                  :values (mapv transform-category-value (:values category-def))}]))
         categories))
 
+(defn- context->request
+  "Select the request-relevant MediaContext fields (`text`, `links`, `summary`)
+   from a stored context map for sending to Tunabrain. Internal-only keys
+   (`:source`, `:operator-edited`, `:updated-at`) are dropped, and blank/empty
+   values are omitted so an empty context sends nothing (preserving the legacy
+   Wikipedia auto-search). Field names already match the snake_case wire
+   contract. Returns nil when there is nothing to send."
+  [context]
+  (when context
+    (let [{:keys [text links summary]} context
+          m (cond-> {}
+              (not (str/blank? text))    (assoc :text text)
+              (seq links)                (assoc :links (vec links))
+              (not (str/blank? summary)) (assoc :summary summary))]
+      (when (seq m) m))))
+
+(defn- parse-context
+  "Parse a MediaContext object from a Tunabrain response into the internal
+   representation ({:text :links :summary :source}). Returns nil when the
+   response carried no context (e.g. an older Tunabrain build)."
+  [context]
+  (when (map? context)
+    {:text    (:text context)
+     :links   (vec (or (:links context) []))
+     :summary (:summary context)
+     :source  (:source context)}))
+
 (defn- json-post!
   [^TunabrainClient client path payload & {:keys [timeout-ms]}]
   (let [url (str (:endpoint client) path)
@@ -129,13 +156,20 @@
   request-categorization! for structured dimension-based categorization.
 
   Payload should include the media data and any existing tags so the upstream
-  service can deduplicate as needed."
-  [client media & {:keys [catalog-tags]
+  service can deduplicate as needed.
+
+  `:context`, when provided, is a stored MediaContext map that overrides the
+  upstream Wikipedia auto-search (see handoff §4). The grounding context
+  actually used is returned under `:context` on map responses so it can be
+  persisted and re-sent."
+  [client media & {:keys [catalog-tags context]
                    :or   {catalog-tags []}}]
   (log/debug (format "===== RETAGGING MEDIA:\n%s\n" (with-out-str (pprint media))))
-  (if-let [response (json-post! client "/tags"
-                                {:media         (media-map->tunabrain-format media)
-                                 :existing_tags (mapv name (remove nil? catalog-tags))})]
+  (if-let [response (let [req-ctx (context->request context)]
+                      (json-post! client "/tags"
+                                  (cond-> {:media         (media-map->tunabrain-format media)
+                                           :existing_tags (mapv name (remove nil? catalog-tags))}
+                                    req-ctx (assoc :context req-ctx))))]
     (cond
       (s/valid? (s/coll-of string?) response)
       (do
@@ -153,7 +187,8 @@
                           (count tags) (count filtered_tags)))
         {:tags          (mapv keyword tags)
          :filtered-tags (some->> filtered_tags (mapv keyword))
-         :taglines      taglines})
+         :taglines      taglines
+         :context       (parse-context (:context response))})
 
       :else
       (throw (ex-info "Unexpected tagging response format"
@@ -193,11 +228,18 @@
                      :media-name (::media/name media)}))))
 
 (defn request-categorization!
-  "Fetch dimension-based categorization from tunabrain."
-  [client media & {:keys [categories]}]
-  (if-let [response (json-post! client "/categorize"
-                                {:media      (media-map->tunabrain-format media)
-                                 :categories (categories->tunabrain-format categories)})]
+  "Fetch dimension-based categorization from tunabrain.
+
+  `:context`, when provided, is a stored MediaContext map that overrides the
+  upstream Wikipedia auto-search (see handoff §4). The grounding context
+  actually used is returned under `:context` so it can be persisted and
+  re-sent."
+  [client media & {:keys [categories context]}]
+  (if-let [response (let [req-ctx (context->request context)]
+                      (json-post! client "/categorize"
+                                  (cond-> {:media      (media-map->tunabrain-format media)
+                                           :categories (categories->tunabrain-format categories)}
+                                    req-ctx (assoc :context req-ctx))))]
     (let [{:keys [dimensions]} response]
       (when (nil? dimensions)
         (throw (ex-info "Invalid categorization response: missing 'dimensions' key"
@@ -215,7 +257,8 @@
                                       {::media/category-value (keyword v)
                                        ::media/rationale      (or (get notes-v i) "")})
                                     values)])))
-                         dimensions)})
+                         dimensions)
+       :context   (parse-context (:context response))})
     (throw (ex-info "No response received from tunabrain categorization"
                     {:endpoint (:endpoint client)
                      :media-name (::media/name media)}))))

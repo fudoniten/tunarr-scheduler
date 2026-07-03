@@ -104,19 +104,36 @@
                         description (.getCount latch))))
     finished?))
 
+(defn persist-context!
+  "Persist the grounding context Tunabrain returned for a media item.
+
+   The stored context is left untouched when it was operator-edited: a human
+   correction is sticky and must not be silently clobbered by an automatic
+   re-tag (handoff §5.3). Otherwise the freshly resolved context (the
+   auto-search match or a placeholder) is stored so a bad match is inspectable
+   and the operator can correct it."
+  [catalog media-id stored-context response-context]
+  (when (and response-context
+             (not (:operator-edited stored-context)))
+    (catalog/set-media-context! catalog media-id
+                                (assoc response-context :operator-edited false))))
+
 (defn retag-media!
   [brain catalog {:keys [::media/id ::media/name] :as media}]
   (log/info (format "re-tagging media: %s" name))
-  (when-let [response (tunabrain/request-tags! brain media
-                                               :catalog-tags (catalog/get-tags catalog))]
-    (when-let [tags (or (:tags response) (:filtered-tags response))]
-      (when (s/valid? ::media/tags tags)
-        (log/info (format "Applying tags to %s: %s" name tags))
-        (catalog/set-media-tags! catalog id tags)))
-    (when-let [taglines (:taglines response)]
-      (when (s/valid? (s/coll-of string?) taglines)
-        (log/info (format "Taglines for %s: %s" name taglines))
-        (catalog/add-media-taglines! catalog id taglines)))))
+  (let [stored-context (catalog/get-media-context catalog id)]
+    (when-let [response (tunabrain/request-tags! brain media
+                                                 :catalog-tags (catalog/get-tags catalog)
+                                                 :context stored-context)]
+      (when-let [tags (or (:tags response) (:filtered-tags response))]
+        (when (s/valid? ::media/tags tags)
+          (log/info (format "Applying tags to %s: %s" name tags))
+          (catalog/set-media-tags! catalog id tags)))
+      (when-let [taglines (:taglines response)]
+        (when (s/valid? (s/coll-of string?) taglines)
+          (log/info (format "Taglines for %s: %s" name taglines))
+          (catalog/add-media-taglines! catalog id taglines)))
+      (persist-context! catalog id stored-context (:context response)))))
 
 (defn retag-episode-with-special-flags!
   "Tag an episode using the lightweight special flags endpoint.
@@ -237,9 +254,12 @@
 (defn recategorize-media!
   [brain catalog {:keys [::media/id ::media/name] :as media} categories]
   (log/info (format "recategorizing media: %s" name))
-  (when-let [response (tunabrain/request-categorization! brain media
-                                                         :categories categories)]
+  (let [stored-context (catalog/get-media-context catalog id)]
+   (when-let [response (tunabrain/request-categorization! brain media
+                                                          :categories categories
+                                                          :context stored-context)]
     (let [{:keys [dimensions]} response]
+      (persist-context! catalog id stored-context (:context response))
       (when (s/valid? ::categorization dimensions)
         ;; Guard against hallucinated values: the LLM is occasionally creative
         ;; and returns values outside the configured vocabulary (e.g. typos
@@ -253,7 +273,7 @@
                               name (clojure.core/name dimension) (clojure.core/name value))))
           (doseq [[category selections] valid-dimensions
                   :when (seq selections)]
-            (catalog/set-media-category-values! catalog id category selections)))))))
+            (catalog/set-media-category-values! catalog id category selections))))))))
 
 (defn categorize-library-media!
   [brain catalog library throttler & {:keys [threshold categories force
