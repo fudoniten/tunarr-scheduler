@@ -428,9 +428,9 @@
 
     ["/api/scheduling/weekly"
      {:tags ["scheduling"]
-      :post {:summary    "Re-apply schedule templates to every channel"
+      :post {:summary    "Expand + publish the coming week for every channel (async)"
              :parameters {:query s/ChannelFilter}
-             :responses  {200 {:body s/SchedulingTaskResponse}
+             :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/weekly-handler ctx)}}]
 

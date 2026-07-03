@@ -135,14 +135,15 @@
         (is (= 400 (:status bad)))
         (is (re-find #"unrecognized query param" (get-in bad [:body :error])))))))
 
-;; ── Same behavior on the synchronous weekly endpoint ─────────────────────────
+;; ── Same behavior on the async weekly endpoint ───────────────────────────────
 
 (deftest weekly-shares-selector-and-strict-param-behavior
-  (testing "weekly applies the same channel filter and strict param checks"
+  (testing "weekly runs async and applies the same channel filter and strict param checks"
     (let [seen (atom nil)]
       (with-redefs [tasks/run-weekly! (fn [c] (reset! seen (:channels c)) {})]
         (let [ok ((scheduling/weekly-handler (ctx)) (req {:channel "enigma"}))]
-          (is (= 200 (:status ok)))
+          (is (= 202 (:status ok)))
+          (await-job (get-in ok [:body :job :id]))
           (is (= #{:enigma} (set (keys @seen)))))
         (let [bad ((scheduling/weekly-handler (ctx)) (req {} {"nope" "1"}))]
           (is (= 400 (:status bad))))))))

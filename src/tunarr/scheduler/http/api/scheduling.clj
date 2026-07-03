@@ -5,9 +5,11 @@
    deploy/k8s) rather than an in-process scheduler. Each runs the corresponding
    task against the live system components and returns a per-channel summary.
 
-   Quarterly and monthly tasks are submitted as async jobs (202 + job ID)
-   because they make heavy LLM calls via Tunabrain that can take several
-   minutes per channel.
+   The weekly, monthly, and quarterly tasks are submitted as async jobs (202 +
+   job ID). Monthly and quarterly make heavy LLM calls via Tunabrain that can
+   take several minutes per channel; weekly is deterministic but expanding and
+   publishing every channel's week is itself slow enough to run out of band.
+   Poll the returned job ID via /api/jobs/:job-id for the per-channel result.
 
    All endpoints accept optional repeatable selectors to limit the run to
    specific channels: ?channel=key (the config key name) and/or
@@ -123,17 +125,19 @@
 
 (defn weekly-handler
   "POST /api/scheduling/weekly — expand each channel's grid + overrides for the
-   coming week and push the DailySlots to Pseudovision.
+   coming week and push the DailySlots to Pseudovision. Returns 202 with a job
+   ID: expanding + publishing every channel's week is slow, so it runs async.
    Optional ?channel=key / ?channel_id=uuid to limit."
   [ctx]
   (fn [req]
-    (try
-      (with-selected-channels ctx channel-params req
-        (fn [ctx']
-          {:status 200 :body {:task "weekly" :results (tasks/run-weekly! ctx')}}))
-      (catch Exception e
-        (log/error e "weekly scheduling task failed")
-        {:status 500 :body {:error (util/error-message e)}}))))
+    (with-selected-channels ctx channel-params req
+      (fn [ctx']
+        (let [job (jobs/submit-job!
+                   (:job-runner ctx)
+                   {:type :media/scheduling-weekly}
+                   (fn [_report-progress]
+                     (tasks/run-weekly! ctx')))]
+          {:status 202 :body {:task "weekly" :job job}})))))
 
 (defn monthly-handler
   "POST /api/scheduling/monthly — propose + store sparse monthly overrides for

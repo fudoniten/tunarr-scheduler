@@ -8,13 +8,15 @@ on-demand with a single `curl`.
 
 ## Endpoints
 
-All are `POST` and return `200` with a JSON summary (`{:task ...}`), or `500`
-with `{:error ...}` on failure.
+All are `POST`. `daily` runs synchronously and returns `200` with a JSON
+summary (`{:task ...}`). `weekly`, `monthly`, and `quarterly` run as async jobs
+and return `202` with `{:task ... :job {...}}` — poll `/api/jobs/:job-id` for
+the per-channel result. All return `500` with `{:error ...}` on failure.
 
 | Endpoint                      | What it does                                            | Query params |
 |-------------------------------|---------------------------------------------------------|--------------|
 | `/api/scheduling/daily`       | Extend the playout horizon for every channel            | `horizon` (days, default `14`) |
-| `/api/scheduling/weekly`      | Re-apply schedule templates to every channel            | – |
+| `/api/scheduling/weekly`      | Expand + publish the coming week for every channel      | – |
 | `/api/scheduling/monthly`     | Generate (and apply) a monthly programming strategy     | `commit` (`true`/`false`, default `true`) |
 | `/api/scheduling/quarterly`   | Generate (and apply) a quarterly programming strategy   | `commit` (`true`/`false`, default `true`) |
 

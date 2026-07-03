@@ -80,6 +80,7 @@
    :media/tag-triage
    :media/scheduling-quarterly
    :media/scheduling-monthly
+   :media/scheduling-weekly
    :generate-bumpers])
 
 ;; NOTE: keep JobType in sync with the job types submitted in
@@ -445,13 +446,12 @@
 
 (def SchedulingTaskResponse
   "Open envelope for a scheduling-task result. The concrete payload varies by
-   task (daily/weekly return per-channel :results; monthly/quarterly return the
-   generated :strategy), so only :task is required."
+   task (daily returns per-channel :results), so only :task is required."
   [:map {:closed false}
    [:task :string]])
 
 (def SchedulingJobResponse
-  "Response for async scheduling tasks (monthly/quarterly) that return
+  "Response for async scheduling tasks (weekly/monthly/quarterly) that return
    immediately with a job ID for polling."
   [:map {:closed false}
    [:task :string]
