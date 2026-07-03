@@ -44,8 +44,35 @@
  ;; definitions that drift apart.
  :categories {:time-slot {:description "Best time of day to air this content"
                           :values [:daytime :primetime :late-night]}
-              :audience {:description "Primary target audience"
-                         :values [:kids :family :teen :adult]}
+              :audience {:description
+                         "Range of age groups for which this content is appropriate AND \
+                          enjoyable. Include EVERY value from the floor to the ceiling: \
+                          the FLOOR is the youngest age group for which this content would \
+                          NOT be inappropriate (be aspirational — a detective show without \
+                          explicit content is appropriate for teens; a documentary about \
+                          war is appropriate for older kids/teens). The CEILING is the \
+                          oldest age group that might realistically ENJOY this content \
+                          (be honest — a preschool show is not realistically enjoyed by \
+                          adults; a complex prestige drama is enjoyed by adults but not kids). \
+                          Most content gets 1-2 values; complex/ambitious content gets 2-3."
+                         :values [{:value :kids
+                                   :description "Appropriate and enjoyable for young children \
+                                                 (~3-12). Older audiences typically find it too childish."}
+                                  {:value :family
+                                   :description "Appropriate for the whole family including \
+                                                 young children. Nothing inappropriate for any age. \
+                                                 Often also enjoyable by teens/adults."}
+                                  {:value :teen
+                                   :description "Appropriate and enjoyable for teenagers. \
+                                                 May include mild romance, conflict, or suspense \
+                                                 but nothing gratuitously inappropriate (no \
+                                                 explicit violence, sexuality, or strong language). \
+                                                 Often also enjoyable by adults."}
+                                  {:value :adult
+                                   :description "Includes content requiring an adult audience, \
+                                                 OR is primarily enjoyed by adults (mature themes, \
+                                                 complex narratives, dark humor, prestige drama, \
+                                                 historical/political depth, etc.)."}]}
               :season {:description "Best season or time of year to air"
                        :values [:any :spring :summer :fall :winter
                                 :holiday :halloween :valentines :independence]}
