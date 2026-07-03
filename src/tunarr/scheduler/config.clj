@@ -141,7 +141,12 @@
                             :tunabrain (ig/ref :tunarr/tunabrain)
                             :grout grout-config)
      :tunarr/collection collection-config
-     :tunarr/catalog catalog-config
+     :tunarr/raw-catalog catalog-config
+     ;; The catalog other components use: the raw catalog wrapped with the
+     ;; Pseudovision auto-sync decorator (see system.clj / media.pseudovision-autosync).
+     :tunarr/catalog {:catalog      (ig/ref :tunarr/raw-catalog)
+                      :pseudovision (ig/ref :tunarr/pseudovision)
+                      :config       pseudovision-config}
      :tunarr/curation {:libraries (keys (get collection-config :libraries))
                        :tunabrain (ig/ref :tunarr/tunabrain)
                        :catalog   (ig/ref :tunarr/catalog)

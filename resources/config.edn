@@ -1,7 +1,20 @@
 {:log-level #or [#env LOG_LEVEL :debug]
  :server {:port #or [#env PORT 8080]}
  :pseudovision {:base-url #or [#env PSEUDOVISION_URL "http://localhost:8080"]
+                ;; When true (and Pseudovision is configured), tag/category edits
+                ;; are pushed to Pseudovision immediately via an event-driven
+                ;; worker instead of requiring a manual/cron sync. Also gates the
+                ;; startup channel sync.
                 :auto-sync #or [#env PSEUDOVISION_AUTO_SYNC true]
+                ;; Auto-sync tuning (all optional):
+                ;; :sync-debounce-ms    - coalesce a burst of edits into one pass
+                ;; :sync-bulk-threshold - build the id-map once above this batch size
+                ;; :sync-backoff-ms     - pause before retrying a failed batch
+                ;; :sync-reconcile-hours- periodic full-reconcile backstop; 0 disables
+                :sync-debounce-ms #or [#env PSEUDOVISION_SYNC_DEBOUNCE_MS 3000]
+                :sync-bulk-threshold #or [#env PSEUDOVISION_SYNC_BULK_THRESHOLD 50]
+                :sync-backoff-ms #or [#env PSEUDOVISION_SYNC_BACKOFF_MS 30000]
+                :sync-reconcile-hours #or [#env PSEUDOVISION_SYNC_RECONCILE_HOURS 24]
                 ;; Map tunarr-scheduler library names to Pseudovision collection IDs
                 ;; This is optional - if not specified, will create new collections
                 :library-mappings {}}

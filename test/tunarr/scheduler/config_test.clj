@@ -26,7 +26,11 @@
 
 (deftest config->system-defaults-test
   (let [system (config/config->system {:server {:port 3000}})]
-    (is (= {:type :memory} (:tunarr/catalog system)))
+    ;; The raw catalog carries the catalog config; :tunarr/catalog is the
+    ;; auto-sync wrapper that other components depend on.
+    (is (= {:type :memory} (:tunarr/raw-catalog system)))
+    (is (= (ig/ref :tunarr/raw-catalog) (get-in system [:tunarr/catalog :catalog])))
+    (is (= (ig/ref :tunarr/pseudovision) (get-in system [:tunarr/catalog :pseudovision])))
     (is (= {} (:tunarr/job-runner system)))
     (is (= 3000 (get-in system [:tunarr/http-server :port])))))
 
@@ -41,7 +45,7 @@
   (let [system (config/config->system {:server {:port 3000}
                                        :catalog {:type "postgresql"
                                                  :password "secret"}})
-        catalog (:tunarr/catalog system)]
+        catalog (:tunarr/raw-catalog system)]
     (is (= :postgresql (:type catalog)))
     (is (= "tunarr-scheduler" (:dbname catalog)))
     (is (= "tunarr-scheduler" (:user catalog)))
