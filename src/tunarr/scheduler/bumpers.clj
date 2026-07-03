@@ -5,23 +5,25 @@
    1. Call Tunabrain to generate a channel-appropriate image (prompt + generation)
    2. Select a matching music track from the CC0 library
    3. Compose image + audio into a short MP4 with subtle motion using ffmpeg
-   4. Upload the result to shared storage
-   5. Register the bumper as a media item in Pseudovision
+   4. Write the result to the shared Grout staging mount
+   5. Upload it to Grout via the intake API, tagged so Pseudovision can find it
 
    Generated bumpers are organized into duration buckets:
      - 5 seconds  → tiny cracks between content
      - 10 seconds → standard transitions
      - 15 seconds → slightly longer gaps
 
-   Bumpers are tagged with channel and theme metadata so Pseudovision can
-   select the right one at playout time."
+   Bumpers are tagged with channel/kind/theme metadata at intake so Pseudovision
+   can select the right one at playout time. Grout owns the stored bytes (it
+   normalises + content-addresses on intake), so the staging file is a transient
+   hand-off, not the system of record — replacing the old Jellyfin scan → poll →
+   PV-collection registration dance."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [taoensso.timbre :as log]
             [tunarr.scheduler.tunabrain :as tunabrain]
-            [tunarr.scheduler.backends.jellyfin.client :as jellyfin]
-            [tunarr.scheduler.backends.pseudovision.collections :as pv])
+            [tunarr.scheduler.backends.grout.client :as grout])
   (:import [java.util Base64]))
 
 ;; ---------------------------------------------------------------------------
@@ -119,6 +121,10 @@
              "-c:v" "libx264" "-pix_fmt" "yuv420p"
              "-c:a" "aac" "-b:a" "192k"
              "-ar" "48000" "-ac" "2"
+             ;; +faststart moves the moov atom up front so the file arrives
+             ;; stream-ready. Grout re-adds this on intake regardless, but doing
+             ;; it here lets it skip a re-mux (GROUT.md §8).
+             "-movflags" "+faststart"
              "-t" (str target-secs)
              dest-path]
 
@@ -154,6 +160,8 @@
              "-loop" "1" "-i" image-path
              "-vf" vf
              "-c:v" "libx264" "-pix_fmt" "yuv420p"
+             ;; +faststart: stream-ready moov placement (see compose-bumper!).
+             "-movflags" "+faststart"
              "-t" (str target-secs)
              dest-path]
 
@@ -202,8 +210,9 @@
      opts             — Optional {:music-library-dir ... :theme ...}
 
    Returns:
-     {:mp4-path string :image-path string :prompt string :duration int
-      :channel string :mp4-filename string}"
+     {:mp4-path string :image-path string :title string :prompt string
+      :duration int :channel string :theme (or keyword nil)
+      :mp4-filename string}"
   [tunabrain-client channel-key channel-spec target-secs dest-dir & [opts]]
   (let [channel-name (:name channel-spec)
         channel-desc (:description channel-spec)
@@ -247,9 +256,11 @@
 
     {:mp4-path final-path
      :image-path image-path
+     :title title
      :prompt script
      :duration target-secs
      :channel (name channel-key)
+     :theme theme
      :mp4-filename mp4-filename}))
 
 ;; ---------------------------------------------------------------------------
@@ -277,147 +288,100 @@
       (take count buckets)))))
 
 ;; ---------------------------------------------------------------------------
-;; Jellyfin + Pseudovision orchestration
+;; Grout upload
 ;; ---------------------------------------------------------------------------
+;;
+;; Bumpers land in Grout, the filler-content store. We hand Grout the staging
+;; path and it hashes → ffprobes → normalises → content-addresses → indexes,
+;; returning the stored Media. Intake is idempotent by source hash, so re-runs
+;; are safe and the 201/200 response *is* the confirmation — no scan-polling or
+;; filename matching. Duration lives on the Media as ffprobed `duration-ms`, so
+;; Pseudovision queries by min_ms/max_ms rather than a duration tag.
 
-(defn- poll-jellyfin-item
-  "Poll Jellyfin for an item in `library-name` matching `item-name`.
-   Retries every `sleep-ms` up to `max-attempts` times.
-   Returns the item map with :Id, :Name, etc., or nil if not found."
-  [jellyfin-client library-name item-name & {:keys [max-attempts sleep-ms]
-                                            :or {max-attempts 30 sleep-ms 2000}}]
-  (let [jf (:base-url jellyfin-client)
-        key (:api-key jellyfin-client)]
-    (when (and jf key)
-      (if-let [library (jellyfin/find-library-by-name jf key library-name)]
-        (loop [attempt 1]
-          (if (> attempt max-attempts)
-            (do (log/warn "Jellyfin item not found after max attempts" {:name item-name :attempts max-attempts})
-                nil)
-            (if-let [item (jellyfin/find-item-by-name jf key (:ItemId library) item-name)]
-              (do (log/info "Found Jellyfin item" {:name item-name :id (:Id item) :attempt attempt})
-                  item)
-              (do (log/debug "Jellyfin item not yet indexed, retrying..." {:attempt attempt})
-                  (Thread/sleep sleep-ms)
-                  (recur (inc attempt))))))
-        (do (log/warn "Jellyfin library not found for polling" {:name library-name})
-            nil)))))
+(defn- bumper->tags
+  "Build the intake tag list for a bumper. `kind` and `channel` are dedicated
+   intake fields, not tags; the only content signal we have pre-enrichment is
+   the theme (Grout's Tunabrain pass fills in the rest later)."
+  [{:keys [theme]}]
+  (into [] (comp (remove nil?) (map name)) [theme]))
 
-(defn- try-register-bumper!
-  "Attempt to register a bumper in Pseudovision after Jellyfin has indexed it.
-   Returns {:registered boolean :jellyfin-id (or nil string)}."
-  [pv-base-url channel-name jellyfin-item]
-  (if-let [jf-id (:Id jellyfin-item)]
-    (try
-      (if (pv/register-bumper! pv-base-url channel-name jf-id)
-        (do (log/info "Bumper registered in Pseudovision" {:channel channel-name :jellyfin-id jf-id})
-            {:registered true :jellyfin-id jf-id})
-        (do (log/warn "Bumper not yet available in Pseudovision, will retry on next sync"
-                       {:channel channel-name :jellyfin-id jf-id})
-            {:registered false :jellyfin-id jf-id}))
-      (catch Exception e
-        (log/error e "PV registration failed" {:channel channel-name :jellyfin-id jf-id})
-        {:registered false :jellyfin-id jf-id :error (ex-message e)}))
-    {:registered false :jellyfin-id nil}))
+(defn- cleanup-staging-file!
+  "Best-effort removal of a staging file once Grout owns the bytes. Grout stores
+   at its own content-addressed path, so the staging copy is disposable; failing
+   to delete it is not fatal (worst case a harmless re-upload, deduped by hash)."
+  [path]
+  (try
+    (when (and path (.exists (io/file path)))
+      (.delete (io/file path))
+      (log/debug "Removed staging bumper after Grout intake" {:path path}))
+    (catch Exception e
+      (log/warn "Failed to remove staging bumper" {:path path :error (ex-message e)}))))
 
-(defn register-generated-bumper!
-  "Orchestrate Jellyfin scan + PV registration for a single bumper.
-   **Deprecated in batch workflows** — prefer `register-bumper-batch!` to avoid
-   redundant library scans.
+(defn upload-bumper!
+  "Upload a single generated bumper to Grout.
 
    Args:
-     jellyfin-client  — Map from jellyfin/create! (or nil)
-     pv-base-url      — Pseudovision base URL string (or nil)
-     channel-name     — Human-readable channel name
-     bumper-info      — Map returned by generate-bumper! (must include :mp4-filename)
-     jellyfin-library — Name of the Jellyfin library that scans the bumper path
+     grout-client — Map from grout/create! (or nil to skip)
+     channel-name — Channel slug for the Grout `channel` field
+     bumper-info  — Map returned by generate-bumper!
 
-   Returns:
-     {:registered boolean :jellyfin-id (or nil) :mp4-path string}"
-  [jellyfin-client pv-base-url channel-name bumper-info jellyfin-library]
-  (let [mp4-path (:mp4-path bumper-info)
-        mp4-filename (:mp4-filename bumper-info)]
-    (cond
-      (not jellyfin-client)
-      (do (log/info "Jellyfin client not configured, skipping registration" {:path mp4-path})
-          {:registered false :jellyfin-id nil :mp4-path mp4-path})
+   Returns {:uploaded boolean :grout-id (or nil) :created? boolean
+            :mp4-path string [:error string]}."
+  [grout-client channel-name bumper-info]
+  (let [mp4-path (:mp4-path bumper-info)]
+    (if-not grout-client
+      (do (log/info "Grout client not configured, skipping upload" {:path mp4-path})
+          {:uploaded false :grout-id nil :mp4-path mp4-path})
+      (try
+        (let [{:keys [created? media]}
+              (grout/intake! grout-client
+                             {:path        mp4-path
+                              :kind        "bumper"
+                              :channel     channel-name
+                              :tags        (bumper->tags bumper-info)
+                              :source      "tunarr-bumper"
+                              :name        (:title bumper-info)
+                              :description (:prompt bumper-info)})]
+          (cleanup-staging-file! mp4-path)
+          (log/info "Bumper uploaded to Grout"
+                    {:channel channel-name :grout-id (:id media) :created? created?})
+          {:uploaded true :grout-id (:id media) :created? created? :mp4-path mp4-path})
+        (catch Exception e
+          (log/error e "Grout upload failed" {:channel channel-name :path mp4-path})
+          {:uploaded false :grout-id nil :mp4-path mp4-path :error (ex-message e)})))))
 
-      (not pv-base-url)
-      (do (log/info "Pseudovision URL not configured, skipping registration" {:path mp4-path})
-          {:registered false :jellyfin-id nil :mp4-path mp4-path})
-
-      :else
-      (do
-        ;; 1. Trigger Jellyfin library scan
-        (jellyfin/trigger-library-scan (:base-url jellyfin-client)
-                                        (:api-key jellyfin-client)
-                                        jellyfin-library)
-        ;; 2. Poll for the newly indexed item
-        (if-let [jf-item (poll-jellyfin-item jellyfin-client jellyfin-library mp4-filename)]
-          ;; 3. Register in PV
-          (merge (try-register-bumper! pv-base-url channel-name jf-item)
-                 {:mp4-path mp4-path})
-          (do (log/warn "Could not find bumper in Jellyfin, skipping PV registration"
-                        {:filename mp4-filename :library jellyfin-library})
-              {:registered false :jellyfin-id nil :mp4-path mp4-path}))))))
-
-(defn register-bumper-batch!
-  "Register a batch of generated bumpers efficiently.
-   Triggers a single Jellyfin library scan, then polls for all items.
+(defn upload-bumper-batch!
+  "Upload a batch of generated bumpers to Grout. Each intake is independent and
+   idempotent by hash, so a single failure doesn't abort the rest.
 
    Args:
-     jellyfin-client  — Map from jellyfin/create! (or nil)
-     pv-base-url      — Pseudovision base URL string (or nil)
-     channel-name     — Human-readable channel name
-     bumper-infos     — Seq of maps returned by generate-bumper!
-     jellyfin-library — Name of the Jellyfin library that scans the bumper path
+     grout-client — Map from grout/create! (or nil to skip)
+     channel-name — Channel slug for the Grout `channel` field
+     bumper-infos — Seq of maps returned by generate-bumper!
 
-   Returns:
-     Seq of {:registered boolean :jellyfin-id (or nil) :mp4-path string}"
-  [jellyfin-client pv-base-url channel-name bumper-infos jellyfin-library]
-  (cond
-    (not jellyfin-client)
-    (do (log/info "Jellyfin client not configured, skipping batch registration"
+   Returns a vector of per-bumper result maps (see upload-bumper!)."
+  [grout-client channel-name bumper-infos]
+  (if-not grout-client
+    (do (log/info "Grout client not configured, skipping batch upload"
                   {:count (count bumper-infos)})
-        (mapv #(assoc % :registered false :jellyfin-id nil) bumper-infos))
-
-    (not pv-base-url)
-    (do (log/info "Pseudovision URL not configured, skipping batch registration"
-                  {:count (count bumper-infos)})
-        (mapv #(assoc % :registered false :jellyfin-id nil) bumper-infos))
-
-    :else
-    (do
-      ;; 1. Trigger a single scan for the whole batch
-      (jellyfin/trigger-library-scan (:base-url jellyfin-client)
-                                      (:api-key jellyfin-client)
-                                      jellyfin-library)
-      ;; 2. Poll + register each bumper
-      (mapv (fn [bumper]
-              (let [mp4-filename (:mp4-filename bumper)]
-                (if-let [jf-item (poll-jellyfin-item jellyfin-client
-                                                      jellyfin-library
-                                                      mp4-filename
-                                                      :max-attempts 30
-                                                      :sleep-ms 2000)]
-                  (merge (try-register-bumper! pv-base-url channel-name jf-item)
-                         {:mp4-path (:mp4-path bumper)})
-                  (do (log/warn "Could not find bumper in Jellyfin"
-                                {:filename mp4-filename :library jellyfin-library})
-                      {:registered false :jellyfin-id nil :mp4-path (:mp4-path bumper)}))))
-            bumper-infos))))
+        (mapv #(hash-map :uploaded false :grout-id nil :mp4-path (:mp4-path %))
+              bumper-infos))
+    (mapv #(upload-bumper! grout-client channel-name %) bumper-infos)))
 
 ;; ---------------------------------------------------------------------------
 ;; Service lifecycle
 ;; ---------------------------------------------------------------------------
 
 (defn- default-output-dir
-  "Return the default bumper output directory.
-   Prefers BUMPER_OUTPUT_DIR env var, then falls back to /data/media/bumpers
-   (the arr-data mount shared with Jellyfin)."
+  "Return the default bumper staging directory.
+   Prefers BUMPER_OUTPUT_DIR, then GROUT_STAGING_DIR, then a staging subdir under
+   the shared Grout mount. Grout requires intake paths to live under
+   GROUT_MEDIA_DIR, and it takes ownership of the bytes on intake, so this is a
+   transient staging area rather than the store of record."
   []
   (or (System/getenv "BUMPER_OUTPUT_DIR")
-      "/data/media/bumpers"))
+      (System/getenv "GROUT_STAGING_DIR")
+      "/data/media/grout/staging"))
 
 (defn create-service
   "Create the bumper generation service from system config.
@@ -425,22 +389,21 @@
    Config keys under :bumpers:
      :tunabrain         — Tunabrain client (required)
      :music-library-dir — Path to CC0 music library
-     :output-dir        — Where to write generated MP4s
-     :jellyfin          — Jellyfin client config map (optional)
-     :pseudovision-url  — Pseudovision base URL (optional)"
-  [{:keys [tunabrain music-library-dir output-dir jellyfin pseudovision-url]}]
+     :output-dir        — Grout staging dir for generated MP4s
+     :grout             — Grout client config map with :base-url (optional; when
+                          absent, generation still works but upload is skipped)"
+  [{:keys [tunabrain music-library-dir output-dir grout]}]
   (log/info "Initialising bumper service")
   (let [out-dir (or output-dir (default-output-dir))
-        jf-client (when jellyfin (jellyfin/create! jellyfin))]
+        grout-client (when grout (grout/create! grout))]
     (let [f (io/file out-dir)
           ok (.mkdirs f)]
-      (log/info "Ensured bumper output directory"
+      (log/info "Ensured bumper staging directory"
                 {:path out-dir :created ok :exists (.exists f)}))
     {:tunabrain tunabrain
      :music-library-dir (or music-library-dir default-music-dir)
      :output-dir   out-dir
-     :jellyfin     jf-client
-     :pseudovision-url pseudovision-url}))
+     :grout        grout-client}))
 
 (defn close!
   "No-op shutdown — bumper service is stateless."

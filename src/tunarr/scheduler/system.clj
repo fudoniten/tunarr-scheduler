@@ -201,13 +201,12 @@
 ;; /api/scheduling/{daily,weekly,monthly,quarterly} (see deploy/k8s), so there
 ;; is no in-process scheduler component.
 
-(defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain music-library-dir output-dir jellyfin pseudovision-url]}]
+(defmethod ig/init-key :tunarr/bumpers [_ {:keys [tunabrain music-library-dir output-dir grout]}]
   (log/info "initialising bumper service")
   (bumpers/create-service {:tunabrain tunabrain
                            :music-library-dir music-library-dir
                            :output-dir output-dir
-                           :jellyfin jellyfin
-                           :pseudovision-url pseudovision-url}))
+                           :grout grout}))
 
 (defmethod ig/halt-key! :tunarr/bumpers [_ svc]
   (log/info "shutting down bumper service")
