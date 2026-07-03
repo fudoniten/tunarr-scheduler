@@ -118,6 +118,45 @@ The Pseudovision sync feature uses the configuration in `config.edn`:
 Environment variables:
 - `PSEUDOVISION_URL`: Pseudovision server URL
 
+## Automatic Sync (Event-Driven)
+
+You don't have to trigger syncs manually or on a cron. When `:auto-sync` is
+enabled (the default) and Pseudovision is configured, tag and category edits
+are pushed to Pseudovision **as they happen**.
+
+Tunarr Scheduler is the source of truth for tags, and every tag/category write
+funnels through the catalog. In auto-sync mode the catalog is wrapped with a
+decorator that, on each item-level tag/category mutation, marks that item
+"dirty". A background worker coalesces dirty items over a short debounce window
+and syncs each once — so an LLM retagging a whole library collapses into a
+single batched pass rather than hundreds of blocking calls. Global tag
+operations (rename/delete/purge across all items) can't name the items they
+touch, so they trigger a full reconcile instead.
+
+A low-frequency periodic reconcile runs as a backstop for changes that never
+flowed through the process (e.g. direct DB edits) or that were dropped during a
+Pseudovision outage.
+
+This complements — and can replace — the manual `sync-pseudovision-tags`
+endpoint, which remains available for on-demand full-library syncs.
+
+### Tuning
+
+```clojure
+{:pseudovision {:auto-sync true            ; master switch (also gates channel startup sync)
+                :sync-debounce-ms 3000      ; coalescing window after the first edit
+                :sync-bulk-threshold 50     ; build the id-map once above this batch size
+                :sync-backoff-ms 30000      ; pause before retrying a failed batch
+                :sync-reconcile-hours 24}}  ; periodic full-reconcile backstop; 0 disables
+```
+
+Environment overrides: `PSEUDOVISION_AUTO_SYNC`, `PSEUDOVISION_SYNC_DEBOUNCE_MS`,
+`PSEUDOVISION_SYNC_BULK_THRESHOLD`, `PSEUDOVISION_SYNC_BACKOFF_MS`,
+`PSEUDOVISION_SYNC_RECONCILE_HOURS`.
+
+Set `:auto-sync false` (or `PSEUDOVISION_AUTO_SYNC=false`) to fall back to
+manual/cron syncing; the catalog is then used unwrapped with no worker.
+
 ## Tag Format
 
 Tags in tunarr-scheduler are stored as keywords (e.g., `:sci-fi`, `:action-adventure`). When syncing to Pseudovision, they are converted to strings with hyphens preserved:
@@ -196,10 +235,11 @@ Common issues:
 ## Implementation Details
 
 **Files:**
-- `src/tunarr/scheduler/media/pseudovision_sync.clj`: Core sync logic
+- `src/tunarr/scheduler/media/pseudovision_sync.clj`: Core sync logic (per-item, batch, and full-library)
+- `src/tunarr/scheduler/media/pseudovision_autosync.clj`: Event-driven auto-sync — catalog decorator + debounced worker
 - `src/tunarr/scheduler/backends/pseudovision/client.clj`: HTTP client
 - `src/tunarr/scheduler/http/routes.clj`: API endpoint definition
-- `src/tunarr/scheduler/system.clj`: Dependency injection
+- `src/tunarr/scheduler/system.clj`: Dependency injection (`:tunarr/raw-catalog` + wrapping `:tunarr/catalog`)
 - `src/tunarr/scheduler/config.clj`: Configuration loading
 
 **Pseudovision API:**

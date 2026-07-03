@@ -8,6 +8,7 @@
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.sql-catalog]
             [tunarr.scheduler.media.collection :as collection]
+            [tunarr.scheduler.media.pseudovision-autosync :as pv-autosync]
             [tunarr.scheduler.media.pseudovision-collection]
             [tunarr.scheduler.curation.tags :as tag-curator]
             [tunarr.scheduler.curation.core :as curation]
@@ -68,13 +69,51 @@
   (log/info "tunarr source shutdown disabled (not yet implemented)")
   nil)
 
-(defmethod ig/init-key :tunarr/catalog [_ config]
+(defmethod ig/init-key :tunarr/raw-catalog [_ config]
   (log/info "initializing catalog")
   (catalog/initialize-catalog! config))
 
-(defmethod ig/halt-key! :tunarr/catalog [_ state]
+(defmethod ig/halt-key! :tunarr/raw-catalog [_ state]
   (log/info "closing catalog")
   (catalog/close-catalog! state))
+
+(defn- ->long
+  "Coerce a config value that may arrive as an int or (via an env override) a
+   string into a long. Returns `default` for nil/blank/unparseable values."
+  [v default]
+  (cond
+    (number? v) (long v)
+    (string? v) (try (Long/parseLong (str/trim v)) (catch Exception _ default))
+    :else default))
+
+;; The :tunarr/catalog component is what every other component depends on. It
+;; wraps the raw catalog with the Pseudovision auto-sync decorator when
+;; auto-sync is enabled and Pseudovision is configured, so tag/category edits
+;; propagate immediately (see media.pseudovision-autosync). When disabled, it
+;; is the raw catalog verbatim — no worker, no overhead.
+(defmethod ig/init-key :tunarr/catalog [_ {:keys [catalog pseudovision config]}]
+  (if (and pseudovision (:auto-sync config))
+    (do
+      (log/info "initializing Pseudovision auto-sync (event-driven tag sync)")
+      (let [reconcile-hours (->long (:sync-reconcile-hours config 24) 24)
+            worker (-> {:pseudovision   pseudovision
+                        :catalog        catalog
+                        :debounce-ms    (->long (:sync-debounce-ms config 3000) 3000)
+                        :bulk-threshold (->long (:sync-bulk-threshold config 50) 50)
+                        :backoff-ms     (->long (:sync-backoff-ms config 30000) 30000)
+                        :reconcile-ms   (when (pos? reconcile-hours)
+                                          (* reconcile-hours 60 60 1000))}
+                       pv-autosync/create
+                       pv-autosync/start!)]
+        (pv-autosync/wrap-catalog catalog worker)))
+    (do
+      (log/info "Pseudovision auto-sync disabled - using raw catalog")
+      catalog)))
+
+(defmethod ig/halt-key! :tunarr/catalog [_ catalog]
+  (when-let [worker (pv-autosync/wrapped-worker catalog)]
+    (log/info "stopping Pseudovision auto-sync worker")
+    (pv-autosync/stop! worker)))
 
 (defmethod ig/init-key :tunarr/tunabrain-throttler [_ {:keys [rate queue-size]}]
   (log/info "initializing tunabrain throttler")
