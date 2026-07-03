@@ -99,3 +99,81 @@
   (testing "mark-dirty!/mark-reconcile! tolerate a nil/queue-less worker"
     (is (nil? (autosync/mark-dirty! {} "id")))
     (is (nil? (autosync/mark-reconcile! {})))))
+
+;; A minimal "executor-bearing" inner catalog so we can verify the wrapping
+;; preserves the inner's :executor field for direct SQL access. The bug we're
+;; guarding against: when the system component is a SyncingCatalog, the
+;; expression `(:executor catalog)` returns nil because defrecord fields are
+;; positional and the inner SqlCatalog's :executor is only accessible via
+;; (:executor inner). This breaks the weekly/monthly/quarterly scheduling
+;; tasks and the read endpoints in http.api.plans / http.api.strategy.
+(defn- executor-bearing-catalog [executor]
+  (reify catalog/Catalog
+    (get-media-tags [_ _] [])
+    (add-media! [_ _] nil)
+    (add-media-batch! [_ _] nil)
+    (get-media [_] [])
+    (get-media-by-id [_ _] nil)
+    (get-media-by-library-id [_ _] nil)
+    (get-media-by-library [_ _] nil)
+    (get-media-by-kind [_ _ _] [])
+    (get-filler-items [_] [])
+    (count-media-by-kind [_] 0)
+    (search-media-by-library-id [_ _ _] [])
+    (get-tags [_] [])
+    (get-channels [_] [])
+    (get-genres [_] [])
+    (update-channels! [_ _] nil)
+    (update-libraries! [_ _] nil)
+    (add-media-channels! [_ _ _] nil)
+    (add-media-genres! [_ _ _] nil)
+    (add-media-taglines! [_ _ _] nil)
+    (get-media-by-channel [_] [])
+    (get-media-by-tag [_] [])
+    (get-media-by-genre [_] [])
+    (get-media-process-timestamps [_ _] nil)
+    (get-tag-samples [_] [])
+    (update-process-timestamp! [_ _ _] nil)
+    (delete-process-timestamp! [_ _] nil)
+    (delete-library-process-timestamps! [_ _] nil)
+    (close-catalog! [_] nil)
+    (get-media-category-values [_ _ _] [])
+    (get-media-categories [_] [])
+    (get-episodes-by-series [_] [])
+    (get-episode [_ _ _ _] nil)
+    (get-effective-tags [_] [])
+    (get-effective-categories [_] [])
+    (get-library-id [_] nil)
+    (enrich-media-with-timestamps [_ m] m)
+    (get-all-dimensions [_] [])
+    (get-dimension-values [_] [])
+    (get-media-by-category-value [_ _ _] [])))
+
+(def ^:private sentinel-executor
+  ;; A unique sentinel — an Object identity we can compare with identical?.
+  ;; Using Object. rather than a keyword/string to make absolutely sure no
+  ;; accidental nil/keyword collisions sneak in.
+  (Object.))
+
+(deftest wrap-catalog-exposes-inner-executor
+  (testing "a wrapped catalog exposes the inner's :executor via keyword lookup"
+    (let [inner (assoc (executor-bearing-catalog nil) :executor sentinel-executor)
+          worker (test-worker)
+          cat    (autosync/wrap-catalog inner worker)]
+      (is (instance? autosync/SyncingCatalog cat))
+      (is (identical? sentinel-executor (:executor cat))
+          "(:executor wrapped) must return the inner's :executor so scheduling tasks can issue SQL")
+      (is (identical? inner (:inner cat))
+          "the inner catalog is still accessible for protocol-level delegation")))
+
+  (testing "a wrapped catalog without an inner :executor returns nil cleanly (no NPE)"
+    (let [inner (executor-bearing-catalog nil)
+          worker (test-worker)
+          cat    (autosync/wrap-catalog inner worker)]
+      (is (nil? (:executor cat)))))
+
+  (testing "wrapping with a nil worker returns the inner unchanged"
+    (let [inner (assoc (executor-bearing-catalog nil) :executor sentinel-executor)]
+      (is (identical? inner (autosync/wrap-catalog inner nil)))
+      (is (identical? sentinel-executor (:executor inner))
+          "the unwrapped inner still exposes :executor as before — no regression"))))
