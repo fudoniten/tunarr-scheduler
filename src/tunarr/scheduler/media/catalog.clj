@@ -35,6 +35,11 @@
   (add-media-tags! [catalog media-id tags])
   (set-media-tags! [catalog media-id tags])
 
+  ;; Remove specific tags from a single media item (leaving the rest intact).
+  ;; Unlike delete-tag!, this only detaches the tags from this item; the tag
+  ;; itself is left in the global vocabulary.
+  (delete-media-tags! [catalog media-id tags])
+
   ;; DEPRECATED: Hardcoded channel update. Channels are a dimension now.
   ;; Use set-media-category-values! with "channel" dimension instead.
   ;; See DIMENSION_CLEANUP.md Phase 3.
@@ -156,6 +161,11 @@
   :args (s/cat :catalog  ::catalog
                :media-id ::media/id
                :tags     (s/coll-of ::media/tags)))
+
+(s/fdef delete-media-tags
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :tags     (s/coll-of ::media/tag)))
 
 ;; DEPRECATED: Hardcoded channel update. See protocol note above.
 (s/fdef update-channels
@@ -304,6 +314,7 @@
 (instrument 'get-media-by-library)
 (instrument 'add-media-tags)
 (instrument 'set-media-tags)
+(instrument 'delete-media-tags)
 (instrument 'update-channels)
 (instrument 'update-libraries)
 (instrument 'add-media-channels)

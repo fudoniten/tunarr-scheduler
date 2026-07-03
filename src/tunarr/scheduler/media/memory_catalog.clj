@@ -73,6 +73,17 @@
   (add-media-tags! [_ media-id tags]
     (update-media! state media-id #(update % ::media/tags conj-distinct tags))
     nil)
+  (set-media-tags! [_ media-id tags]
+    (update-media! state media-id #(assoc % ::media/tags (distinct-vector tags)))
+    nil)
+  (get-media-tags [_ media-id]
+    (or (::media/tags (get-in @state [:media media-id])) []))
+  (delete-media-tags! [_ media-id tags]
+    (let [remove? (set tags)]
+      (update-media! state media-id
+                     #(update % ::media/tags (fn [existing]
+                                               (vec (remove remove? (or existing [])))))))
+    nil)
   ;; DEPRECATED: Hardcoded channel assignment. Channels are dimensions now.
   ;; Use dimension-based storage or add-media-tags! with "channel:NAME" instead.
   ;; See DIMENSION_CLEANUP.md Phase 3.

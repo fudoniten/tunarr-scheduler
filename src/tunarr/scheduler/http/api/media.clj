@@ -526,6 +526,166 @@
         (log/error e "Error submitting per-item recategorize")
         {:status 500 :body {:error (util/error-message e)}}))))
 
+;; ---------------------------------------------------------------------------
+;; Per-item tag editing
+;;
+;; These endpoints let an operator (e.g. Marquee) edit tags directly on a
+;; Tunarr Scheduler media item. TS is the source of truth for tags: edits made
+;; here survive LLM tag generation and are what gets pushed to Pseudovision via
+;; the sync endpoints. Editing tags in Pseudovision instead would be clobbered
+;; on the next TS -> PV sync.
+;; ---------------------------------------------------------------------------
+
+(defn- media-tags-response
+  "Build the tag-list response body for a media item, tags as plain strings."
+  [catalog media-id]
+  {:media-id media-id
+   :tags     (mapv name (catalog/get-media-tags catalog media-id))})
+
+(defn get-media-item-tags-handler
+  "List the tags currently attached to a single media item."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          {:status 200 :body (media-tags-response catalog (::media/id media))}
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error fetching media item tags")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn add-media-item-tags-handler
+  "Add one or more tags to a single media item (merged with existing tags).
+   Returns the item's full tag list after the change."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            tags     (get-in req [:parameters :body :tags])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            (catalog/add-media-tags! catalog catalog-id (mapv keyword tags))
+            {:status 200 :body (media-tags-response catalog catalog-id)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error adding tags to media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn set-media-item-tags-handler
+  "Replace the full set of tags on a single media item.
+   Returns the item's tag list after the change."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            tags     (get-in req [:parameters :body :tags])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            (catalog/set-media-tags! catalog catalog-id (mapv keyword tags))
+            {:status 200 :body (media-tags-response catalog catalog-id)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error setting tags on media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn delete-media-item-tag-handler
+  "Remove a single tag from a media item. The tag stays in the global
+   vocabulary; only its association with this item is removed.
+   Returns the item's tag list after the change."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            tag      (get-in req [:parameters :path :tag])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            (catalog/delete-media-tags! catalog catalog-id [(keyword tag)])
+            {:status 200 :body (media-tags-response catalog catalog-id)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error removing tag from media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+;; ---------------------------------------------------------------------------
+;; Per-item dimension (category) value editing
+;; ---------------------------------------------------------------------------
+
+(defn- media-category-values-response
+  "Build the value-list response body for one dimension on a media item."
+  [catalog media-id category]
+  {:media-id media-id
+   :category (name category)
+   :values   (mapv name (catalog/get-media-category-values catalog media-id category))})
+
+(defn add-media-item-category-values-handler
+  "Add one or more values to a dimension on a single media item (merged with
+   existing values). An optional :rationale is stored with each added value.
+   Returns the dimension's value list after the change."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id  (get-in req [:parameters :path :media-id])
+            category  (get-in req [:parameters :path :category])
+            values    (get-in req [:parameters :body :values])
+            rationale (get-in req [:parameters :body :rationale])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                category-kw (keyword category)]
+            (catalog/add-media-category-values!
+             catalog catalog-id category-kw
+             (mapv (fn [v] {::media/category-value (keyword v)
+                            ::media/rationale      rationale})
+                   values))
+            {:status 200 :body (media-category-values-response catalog catalog-id category-kw)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error adding dimension values to media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn set-media-item-category-values-handler
+  "Replace the full set of values for a dimension on a single media item.
+   Returns the dimension's value list after the change."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id  (get-in req [:parameters :path :media-id])
+            category  (get-in req [:parameters :path :category])
+            values    (get-in req [:parameters :body :values])
+            rationale (get-in req [:parameters :body :rationale])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                category-kw (keyword category)]
+            (catalog/set-media-category-values!
+             catalog catalog-id category-kw
+             (mapv (fn [v] {::media/category-value (keyword v)
+                            ::media/rationale      rationale})
+                   values))
+            {:status 200 :body (media-category-values-response catalog catalog-id category-kw)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error setting dimension values on media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn delete-media-item-category-value-handler
+  "Remove a single value from a dimension on a media item.
+   Returns the dimension's value list after the change."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])
+            category (get-in req [:parameters :path :category])
+            value    (get-in req [:parameters :path :value])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                category-kw (keyword category)]
+            (catalog/delete-media-category-value! catalog catalog-id category-kw (keyword value))
+            {:status 200 :body (media-category-values-response catalog catalog-id category-kw)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error removing dimension value from media item")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
 (defn sync-media-item-pseudovision-handler
   "Sync a single media item's tags to Pseudovision."
   [{:keys [catalog pseudovision]}]
