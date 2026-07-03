@@ -5,13 +5,34 @@
    generation). None of these gate generation.
 
    The SQL executor is obtained from the catalog component (ctx :catalog
-   → :executor), as in the strategy handlers."
+   → :executor), as in the strategy handlers.
+
+   URL channels (`:channel` path param) are the config **slug** (e.g. 'goldenreels')
+   — the same identifier used by the POST `/api/scheduling/{daily,weekly,...}`
+   endpoints. Storage, however, keys on the **display name** (e.g. 'Golden Reels')
+   per `tunarr.scheduler.scheduling.tasks` (where the cron tasks translate slug
+   → fullname before persisting). Every handler in this namespace calls
+   `channel-storage-key` to bridge that gap, so that lookups by slug succeed
+   for data that was originally stored by display name. Looking up by display
+   name directly is still supported (for backwards compatibility and direct
+   one-off queries)."
   (:require [taoensso.timbre :as log]
+            [tunarr.scheduler.media :as media]
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.plans :as plans]
             [tunarr.scheduler.http.util :as util]))
 
 (defn- executor-of [ctx] (:executor (:catalog ctx)))
+
+(defn- channel-storage-key
+  "Translate a URL `:channel` param to the storage key (display name).
+   - If `channel` matches a configured channel key, return its fullname.
+   - Otherwise return `channel` unchanged, so a direct lookup by display
+     name still resolves (the case-mismatch symptom of pre-fix read paths)."
+  [ctx channel]
+  (or (some-> (get-in ctx [:channels (keyword channel)])
+              (::media/channel-fullname))
+      channel))
 
 (defmacro ^:private with-handler
   "Wrap a handler body with the standard try/500 envelope."
@@ -44,7 +65,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error getting grid"
-        (let [channel (get-in req [:parameters :path :channel])
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))
               today   (plans/today)
               quarter (get-in req [:parameters :query :quarter] (plans/quarter-of today))
               year    (get-in req [:parameters :query :year] (plans/year-of today))]
@@ -58,7 +79,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error listing grids"
-        (let [channel (get-in req [:parameters :path :channel])]
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))]
           {:status 200 :body {:grids (storage/list-grids ex :channel channel)}})))))
 
 ;; ---------------------------------------------------------------------------
@@ -72,7 +93,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error getting overrides"
-        (let [channel (get-in req [:parameters :path :channel])
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))
               month   (get-in req [:parameters :query :month] (plans/month-of (plans/today)))]
           (if-let [o (storage/current-overrides ex channel month)]
             {:status 200 :body o}
@@ -84,7 +105,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error listing overrides"
-        (let [channel (get-in req [:parameters :path :channel])]
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))]
           {:status 200 :body {:overrides (storage/list-overrides ex :channel channel)}})))))
 
 ;; ---------------------------------------------------------------------------
@@ -99,7 +120,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error building schedule preview"
-        (let [channel (get-in req [:parameters :path :channel])
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))
               today   (plans/today)
               start   (get-in req [:parameters :query :start] (str today))
               end     (get-in req [:parameters :query :end] (str (.plusDays today 7)))]
@@ -112,7 +133,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error building channel plan"
-        (let [channel (get-in req [:parameters :path :channel])]
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))]
           {:status 200 :body (plans/dashboard ex channel)})))))
 
 ;; ---------------------------------------------------------------------------
@@ -129,7 +150,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error getting guidance"
-        (let [channel (get-in req [:parameters :path :channel])]
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))]
           {:status 200 :body (or (storage/get-guidance ex channel)
                                  (assoc empty-guidance :channel channel))})))))
 
@@ -141,6 +162,6 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error setting guidance"
-        (let [channel (get-in req [:parameters :path :channel])
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))
               fields  (get-in req [:parameters :body])]
           {:status 200 :body (storage/set-guidance! ex channel fields)})))))
