@@ -29,6 +29,180 @@
                                      :http-opts http-opts})]
       (is (= http-opts (:http-opts client))))))
 
+;; ===========================================================================
+;; normalize-override — random:<category> kebab-case (Layer 2 of the
+;; random-category fix; lookup-side fallback is fudoniten/pseudovision#116).
+;; The helpers are private; we reach them via the var (`@#'`) so the test
+;; stays in lockstep with the production function — if a var is renamed
+;; or removed, the test will throw a var-resolution error at load time
+;; instead of silently testing a different function.
+;; ===========================================================================
+
+(def ^:private normalize-override-fn
+  @#'tunarr.scheduler.tunabrain/normalize-override)
+(def ^:private normalize-random-media-id-fn
+  @#'tunarr.scheduler.tunabrain/normalize-random-media-id)
+(def ^:private kebab-case-fn
+  @#'tunarr.scheduler.tunabrain/kebab-case)
+
+;; ---------------------------------------------------------------------------
+;; kebab-case — the dimension-naming helper
+;; ---------------------------------------------------------------------------
+
+(deftest kebab-case-canonical-examples
+  (testing "kebab-case produces the canonical PV tag form"
+    (is (= "sci-fi-and-fantasy"   (kebab-case-fn "Sci-Fi & Fantasy"))
+        "& becomes 'and' and spaces collapse to hyphens")
+    (is (= "action-and-adventure" (kebab-case-fn "Action & Adventure"))
+        "multi-word with `&` is the load-bearing case — the 5 channels with
+         bad overrides (galaxy, spectrum, chronicles, infobytes, toontown)
+         all hit this transformation")
+    (is (= "sci-fi"               (kebab-case-fn "Sci-Fi"))
+        "single-word with hyphen — non-alphanumerics collapse to a single `-`")
+    (is (= "comedy"               (kebab-case-fn "Comedy"))
+        "lowercase pass-through for the simple Title-Case form")
+    (is (= "comedy"               (kebab-case-fn "comedy"))
+        "already-kebab inputs are unchanged (idempotent)")))
+
+(deftest kebab-case-edge-cases
+  (testing "kebab-case is nil-safe and trims whitespace"
+    (is (nil? (kebab-case-fn nil))
+        "nil input returns nil — used inside `cond->` so the absence of a
+         value must be a no-op, not a NullPointerException")
+    (is (= "" (kebab-case-fn ""))
+        "empty string returns empty string")
+    (is (= "drama" (kebab-case-fn "  Drama  "))
+        "leading/trailing whitespace is trimmed before transformation"))
+  (testing "kebab-case is idempotent under repeated calls"
+    (is (= (kebab-case-fn (kebab-case-fn "Sci-Fi & Fantasy"))
+           (kebab-case-fn "Sci-Fi & Fantasy"))
+        "applying kebab-case twice yields the same result as once — the
+         already-kebab form is the fixed point of the transformation")))
+
+;; ---------------------------------------------------------------------------
+;; normalize-random-media-id — applies kebab-case only to random:<category>
+;; ---------------------------------------------------------------------------
+
+(deftest normalize-random-media-id-canonicalizes-the-category
+  (testing "random:<Human-Readable> becomes random:<kebab>"
+    (is (= "random:sci-fi-and-fantasy"   (normalize-random-media-id-fn "random:Sci-Fi & Fantasy")))
+    (is (= "random:comedy"               (normalize-random-media-id-fn "random:Comedy")))
+    (is (= "random:action-and-adventure" (normalize-random-media-id-fn "random:Action & Adventure")))
+    (is (= "random:documentary"          (normalize-random-media-id-fn "random:Documentary")))))
+
+(deftest normalize-random-media-id-leaves-other-shapes-alone
+  (testing "non-random media_ids are returned verbatim"
+    (is (= "series:abc123" (normalize-random-media-id-fn "series:abc123"))
+        "series:<id> is opaque to the normalizer — it should pass through")
+    (is (= "movie:abc123"  (normalize-random-media-id-fn "movie:abc123"))
+        "movie:<id> is also opaque — UUIDs and PV ids can contain `&`-like
+         or `-`-like characters that we must not touch"))
+  (testing "already-kebab random: is a no-op (idempotent)"
+    (is (= "random:sci-fi-and-fantasy"
+           (normalize-random-media-id-fn "random:sci-fi-and-fantasy"))
+        "if the override was already generated in canonical form, running
+         it through the normalizer again must not change it (the second
+         pass must be idempotent, not introduce double-dashes or stray
+         whitespace)"))
+  (testing "nil and non-string inputs are safe"
+    (is (nil? (normalize-random-media-id-fn nil))
+        "nil is the most-common case when content/media_id is absent in
+         a non-random override — the cond-> guard calls it with nil
+         values during storage of every series: and movie: override")
+    (is (= 42 (normalize-random-media-id-fn 42))
+        "non-string is left alone — the contract is `(string? ...)` guarded
+         in normalize-override, so anything weird here is a programmer
+         error, not data we try to massage")))
+
+;; ---------------------------------------------------------------------------
+;; normalize-override — the integration: scope trim + media_id normalization
+;; ---------------------------------------------------------------------------
+
+(deftest normalize-override-strips-nil-scopes-and-kebabs-random
+  (testing "scope-key trimming and media_id kebab-case compose cleanly"
+    (let [override {:scope     {:date "2026-07-04" :days nil :effective_start nil}
+                    :content   {:media_id "random:Sci-Fi & Fantasy"
+                                :strategy "random"
+                                :label    "Independence Day Sci-Fi Marathon"}}
+          out      (normalize-override-fn override)]
+      (is (= {:date "2026-07-04"} (:scope out))
+          "nil-valued scope keys (`:days`, `:effective_start`) are dropped
+           so the override satisfies the closed OverrideScope contract")
+      (is (= "random:sci-fi-and-fantasy" (get-in out [:content :media_id]))
+          "the random:<category> media_id is kebab-cased to match the
+           canonical PV tag form, ready for storage")
+      (is (= "Independence Day Sci-Fi Marathon" (get-in out [:content :label]))
+          "other content fields are not touched (label/strategy/etc)"))))
+
+(deftest normalize-override-passes-through-series-and-movie
+  (testing "series:<id> and movie:<id> overrides are stored verbatim"
+    (let [series {:scope   {:date "2026-07-04"}
+                  :content {:media_id "series:e7712464e5bb99b7faa29eb60ad6d8a1"
+                            :strategy "specific"
+                            :label    "Agatha Christie's Poirot Marathon"}}
+          movie  {:scope   {:date "2026-07-04"}
+                  :content {:media_id "movie:6f4faf68aabc64eb4d9b54b33627a742"
+                            :strategy "specific"
+                            :label    "Independence Day Special"}}
+          s-out  (normalize-override-fn series)
+          m-out  (normalize-override-fn movie)]
+      (is (= "series:e7712464e5bb99b7faa29eb60ad6d8a1" (get-in s-out [:content :media_id]))
+          "series:<id> passes through unchanged — the normalizer only
+           touches `random:<category>` media_ids")
+      (is (= "movie:6f4faf68aabc64eb4d9b54b33627a742"  (get-in m-out [:content :media_id]))
+          "movie:<id> passes through unchanged for the same reason"))))
+
+(deftest normalize-override-leaves-existing-good-data-intact
+  (testing "an override already in canonical form is unchanged end-to-end"
+    (let [good   {:scope   {:date "2026-07-04"}
+                  :content {:media_id "random:comedy"
+                            :strategy "random"}}
+          out    (normalize-override-fn good)]
+      (is (= "random:comedy" (get-in out [:content :media_id]))
+          "already-kebab random: must NOT be transformed — round-tripping
+           through the normalizer must be a no-op (idempotency is part
+           of the contract; otherwise re-running monthly would corrupt
+           previously-stored clean overrides)"))))
+
+(deftest normalize-override-survives-weird-inputs
+  (testing "defensive guards — bad data must not throw"
+    (is (= {} (normalize-override-fn {}))
+        "empty map normalises to empty map (no :scope, no :content)")
+    (is (= {:content nil} (normalize-override-fn {:content nil}))
+        "nil :content is fine — the second cond-> branch is false")
+    (is (= {:content {:media_id 42}} (normalize-override-fn {:content {:media_id 42}}))
+        "non-string media_id is left alone (storage layer validates the type)")))
+
+;; ---------------------------------------------------------------------------
+;; End-to-end shape test — the wire format that ends up in the DB
+;; ---------------------------------------------------------------------------
+
+(deftest normalized-override-round-trips-through-the-override-scope-contract
+  (testing "after normalize-override, the result is exactly what storage expects"
+    (let [raw     {:scope            {:date "2026-07-04" :days nil}
+                   :override_id      "galaxy-2026-07-ovr-2"
+                   :content          {:media_id "random:Action & Adventure"
+                                      :strategy "random"
+                                      :marathon false
+                                      :category_filters []
+                                      :label    "Weekend Action Block"
+                                      :notes    []}
+                   :mode             "replace"
+                   :priority         0
+                   :note             "Weekend Action block"}
+          out     (normalize-override-fn raw)]
+      ;; Scope key dropped (was :days, nil)
+      (is (not (contains? (:scope out) :days)))
+      ;; Scope kept the non-nil key
+      (is (contains? (:scope out) :date))
+      ;; Media_id kebab-cased
+      (is (= "random:action-and-adventure" (get-in out [:content :media_id])))
+      ;; Everything else is preserved
+      (is (= "galaxy-2026-07-ovr-2"        (:override_id out)))
+      (is (= "replace"                     (:mode out)))
+      (is (= 0                            (:priority out)))
+      (is (= "Weekend Action block"       (:note out))))))
+
 (deftest request-tags-simple-response-test
   (testing "request-tags! parses simple string array response"
     (with-redefs [http/post (fn [_ _]

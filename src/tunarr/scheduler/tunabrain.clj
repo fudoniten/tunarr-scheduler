@@ -302,6 +302,39 @@
               {:field label :errors (contracts/humanize schema value)}))
   value)
 
+(defn- kebab-case
+  "Lowercase, replace `&` with `and`, replace runs of non-alphanumerics with
+   a single `-`, and trim leading/trailing `-`. Matches the dimension
+   naming convention used by the PV tag-curation pipeline: spaces and
+   punctuation collapse to hyphens, `&` becomes the word `and`.
+
+   `Sci-Fi and Fantasy`   -> `sci-fi-and-fantasy`
+   `Action & Adventure`   -> `action-and-adventure`
+   `Sci-Fi`               -> `sci-fi`
+   `Comedy`               -> `comedy`
+   `comedy`               -> `comedy`  (already-kebab pass-through)"
+  [s]
+  (when s
+    (-> s
+        str/lower-case
+        (str/replace "&" "and")
+        (str/replace #"[^a-z0-9]+" "-")
+        (str/replace #"(^-+)|(-+$)" ""))))
+
+(defn- normalize-random-media-id
+  "If `media_id` is `random:<category>`, kebab-case the category to match the
+   canonical PV tag form (e.g. `random:Sci-Fi & Fantasy` -> `random:sci-fi-and-fantasy`).
+   Tunabrain emits overrides with the human-readable form straight from the
+   catalog profile; this is the storage-time half of the fix that pairs with
+   the lookup-side kebab-case fallback in `pseudovision.http.api.daily-slots`
+   (PR fudoniten/pseudovision#116). Returns `media-id` unchanged for any
+   other media_id shape (series:<id>, movie:<id>, nil, or already-kebab
+   `random:` which is a no-op)."
+  [media-id]
+  (if (and (string? media-id) (str/starts-with? media-id "random:"))
+    (str "random:" (kebab-case (subs media-id 7)))
+    media-id))
+
 (defn- normalize-override
   "Tunabrain emits an override :scope with every scope key present, using null
    for the keys that don't apply to the chosen shape (a single :date vs. a
@@ -309,12 +342,22 @@
    explicit nulls read as disallowed/invalid keys and storage refuses them. Drop
    the nil-valued scope keys so the two shapes stay mutually exclusive before
    validation and storage; a genuinely ambiguous scope (both :date and :days
-   set) is left intact so it still fails validation."
+   set) is left intact so it still fails validation.
+
+   Also normalises `(get-in override [:content :media_id])` when it is
+   `random:<category>`: the category is kebab-cased to the canonical PV tag
+   form (see `normalize-random-media-id`). This is the preventive half of
+   the random-category fix — without it, every monthly LLM run re-introduces
+   the same `random:Comedy` / `random:Sci-Fi and Fantasy` form that the
+   PV-side lookup fix was added to tolerate."
   [override]
   (cond-> override
     (map? (:scope override))
     (update :scope (fn [scope]
-                     (into {} (remove (comp nil? val)) scope)))))
+                     (into {} (remove (comp nil? val)) scope)))
+    (and (map? (:content override))
+         (string? (get-in override [:content :media_id])))
+    (update-in [:content :media_id] normalize-random-media-id)))
 
 (defn quarterly-grid-request
   "Build a QuarterlyGridRequest payload (handoff §5.1)."
