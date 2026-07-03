@@ -498,6 +498,35 @@
    [:tags {:optional true} [:maybe [:vector :string]]]
    [:error {:optional true} [:maybe :string]]])
 
+;; ---------------------------------------------------------------------------
+;; Per-item tag & dimension editing (manual curation, e.g. from Marquee)
+;; ---------------------------------------------------------------------------
+
+(def MediaTagsRequest
+  "Body for adding/replacing tags on a single media item."
+  [:map
+   [:tags [:vector [:string {:min 1}]]]])
+
+(def MediaTagsResponse
+  "Current tags on a media item after a mutation."
+  [:map
+   [:media-id :string]
+   [:tags [:vector :string]]])
+
+(def MediaCategoryValuesRequest
+  "Body for adding/replacing values on a dimension for a single media item.
+   The optional :rationale is stored alongside each added value."
+  [:map
+   [:values [:vector [:string {:min 1}]]]
+   [:rationale {:optional true} [:maybe :string]]])
+
+(def MediaCategoryValuesResponse
+  "Current values for one dimension on a media item after a mutation."
+  [:map
+   [:media-id :string]
+   [:category :string]
+   [:values [:vector :string]]])
+
 (def ForceQuery
   [:map
    [:force {:optional true} [:enum "true" "false"]]])

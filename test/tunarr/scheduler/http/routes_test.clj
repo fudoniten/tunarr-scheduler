@@ -33,6 +33,9 @@
     (swap! state update-in [:media-tags media-id] (fnil concat []) tags))
   (set-media-tags! [_ media-id tags]
     (swap! state assoc-in [:media-tags media-id] tags))
+  (delete-media-tags! [_ media-id tags]
+    (swap! state update-in [:media-tags media-id]
+           (fn [existing] (vec (remove (set tags) existing)))))
   (update-channels! [_ channels]
     (swap! state assoc :channels channels))
   (update-libraries! [_ libraries]
@@ -78,9 +81,13 @@
     (swap! state update-in [:category-values media-id category]
            (fnil conj []) {::media/category-value value ::media/rationale rationale}))
   (add-media-category-values! [_ media-id category values]
-    (swap! state update-in [:category-values media-id category] (fnil concat []) values))
+    ;; Mirror the real catalogs: store just the category-value keyword, so
+    ;; get-media-category-values returns values (not the {value,rationale} maps).
+    (swap! state update-in [:category-values media-id category]
+           (fn [existing] (distinct (concat (or existing []) (map ::media/category-value values))))))
   (set-media-category-values! [_ media-id category values]
-    (swap! state assoc-in [:category-values media-id category] values))
+    (swap! state assoc-in [:category-values media-id category]
+           (distinct (map ::media/category-value values))))
   (get-media-categories [_ media-id]
     (get-in @state [:category-values media-id] {}))
   (delete-media-category-value! [_ media-id category value]
@@ -656,6 +663,117 @@
           (is (= 42 (:schedule-id body)))
           (is (= 2 (count (:slots body))))
           (is (= 2 (count (:upcoming-events body)))))))))
+
+;; ---------------------------------------------------------------------------
+;; Per-item tag editing endpoints
+;; ---------------------------------------------------------------------------
+
+(defn- json-post [handler method url body]
+  (handler (-> (mock/request method url)
+               (mock/content-type "application/json")
+               (mock/body (json/generate-string body)))))
+
+(deftest add-media-item-tags-test
+  (testing "POST /api/media-item/:id/tags adds tags and returns the full list"
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "m1") {::media/id "m1" ::media/name "Item"}))]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (json-post handler :post "/api/media-item/m1/tags"
+                                {:tags ["noir" "heist"]})
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= "m1" (:media-id body)))
+        (is (= #{"noir" "heist"} (set (:tags body))))))))
+
+(deftest get-media-item-tags-test
+  (testing "GET /api/media-item/:id/tags returns the current tags"
+    (swap! (:state *catalog*) assoc-in [:media-tags "m1"] [:noir :heist])
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (handler (mock/request :get "/api/media-item/m1/tags"))
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= #{"noir" "heist"} (set (:tags body))))))))
+
+(deftest set-media-item-tags-test
+  (testing "PUT /api/media-item/:id/tags replaces the tag set"
+    (swap! (:state *catalog*) assoc-in [:media-tags "m1"] [:old-tag])
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (json-post handler :put "/api/media-item/m1/tags"
+                                {:tags ["fresh"]})
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= ["fresh"] (:tags body)))))))
+
+(deftest delete-media-item-tag-test
+  (testing "DELETE /api/media-item/:id/tags/:tag removes one tag"
+    (swap! (:state *catalog*) assoc-in [:media-tags "m1"] [:noir :heist])
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (handler (mock/request :delete "/api/media-item/m1/tags/noir"))
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= ["heist"] (:tags body)))))))
+
+(deftest media-item-tags-not-found-test
+  (testing "tag endpoints return 404 when the media item does not resolve"
+    (with-redefs [catalog/get-media-by-id (fn [_ _] nil)]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (json-post handler :post "/api/media-item/missing/tags"
+                                {:tags ["x"]})]
+        (is (= 404 (:status response)))))))
+
+;; ---------------------------------------------------------------------------
+;; Per-item dimension value editing endpoints
+;; ---------------------------------------------------------------------------
+
+(deftest add-media-item-category-values-test
+  (testing "POST /api/media-item/:id/categories/:category adds dimension values"
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (json-post handler :post "/api/media-item/m1/categories/mood"
+                                {:values ["tense" "dark"] :rationale "manual"})
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= "mood" (:category body)))
+        (is (= #{"tense" "dark"} (set (:values body))))))))
+
+(deftest delete-media-item-category-value-test
+  (testing "DELETE /api/media-item/:id/categories/:category/values/:value removes a value"
+    (swap! (:state *catalog*) assoc-in [:category-values "m1" :mood] [:tense :dark])
+    (with-redefs [catalog/get-media-by-id
+                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
+      (let [handler  (routes/handler {:job-runner *job-runner*
+                                      :collection mock-collection
+                                      :catalog    *catalog*
+                                      :tunabrain  mock-tunabrain})
+            response (handler (mock/request :delete "/api/media-item/m1/categories/mood/values/tense"))
+            body     (parse-json-response response)]
+        (is (= 200 (:status response)))
+        (is (= ["dark"] (:values body)))))))
 
 (deftest get-schedule-no-schedule-test
   (testing "GET /api/channels/:id/schedule returns 404 when no schedule attached"

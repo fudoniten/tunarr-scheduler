@@ -673,6 +673,10 @@
                         (sql:insert-tags tags)
                         (sql:insert-media-tags media-id tags)]))
 
+  (delete-media-tags! [_ media-id tags]
+    (when (seq tags)
+      (sql:exec! executor (sql:delete-media-tags! media-id tags))))
+
   (get-media-tags [_ media-id]
     (map (comp keyword :media_tags/tag)
          (sql:fetch! executor (sql:get-media-tags media-id))))

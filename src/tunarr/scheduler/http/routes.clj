@@ -122,6 +122,64 @@
                               500 {:body s/APIError}}
                   :handler   (media/recategorize-media-item-handler ctx)}}]
 
+   ["/api/media-item/:media-id/tags"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :get        {:summary   "List the tags on a media item"
+                  :responses {200 {:body s/MediaTagsResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/get-media-item-tags-handler ctx)}
+     :post       {:summary    "Add tags to a media item (merged with existing tags)"
+                  :parameters {:body s/MediaTagsRequest}
+                  :responses  {200 {:body s/MediaTagsResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/add-media-item-tags-handler ctx)}
+     :put        {:summary    "Replace the full set of tags on a media item"
+                  :parameters {:body s/MediaTagsRequest}
+                  :responses  {200 {:body s/MediaTagsResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/set-media-item-tags-handler ctx)}}]
+
+   ["/api/media-item/:media-id/tags/:tag"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId] [:tag s/TagName]]}
+     :delete     {:summary   "Remove a single tag from a media item"
+                  :responses {200 {:body s/MediaTagsResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/delete-media-item-tag-handler ctx)}}]
+
+   ["/api/media-item/:media-id/categories/:category"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId] [:category s/DimensionName]]}
+     :post       {:summary    "Add values to a dimension on a media item (merged with existing values)"
+                  :parameters {:body s/MediaCategoryValuesRequest}
+                  :responses  {200 {:body s/MediaCategoryValuesResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/add-media-item-category-values-handler ctx)}
+     :put        {:summary    "Replace the full set of values for a dimension on a media item"
+                  :parameters {:body s/MediaCategoryValuesRequest}
+                  :responses  {200 {:body s/MediaCategoryValuesResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/set-media-item-category-values-handler ctx)}}]
+
+   ["/api/media-item/:media-id/categories/:category/values/:value"
+    {:tags       ["media"]
+     :parameters {:path [:map
+                         [:media-id s/MediaId]
+                         [:category s/DimensionName]
+                         [:value :string]]}
+     :delete     {:summary   "Remove a single value from a dimension on a media item"
+                  :responses {200 {:body s/MediaCategoryValuesResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/delete-media-item-category-value-handler ctx)}}]
+
    ["/api/media-item/:media-id/sync-pseudovision"
     {:tags       ["media"]
      :parameters {:path [:map [:media-id s/MediaId]]}
