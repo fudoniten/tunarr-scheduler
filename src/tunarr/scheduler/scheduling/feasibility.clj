@@ -30,7 +30,8 @@
    ships a reference implementation, as we did for the expander."
   (:require [clojure.string :as str]
             [clojure.set :as set]
-            [tunarr.scheduler.scheduling.calendar :as cal])
+            [tunarr.scheduler.scheduling.calendar :as cal]
+            [tunarr.scheduler.scheduling.policy :as policy])
   (:import [java.time LocalDate]))
 
 (def ^:const margin
@@ -267,27 +268,53 @@
            vec))))
 
 ;; ---------------------------------------------------------------------------
+;; Content-policy (watershed) violations
+;; ---------------------------------------------------------------------------
+
+(defn- profile-tag-resolver
+  "A media_id → catalog-tag-seq lookup built from a CatalogProfile's `:shows`
+   (each ShowProfile carries `:tags`). Movies not present in `:shows` resolve to
+   nil, so only their strip's own `category_filters` are consulted."
+  [catalog-profile]
+  (let [by-id (into {} (map (juxt :media_id :tags)) (:shows catalog-profile))]
+    (fn [media-id] (get by-id media-id))))
+
+;; ---------------------------------------------------------------------------
 ;; Public API
 ;; ---------------------------------------------------------------------------
 
 (defn check
   "Produce a FeasibilityReport (contracts/FeasibilityReport) for `grid` against
    `catalog-profile` over [horizon-start, horizon-end) (end exclusive). Dates may
-   be LocalDate or ISO strings."
-  [grid catalog-profile horizon-start horizon-end]
-  (let [dates    (horizon-dates horizon-start horizon-end)
-        findings (mapv #(finding % catalog-profile dates) (:strips grid))
-        olaps    (find-overlaps (:strips grid))
-        uncov    (uncovered-intervals grid)
-        any?     (fn [status] (some #(= status (:status %)) findings))
-        overall  (cond
-                   (any? "shortfall")                       "blocked"
-                   (or (any? "tight") (seq olaps) (seq uncov)) "warnings"
-                   :else                                    "ok")]
-    {:horizon_start (str (->date horizon-start))
-     :horizon_end   (str (->date horizon-end))
-     :overall_status overall
-     :strip_findings findings
-     :overlaps olaps
-     :uncovered_intervals uncov
-     :notes []}))
+   be LocalDate or ISO strings.
+
+   The optional `policy` (contracts/ContentPolicy) adds deterministic
+   content-placement checks: any strip that airs restricted content (e.g.
+   `audience:adult`) in a forbidden part of the day yields a
+   `:watershed_violations` entry and forces `overall_status` to \"blocked\", so
+   the propose→repair loop re-places it."
+  ([grid catalog-profile horizon-start horizon-end]
+   (check grid catalog-profile horizon-start horizon-end nil))
+  ([grid catalog-profile horizon-start horizon-end policy]
+   (let [dates      (horizon-dates horizon-start horizon-end)
+         findings   (mapv #(finding % catalog-profile dates) (:strips grid))
+         olaps      (find-overlaps (:strips grid))
+         uncov      (uncovered-intervals grid)
+         violations (if (seq (:watersheds policy))
+                      (policy/grid-violations grid policy (profile-tag-resolver catalog-profile))
+                      [])
+         any?       (fn [status] (some #(= status (:status %)) findings))
+         overall    (cond
+                      (or (any? "shortfall") (seq violations)) "blocked"
+                      (or (any? "tight") (seq olaps) (seq uncov)) "warnings"
+                      :else                                    "ok")]
+     {:horizon_start (str (->date horizon-start))
+      :horizon_end   (str (->date horizon-end))
+      :overall_status overall
+      :strip_findings findings
+      :overlaps olaps
+      :uncovered_intervals uncov
+      :watershed_violations violations
+      ;; Surface violations in :notes too, so a Tunabrain repair endpoint that
+      ;; does not read the local :watershed_violations field still gets the why.
+      :notes (vec violations)})))

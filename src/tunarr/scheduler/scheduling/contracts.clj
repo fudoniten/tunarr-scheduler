@@ -179,6 +179,39 @@
    [:note {:optional true} [:maybe :string]]])
 
 ;; ---------------------------------------------------------------------------
+;; ContentPolicy — deterministic per-channel placement constraints
+;; ---------------------------------------------------------------------------
+;;
+;; Unlike operator *guidance* (free-text hints fed to the LLM, which steer but
+;; never gate), a ContentPolicy is a HARD constraint the deterministic layer
+;; enforces: the feasibility checker blocks a grid that violates it (driving the
+;; repair loop) and the publish step substitutes default content at air time.
+;; It is a Tunarr-Scheduler-local contract (not part of the Tunabrain wire
+;; spec), but it is passed to Tunabrain's propose calls as a best-effort hint so
+;; violations are avoided up front rather than only repaired after the fact.
+
+(def Watershed
+  "A time-of-day restriction on content carrying a dimension value. Content
+   tagged `<dimension>:<value>` (e.g. audience:adult) may air ONLY within the
+   half-open window [allowed_from, allowed_to). `allowed_to <= allowed_from`
+   means the window crosses midnight — e.g. allowed_from \"22:00\" /
+   allowed_to \"06:00\" permits 22:00→06:00 and forbids the daytime in between
+   (\"adult content only after 10 PM\")."
+  [:map
+   [:dimension :string]
+   [:value :string]
+   [:allowed_from ClockTime]
+   [:allowed_to ClockTime]
+   [:label {:optional true} [:maybe :string]]])
+
+(def ContentPolicy
+  "The per-channel set of hard placement constraints. Currently just watersheds;
+   the map is left open so further constraint kinds can be added without a
+   contract break."
+  [:map {:closed false}
+   [:watersheds {:optional true} [:vector Watershed]]])
+
+;; ---------------------------------------------------------------------------
 ;; FeasibilityReport — repair feedback to Tunabrain (§2.4)
 ;; ---------------------------------------------------------------------------
 
@@ -206,6 +239,12 @@
    [:strip_findings {:optional true} [:vector StripFeasibility]]
    [:overlaps {:optional true} [:vector :string]]
    [:uncovered_intervals {:optional true} [:vector :string]]
+   ;; Local extension (not in the Tunabrain wire spec): human-readable
+   ;; content-policy breaches (e.g. a watershed placing adult content in the
+   ;; daytime). Any entry forces `overall_status` to "blocked" so the repair
+   ;; loop re-places the offending strip. Also mirrored into `:notes` so a
+   ;; Tunabrain repair endpoint that ignores this field still sees the reason.
+   [:watershed_violations {:optional true} [:vector :string]]
    [:notes {:optional true} [:vector :string]]])
 
 ;; ---------------------------------------------------------------------------
@@ -239,6 +278,8 @@
    :Grid              Grid
    :OverrideScope     OverrideScope
    :Override          ScheduleOverride
+   :Watershed         Watershed
+   :ContentPolicy     ContentPolicy
    :StripFeasibility  StripFeasibility
    :FeasibilityReport FeasibilityReport
    :DailySlot         DailySlot})

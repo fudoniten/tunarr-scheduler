@@ -165,3 +165,36 @@
         (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))
               fields  (get-in req [:parameters :body])]
           {:status 200 :body (storage/set-guidance! ex channel fields)})))))
+
+;; ---------------------------------------------------------------------------
+;; Content policy (deterministic hard constraints, e.g. watersheds)
+;; ---------------------------------------------------------------------------
+
+(defn get-policy-handler
+  "GET /api/scheduling/channels/:channel/policy — the deterministic content
+   policy (an empty watershed set when none has been set)."
+  [ctx]
+  (let [ex (executor-of ctx)]
+    (fn [req]
+      (with-handler "Error getting policy"
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))]
+          {:status 200 :body (or (storage/get-policy ex channel)
+                                 {:channel channel :watersheds []})})))))
+
+(defn put-policy-handler
+  "PUT /api/scheduling/channels/:channel/policy — set/replace the content policy.
+   Body is a ContentPolicy ({:watersheds [...]}) validated before it is stored;
+   an invalid policy is rejected with 400 rather than persisted."
+  [ctx]
+  (let [ex (executor-of ctx)]
+    (fn [req]
+      (with-handler "Error setting policy"
+        (let [channel (channel-storage-key ctx (get-in req [:parameters :path :channel]))
+              policy  (get-in req [:parameters :body])]
+          (try
+            {:status 200 :body (storage/set-policy! ex channel policy)}
+            (catch clojure.lang.ExceptionInfo e
+              (if (:errors (ex-data e))
+                {:status 400 :body {:error (util/error-message e)
+                                    :details (:errors (ex-data e))}}
+                (throw e)))))))))

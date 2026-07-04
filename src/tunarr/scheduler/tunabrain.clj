@@ -402,44 +402,59 @@
          (string? (get-in override [:content :media_id])))
     (update-in [:content :media_id] normalize-random-media-id)))
 
+(defn- with-content-policy
+  "Attach a `:content_policy` to a request payload when the policy actually
+   carries watersheds. A best-effort hint so Tunabrain avoids placing restricted
+   content in forbidden windows up front; the deterministic feasibility check is
+   what actually enforces it, so an omitted/empty policy is harmless."
+  [payload content-policy]
+  (cond-> payload
+    (seq (:watersheds content-policy)) (assoc :content_policy content-policy)))
+
 (defn quarterly-grid-request
   "Build a QuarterlyGridRequest payload (handoff §5.1)."
   [{:keys [channel quarter year catalog-profile quarterly-theme strategic-guidance
-           broadcast-day-start default-media-id cost-tier]
+           content-policy broadcast-day-start default-media-id cost-tier]
     :or   {broadcast-day-start "06:00" cost-tier "balanced"}}]
-  {:channel             (channel->payload channel)
-   :quarter             quarter
-   :year                year
-   :catalog_profile     catalog-profile
-   :quarterly_theme     quarterly-theme
-   :strategic_guidance  strategic-guidance
-   :broadcast_day_start broadcast-day-start
-   :default_media_id    default-media-id
-   :cost_tier           cost-tier})
+  (with-content-policy
+    {:channel             (channel->payload channel)
+     :quarter             quarter
+     :year                year
+     :catalog_profile     catalog-profile
+     :quarterly_theme     quarterly-theme
+     :strategic_guidance  strategic-guidance
+     :broadcast_day_start broadcast-day-start
+     :default_media_id    default-media-id
+     :cost_tier           cost-tier}
+    content-policy))
 
 (defn repair-grid-request
   "Build a QuarterlyGridRepairRequest payload (handoff §5.2)."
-  [{:keys [channel catalog-profile current-grid feasibility-report cost-tier]
+  [{:keys [channel catalog-profile current-grid feasibility-report content-policy cost-tier]
     :or   {cost-tier "balanced"}}]
-  {:channel            (channel->payload channel)
-   :catalog_profile    catalog-profile
-   :current_grid       current-grid
-   :feasibility_report feasibility-report
-   :cost_tier          cost-tier})
+  (with-content-policy
+    {:channel            (channel->payload channel)
+     :catalog_profile    catalog-profile
+     :current_grid       current-grid
+     :feasibility_report feasibility-report
+     :cost_tier          cost-tier}
+    content-policy))
 
 (defn monthly-overrides-request
   "Build a MonthlyOverridesRequest payload (handoff §5.3)."
   [{:keys [channel month grid catalog-profile monthly-theme planned-events
-           strategic-guidance cost-tier]
+           strategic-guidance content-policy cost-tier]
     :or   {planned-events [] cost-tier "balanced"}}]
-  {:channel            (channel->payload channel)
-   :month              month
-   :grid               grid
-   :catalog_profile    catalog-profile
-   :monthly_theme      monthly-theme
-   :planned_events     (vec planned-events)
-   :strategic_guidance strategic-guidance
-   :cost_tier          cost-tier})
+  (with-content-policy
+    {:channel            (channel->payload channel)
+     :month              month
+     :grid               grid
+     :catalog_profile    catalog-profile
+     :monthly_theme      monthly-theme
+     :planned_events     (vec planned-events)
+     :strategic_guidance strategic-guidance
+     :cost_tier          cost-tier}
+    content-policy))
 
 (defn propose-quarterly-grid!
   "Ask Tunabrain to propose a frozen quarterly Grid for one channel.

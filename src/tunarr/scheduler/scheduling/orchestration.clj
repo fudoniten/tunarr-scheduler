@@ -29,6 +29,9 @@
 (defn- guidance [executor channel]
   (or (storage/get-guidance executor channel) {}))
 
+(defn- policy [executor channel]
+  (or (storage/get-policy executor channel) {}))
+
 (defn run-quarterly!
   "Propose → check → repair → freeze a quarterly Grid for one channel. Bounds the
    repair loop at `:max-repairs` (default 3), then freezes best-effort with the
@@ -44,6 +47,7 @@
   (let [channel        (:name channel-spec)
         profile        (fetch-profile pv-config {:channel channel :tag catalog-tag})
         g              (guidance executor channel)
+        pol            (policy executor channel)
         [hstart hend]  (plans/quarter-range quarter year)
         proposed       (propose-grid
                         tunabrain
@@ -51,11 +55,12 @@
                          :catalog-profile profile
                          :quarterly-theme (:quarterly_theme g)
                          :strategic-guidance (:strategic_guidance g)
+                         :content-policy pol
                          :default-media-id default-media-id
                          :cost-tier cost-tier})
         grid-id        (:grid_id proposed)]
     (loop [grid (:grid proposed), repairs 0]
-      (let [report (feasibility/check grid profile (str hstart) (str hend))]
+      (let [report (feasibility/check grid profile (str hstart) (str hend) pol)]
         (if (or (= "ok" (:overall_status report)) (>= repairs max-repairs))
           (let [stored (storage/freeze-grid! executor channel quarter year grid
                                              :grid-id grid-id :feasibility report)]
@@ -67,6 +72,7 @@
                           tunabrain
                           {:channel channel-spec :catalog-profile profile
                            :current-grid grid :feasibility-report report
+                           :content-policy pol
                            :cost-tier cost-tier})]
             (log/info "repairing quarterly grid"
                       {:channel channel :round (inc repairs) :status (:overall_status report)})
@@ -91,6 +97,7 @@
                       {:channel channel :month month :quarter quarter :year year})))
     (let [profile (fetch-profile pv-config {:channel channel :tag catalog-tag})
           g       (guidance executor channel)
+          pol     (policy executor channel)
           resp    (propose-overrides
                    tunabrain
                    {:channel channel-spec :month month :grid (:grid grid-record)
@@ -98,6 +105,7 @@
                     :monthly-theme (:monthly_theme g)
                     :planned-events (:planned_events g)
                     :strategic-guidance (:strategic_guidance g)
+                    :content-policy pol
                     :cost-tier cost-tier})
           stored  (storage/store-overrides! executor channel month (:overrides resp)
                                             :overrides-id (:overrides_id resp))]

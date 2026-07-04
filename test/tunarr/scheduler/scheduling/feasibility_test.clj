@@ -161,3 +161,47 @@
     (doseq [finding (:strip_findings report)]
       (is (nil? (c/humanize c/StripFeasibility finding))
           (str "non-conforming finding: " finding)))))
+
+;; ---------------------------------------------------------------------------
+;; Content policy (watershed) enforcement
+;; ---------------------------------------------------------------------------
+
+(def adult-catalog
+  "Django is an adult movie, tagged in the profile so the checker can resolve it."
+  (assoc catalog
+         :shows (conj (:shows catalog)
+                      {:media_id "movie:django" :title "Django Unchained"
+                       :episode_count 1 :available_episode_count 1
+                       :tags ["audience:adult"]})))
+
+(def watershed-policy
+  {:watersheds [{:dimension "audience" :value "adult"
+                 :allowed_from "22:00" :allowed_to "06:00"}]})
+
+(deftest watershed-blocks-daytime-adult-movie
+  (testing "an adult movie at 18:00 (the Django-at-6PM bug) is blocked + reported"
+    (let [report (f/check (grid [(strip "evening" "weekdays" "18:00" "20:00" "movie:django")])
+                          adult-catalog week-start week-end watershed-policy)]
+      (is (= "blocked" (:overall_status report)))
+      (is (= 1 (count (:watershed_violations report))))
+      (is (str/includes? (first (:watershed_violations report)) "evening"))
+      (testing "the reason is mirrored into :notes for a repair endpoint"
+        (is (= (:watershed_violations report) (:notes report))))
+      (testing "the report still conforms to the contract"
+        (is (nil? (c/humanize c/FeasibilityReport report)))))))
+
+(deftest watershed-allows-latenight-and-ignores-non-adult
+  (testing "the same movie after 22:00 is fine"
+    (let [report (f/check (grid [(strip "late" "weekdays" "22:30" "23:59" "movie:django")])
+                          adult-catalog week-start week-end watershed-policy)]
+      (is (empty? (:watershed_violations report)))
+      (is (not= "blocked" (:overall_status report)))))
+  (testing "non-adult daytime content is untouched"
+    (let [report (f/check (grid [(strip "s" "weekdays" "17:00" "18:00" "series:seinfeld")])
+                          adult-catalog week-start week-end watershed-policy)]
+      (is (empty? (:watershed_violations report)))))
+  (testing "without a policy the checker behaves exactly as before"
+    (let [report (f/check (grid [(strip "evening" "weekdays" "18:00" "20:00" "movie:django")])
+                          adult-catalog week-start week-end)]
+      (is (empty? (:watershed_violations report)))
+      (is (not= "blocked" (:overall_status report))))))

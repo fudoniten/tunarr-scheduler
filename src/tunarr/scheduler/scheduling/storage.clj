@@ -237,15 +237,62 @@
        (mapv row->guidance)))
 
 ;; ---------------------------------------------------------------------------
+;; Per-channel content policy (deterministic hard constraints, e.g. watersheds)
+;; ---------------------------------------------------------------------------
+
+(defn- row->policy [row]
+  (when row
+    (let [policy (json-> (:channel_policy/policy row) {})]
+      {:channel    (:channel_policy/channel row)
+       :watersheds (vec (:watersheds policy))
+       :updated-at (:channel_policy/updated_at row)})))
+
+(defn get-policy
+  "The content policy for a channel, or nil if none set. The returned map has a
+   `:watersheds` vector (contracts/Watershed[]) plus `:channel`/`:updated-at`."
+  [ex channel]
+  (-> (fetch! ex (-> (h/select :*) (h/from :channel_policy) (h/where [:= :channel channel])))
+      first row->policy))
+
+(defn set-policy!
+  "Upsert the content policy for a channel. `policy` must conform to
+   contracts/ContentPolicy; its `:watersheds` replace any prior set wholesale
+   (a policy is small and structured — there is no partial-merge). Returns the
+   stored policy map."
+  [ex channel policy]
+  (when-let [err (contracts/humanize contracts/ContentPolicy policy)]
+    (throw (ex-info "refusing to store a non-conforming ContentPolicy" {:errors err})))
+  (let [updated  (now-iso)
+        stored   {:watersheds (vec (:watersheds policy))}
+        existing (get-policy ex channel)
+        columns  {:policy (->json stored) :updated_at updated}]
+    (if existing
+      (exec! ex (-> (h/update :channel_policy) (h/set columns)
+                    (h/where [:= :channel channel])))
+      (exec! ex (-> (h/insert-into :channel_policy)
+                    (h/values [(assoc columns :channel channel)]))))
+    (log/info "Stored channel policy" {:channel channel
+                                       :watersheds (count (:watersheds stored))})
+    {:channel channel :watersheds (:watersheds stored) :updated-at updated}))
+
+(defn list-policy
+  "All channel policy rows."
+  [ex]
+  (->> (fetch! ex (-> (h/select :*) (h/from :channel_policy) (h/order-by [:channel :asc])))
+       (mapv row->policy)))
+
+;; ---------------------------------------------------------------------------
 ;; Cross-cutting
 ;; ---------------------------------------------------------------------------
 
 (defn planned-channels
-  "Distinct channel names that have any stored grid, override set, or guidance."
+  "Distinct channel names that have any stored grid, override set, guidance, or
+   content policy."
   [ex]
   (->> (concat (map :channel (list-grids ex))
                (map :channel (list-overrides ex))
-               (map :channel (list-guidance ex)))
+               (map :channel (list-guidance ex))
+               (map :channel (list-policy ex)))
        (remove nil?)
        distinct
        sort

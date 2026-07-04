@@ -199,6 +199,44 @@ UI gets read access to the plans plus a per-channel manual-input surface that
 - `plans_test.clj` (7 tests); full ring handler assembles without route
   conflicts. 55 scheduling tests / 232 assertions green.
 
+### Phase 7 — Content policy (watersheds) ✅ DONE
+Per-channel **hard** placement constraints, distinct from Phase 6 guidance
+(which only steers the LLM). The first constraint kind is the **watershed**:
+content tagged `<dimension>:<value>` (e.g. `audience:adult`) may air only within
+an allowed time-of-day window — "adult content only after 22:00" is
+`allowed_from 22:00 / allowed_to 06:00`.
+- **Contract:** `contracts/Watershed` + `contracts/ContentPolicy`;
+  `FeasibilityReport` gains an optional `:watershed_violations` (mirrored into
+  `:notes` so a repair endpoint that ignores the local field still sees the why).
+- **Storage:** migration `20260704-001-channel-policy` + `channel_policy` table;
+  `storage/get-policy`/`set-policy!` (validated, whole-set replace)/`list-policy`;
+  folded into `planned-channels`.
+- **Enforcement is layered** (`scheduling/policy.clj`, pure):
+  - *Authoritative* — `feasibility/check` takes the policy, resolves each
+    strip's `media_id` to its catalog tags (from the CatalogProfile `:shows`)
+    plus the strip's own `category_filters`, and **blocks** a grid that places
+    restricted content in a forbidden window, driving the propose→repair loop.
+    This is what catches the "Django at 6 PM" case.
+  - *Best-effort up front* — the policy is attached to the Tunabrain propose /
+    repair requests (`:content_policy`) so violations are avoided before repair.
+  - *Air-time backstop* — `integration/publish-week!` runs
+    `policy/enforce-slots`, substituting the grid's `default_content` for the
+    forbidden portion of any restricted slot (splitting at the watershed
+    boundary). Deterministic; a no-op when the channel has no policy.
+- **HTTP** `GET`/`PUT /api/scheduling/channels/:channel/policy` (`http/api/plans.clj`),
+  schemas `ContentPolicy`/`ContentPolicyUpdate`. An invalid watershed is
+  rejected with 400.
+- **Tests:** `policy_test.clj` (pure helpers), watershed cases in
+  `feasibility_test.clj`, storage cases in `plans_test.clj`, handler cases in
+  `http/api/plans_test.clj`, and an end-to-end substitution in
+  `integration_test.clj`.
+- **Known gap:** a broad `random:<pool>` strip whose *individual items* are
+  adult but whose strip is not tagged can only be caught at air time by an
+  **excluded-tags** field on the DailySlot contract — Pseudovision's
+  `category_filters` are required-tags (AND) with no exclusion channel. Adding
+  `excluded_tags` to the DailySlot ingest is the cross-repo follow-up; until
+  then, tag such pools' strips with the restricted value so the guard applies.
+
 ---
 
 ## Open decisions

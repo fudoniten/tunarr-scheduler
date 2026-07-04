@@ -37,7 +37,20 @@
     (testing "defaults"
       (is (= "06:00" (:broadcast_day_start req)))
       (is (= "balanced" (:cost_tier req)))
-      (is (contains? req :strategic_guidance)))))
+      (is (contains? req :strategic_guidance)))
+    (testing "content_policy is omitted when there are no watersheds"
+      (is (not (contains? req :content_policy)))
+      (is (not (contains? (tb/quarterly-grid-request
+                           {:channel channel :quarter "Q1" :year 2026
+                            :catalog-profile catalog-profile :content-policy {:watersheds []}})
+                          :content_policy))))
+    (testing "content_policy is attached as a best-effort hint when watersheds exist"
+      (let [pol {:watersheds [{:dimension "audience" :value "adult"
+                               :allowed_from "22:00" :allowed_to "06:00"}]}
+            r   (tb/quarterly-grid-request
+                 {:channel channel :quarter "Q1" :year 2026
+                  :catalog-profile catalog-profile :content-policy pol})]
+        (is (= pol (:content_policy r)))))))
 
 (deftest ^:eftest/synchronized repair-grid-request-shape
   (let [report {:horizon_start "2026-01-01" :horizon_end "2026-04-01"
@@ -69,7 +82,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- stub-post [capture response]
-  (fn [_client path payload]
+  (fn [_client path payload & _opts]
     (reset! capture {:path path :payload payload})
     response))
 

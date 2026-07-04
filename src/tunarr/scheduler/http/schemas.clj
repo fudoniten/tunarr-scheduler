@@ -425,6 +425,33 @@
    [:monthly_theme {:optional true} [:maybe :string]]
    [:planned_events {:optional true} [:vector :string]]])
 
+(def ^:private ClockTime
+  [:re {:description "24h wall-clock time, HH:MM"} #"^([01]\d|2[0-3]):[0-5]\d$"])
+
+(def Watershed
+  "A time-of-day restriction: content tagged <dimension>:<value> may air only
+   within [allowed_from, allowed_to). allowed_to <= allowed_from crosses
+   midnight (e.g. from 22:00 to 06:00 = 'adult only after 10 PM')."
+  [:map {:closed false}
+   [:dimension [:string {:min 1 :description "Catalog dimension, e.g. 'audience'"}]]
+   [:value [:string {:min 1 :description "Restricted value, e.g. 'adult'"}]]
+   [:allowed_from ClockTime]
+   [:allowed_to ClockTime]
+   [:label {:optional true} [:maybe :string]]])
+
+(def ContentPolicy
+  "Per-channel deterministic placement constraints (GET/PUT body). Enforced by
+   the feasibility checker and the publish step — a hard rule, not an LLM hint."
+  [:map {:closed false}
+   [:channel {:optional true} :string]
+   [:watersheds {:optional true} [:vector Watershed]]
+   [:updated-at {:optional true} :string]])
+
+(def ContentPolicyUpdate
+  "Editable policy fields (PUT body). `:watersheds` replaces the prior set."
+  [:map
+   [:watersheds {:optional true} [:vector Watershed]]])
+
 (def GridQuery
   [:map
    [:quarter {:optional true} [:string {:description "Quarter label, e.g. 'Q1'"}]]

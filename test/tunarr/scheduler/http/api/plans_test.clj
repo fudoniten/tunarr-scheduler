@@ -52,6 +52,12 @@
       monthly_theme TEXT,
       planned_events TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT NOT NULL
+    )"])
+  (jdbc/execute! db ["
+    CREATE TABLE IF NOT EXISTS channel_policy (
+      channel VARCHAR(128) PRIMARY KEY,
+      policy TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL
     )"]))
 
 (defn- grid [media-id]
@@ -193,8 +199,40 @@
         (is (= "summer westerns" (-> resp :body :quarterly_theme)))
         ;; The slug and the display name now both read the same row.
         (is (= "lean into nostalgia"
-               (-> (plans-api/get-guidance-handler *ctx* (req "goldenreels"))
+               (-> ((plans-api/get-guidance-handler *ctx*) (req "goldenreels"))
                    :body :strategic_guidance)))))))
+
+;; ---------------------------------------------------------------------------
+;; policy handlers
+;; ---------------------------------------------------------------------------
+
+(def watershed
+  {:dimension "audience" :value "adult" :allowed_from "22:00" :allowed_to "06:00"})
+
+(deftest policy-handlers-resolve-slug-and-round-trip
+  (testing "GET on a channel with no policy returns an empty watershed set"
+    (let [resp ((plans-api/get-policy-handler *ctx*) (req "goldenreels"))]
+      (is (= 200 (:status resp)))
+      (is (= [] (-> resp :body :watersheds)))))
+  (testing "PUT by slug stores under the display name; GET by slug reads it back"
+    (let [put  (plans-api/put-policy-handler *ctx*)
+          resp (put (assoc (req "goldenreels")
+                           :parameters {:path {:channel "goldenreels"}
+                                        :body {:watersheds [watershed]}}))]
+      (is (= 200 (:status resp)))
+      (is (= [watershed] (-> resp :body :watersheds)))
+      ;; Stored under the fullname, so a direct display-name GET sees it too.
+      (is (= [watershed]
+             (-> ((plans-api/get-policy-handler *ctx*) (req "Golden Reels"))
+                 :body :watersheds)))))
+  (testing "an invalid watershed is rejected with 400, not persisted"
+    (let [put  (plans-api/put-policy-handler *ctx*)
+          resp (put (assoc (req "spectrum")
+                           :parameters {:path {:channel "spectrum"}
+                                        :body {:watersheds [{:dimension "audience" :value "adult"
+                                                             :allowed_from "bogus" :allowed_to "06:00"}]}}))]
+      (is (= 400 (:status resp)))
+      (is (nil? (storage/get-policy (:executor (:catalog *ctx*)) "Sitcom Spectrum"))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Cross-channel isolation

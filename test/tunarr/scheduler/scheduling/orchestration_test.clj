@@ -23,7 +23,9 @@
       created_at TEXT NOT NULL, UNIQUE (channel, cal_month, version))"])
   (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_guidance (
       channel VARCHAR(128) PRIMARY KEY, strategic_guidance TEXT, quarterly_theme TEXT,
-      monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"]))
+      monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"])
+  (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_policy (
+      channel VARCHAR(128) PRIMARY KEY, policy TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)"]))
 
 (use-fixtures :each
   (fn [t]

@@ -174,6 +174,12 @@ as needed. The service exposes the following HTTP endpoints:
   Supports `?dry-run=true` and `?target-limit=N`.
 * `POST /api/channels/sync-pseudovision`
 * `POST /api/channels/:channel-id/schedule`
+* `GET`/`PUT /api/scheduling/channels/:channel/guidance` - per-channel operator
+  guidance (free-text steering fed to the LLM; advisory).
+* `GET`/`PUT /api/scheduling/channels/:channel/policy` - per-channel content
+  policy: **hard**, deterministic placement constraints (e.g. a watershed like
+  "`audience:adult` only after 22:00") enforced by the feasibility checker and
+  the weekly publish step. See [ROADMAP.md](ROADMAP.md) Phase 7.
 * `POST /api/bumpers/up-next`
 
 Payloads are JSON documents.

@@ -23,7 +23,9 @@
       created_at TEXT NOT NULL, UNIQUE (channel, cal_month, version))"])
   (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_guidance (
       channel VARCHAR(128) PRIMARY KEY, strategic_guidance TEXT, quarterly_theme TEXT,
-      monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"]))
+      monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"])
+  (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_policy (
+      channel VARCHAR(128) PRIMARY KEY, policy TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)"]))
 
 (use-fixtures :each
   (fn [t]
@@ -80,7 +82,39 @@
   (storage/freeze-grid! *ex* "Grid Only" "Q1" 2026
                         {:channel "Grid Only" :strips []
                          :default_content {:media_id "random:x" :strategy "random"}})
-  (is (= ["Grid Only" "Guidance Only"] (storage/planned-channels *ex*))))
+  (storage/set-policy! *ex* "Policy Only"
+                       {:watersheds [{:dimension "audience" :value "adult"
+                                      :allowed_from "22:00" :allowed_to "06:00"}]})
+  (is (= ["Grid Only" "Guidance Only" "Policy Only"] (storage/planned-channels *ex*))))
+
+;; ---------------------------------------------------------------------------
+;; Content-policy storage
+;; ---------------------------------------------------------------------------
+
+(def watershed
+  {:dimension "audience" :value "adult" :allowed_from "22:00" :allowed_to "06:00"
+   :label "adult watershed"})
+
+(deftest policy-defaults-to-nil
+  (is (nil? (storage/get-policy *ex* "Spectrum"))))
+
+(deftest policy-upsert-and-replace
+  (testing "first write inserts"
+    (let [p (storage/set-policy! *ex* "Spectrum" {:watersheds [watershed]})]
+      (is (= [watershed] (:watersheds p)))))
+  (testing "read-back round-trips the watershed exactly"
+    (is (= [watershed] (:watersheds (storage/get-policy *ex* "Spectrum")))))
+  (testing "a second write replaces the set wholesale (no merge)"
+    (let [p (storage/set-policy! *ex* "Spectrum" {:watersheds []})]
+      (is (= [] (:watersheds p)))
+      (is (= [] (:watersheds (storage/get-policy *ex* "Spectrum")))))))
+
+(deftest policy-rejects-non-conforming
+  (testing "a watershed with a bad clock time is refused before it hits the DB"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (storage/set-policy! *ex* "Spectrum"
+                                      {:watersheds [{:dimension "audience" :value "adult"
+                                                     :allowed_from "10pm" :allowed_to "06:00"}]})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Preview + dashboard

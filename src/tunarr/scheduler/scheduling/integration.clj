@@ -16,7 +16,9 @@
             [taoensso.timbre :as log]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.scheduling.contracts :as contracts]
-            [tunarr.scheduler.scheduling.plans :as plans]))
+            [tunarr.scheduler.scheduling.plans :as plans]
+            [tunarr.scheduler.scheduling.policy :as policy]
+            [tunarr.scheduler.scheduling.storage :as storage]))
 
 ;; ---------------------------------------------------------------------------
 ;; Key-case translation (deep, over maps nested in vectors/maps)
@@ -111,16 +113,25 @@
    `channel-tag` (optional, e.g. \"channel:hua\") is injected into every slot's
    `:category_filters` so random resolution stays scoped to the channel pool."
   [ex pv-config channel pv-channel-id start end & {:keys [channel-tag]}]
-  (let [{:keys [grid_id slots]} (plans/preview ex channel start end)]
+  (let [{:keys [grid_id slots default_content]} (plans/preview ex channel start end)]
     (if (nil? grid_id)
       (do (log/info "publish-week!: no frozen grid; skipping"
                     {:channel channel :start (str start) :end (str end)})
           {:channel channel :pv-channel-id pv-channel-id
            :start (str start) :end (str end) :skipped :no-grid})
-      (let [result (publish-daily-slots! pv-config pv-channel-id slots :channel-tag channel-tag)]
+      ;; Air-time backstop: substitute the grid's default content for any slot a
+      ;; content-policy watershed forbids at this time of day. Deterministic and
+      ;; a no-op when the channel has no policy.
+      (let [pol      (storage/get-policy ex channel)
+            enforced (policy/enforce-slots slots pol default_content)
+            vetoed   (- (count enforced) (count slots))
+            result   (publish-daily-slots! pv-config pv-channel-id enforced :channel-tag channel-tag)]
+        (when (pos? vetoed)
+          (log/info "publish-week!: watershed substitutions applied"
+                    {:channel channel :extra-segments vetoed}))
         (log/info "publish-week!: pushed daily slots"
                   {:channel channel :pv-channel-id pv-channel-id
-                   :slot-count (count slots) :result result})
+                   :slot-count (count enforced) :result result})
         {:channel channel :pv-channel-id pv-channel-id
          :start (str start) :end (str end)
-         :slot-count (count slots) :result result}))))
+         :slot-count (count enforced) :result result}))))

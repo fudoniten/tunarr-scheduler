@@ -79,6 +79,9 @@
      :start   (str start)
      :end     (str end)
      :grid_id (:grid_id record)
+     ;; The frozen grid's fallback content, surfaced so the publish step can
+     ;; substitute it when a content-policy watershed vetoes a slot.
+     :default_content (get-in record [:grid :default_content])
      :slots   slots}))
 
 (defn dashboard

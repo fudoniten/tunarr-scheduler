@@ -648,6 +648,20 @@
                                 500 {:body s/APIError}}
                    :handler    (plans/put-guidance-handler ctx)}}]
 
+    ["/api/scheduling/channels/:channel/policy"
+     {:tags       ["plans"]
+      :parameters {:path [:map [:channel s/ChannelName]]}
+      :get        {:summary   "Get the per-channel content policy (watersheds)"
+                   :responses {200 {:body s/ContentPolicy}
+                               500 {:body s/APIError}}
+                   :handler   (plans/get-policy-handler ctx)}
+      :put        {:summary    "Set/replace the per-channel content policy. Hard, deterministic placement constraints (e.g. 'audience:adult only after 22:00') enforced by the feasibility checker and the publish step."
+                   :parameters {:body s/ContentPolicyUpdate}
+                   :responses  {200 {:body s/ContentPolicy}
+                                400 {:body s/APIError}
+                                500 {:body s/APIError}}
+                   :handler    (plans/put-policy-handler ctx)}}]
+
     ;; ── Jobs ────────────────────────────────────────────────────────────────
     ["/api/jobs"
      {:tags ["jobs"]

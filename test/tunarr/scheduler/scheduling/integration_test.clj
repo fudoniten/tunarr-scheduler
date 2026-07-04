@@ -148,7 +148,9 @@
       id VARCHAR(64) PRIMARY KEY, overrides_id VARCHAR(128), channel VARCHAR(128) NOT NULL,
       cal_month VARCHAR(7) NOT NULL, version INTEGER NOT NULL DEFAULT 1,
       status VARCHAR(32) NOT NULL DEFAULT 'active', overrides TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL, UNIQUE (channel, cal_month, version))"]))
+      created_at TEXT NOT NULL, UNIQUE (channel, cal_month, version))"])
+  (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_policy (
+      channel VARCHAR(128) PRIMARY KEY, policy TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)"]))
 
 (use-fixtures :each
   (fn [t]
@@ -183,3 +185,28 @@
   (with-redefs [pv/push-daily-slots! (fn [& _] (throw (ex-info "should not push" {})))]
     (let [out (integ/publish-week! *ex* ::cfg "No Grid Channel" 9 "2026-01-05" "2026-01-12")]
       (is (= :no-grid (:skipped out))))))
+
+(def adult-grid
+  "A daytime adult-movie strip — the shape the watershed must catch at air time."
+  {:channel "Late Night"
+   :strips [{:strip_id "afternoon-movie" :days "weekdays" :start "17:00" :end "18:00"
+             :content {:media_id "movie:django" :strategy "specific"
+                       :category_filters ["audience:adult"]}}]
+   :default_content {:media_id "random:comedy" :strategy "random"}})
+
+(deftest ^:eftest/synchronized publish-week-applies-watershed-substitution
+  (storage/freeze-grid! *ex* "Late Night" "Q1" 2026 adult-grid :grid-id "g-adult")
+  (storage/set-policy! *ex* "Late Night"
+                       {:watersheds [{:dimension "audience" :value "adult"
+                                      :allowed_from "22:00" :allowed_to "06:00"}]})
+  (let [capture (atom nil)]
+    (with-redefs [pv/push-daily-slots! (fn [_cfg _id slots]
+                                         (reset! capture slots)
+                                         {:ingested (count slots) :skipped 0 :errors []})]
+      (integ/publish-week! *ex* ::cfg "Late Night" 7 "2026-01-05" "2026-01-12"
+                           :channel-tag "channel:latenight")
+      (testing "no adult content survives in the daytime slots"
+        (is (not-any? #(some #{"audience:adult"} (:category-filters %)) @capture)))
+      (testing "the daytime strip was replaced by the default fill"
+        (is (some #(= "random:comedy" (:media-id %)) @capture))
+        (is (not-any? #(= "movie:django" (:media-id %)) @capture))))))
