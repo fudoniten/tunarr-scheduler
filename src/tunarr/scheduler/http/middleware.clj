@@ -64,7 +64,14 @@
       (catch Exception e
         (log/error e "Unexpected exception")
         {:status 500
-         :body   {:error (util/error-message e)}}))))
+         :body   {:error (util/error-message e)}})
+      ;; Catch non-Exception Throwables too (e.g. AbstractMethodError from a
+      ;; protocol/impl mismatch). Without this they escape every boundary and
+      ;; Jetty returns an unlogged HTML 500, hiding the real cause.
+      (catch Throwable t
+        (log/error t "Unexpected error")
+        {:status 500
+         :body   {:error (util/error-message t)}}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Request logging
@@ -111,7 +118,10 @@
   (fn [request]
     (try
       (handler request)
-      (catch Exception e
+      ;; Throwable (not just Exception) so that Errors escaping the inner
+      ;; layers still produce a logged, JSON 500 rather than a bare Jetty
+      ;; HTML error page with nothing in the logs.
+      (catch Throwable e
         (log/error e "Unhandled exception in handler")
         {:status 500
          :headers {"Content-Type" "application/json"}
