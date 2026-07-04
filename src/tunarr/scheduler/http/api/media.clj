@@ -686,6 +686,150 @@
         (log/error e "Error removing dimension value from media item")
         {:status 500 :body {:error (util/error-message e)}}))))
 
+;; ---------------------------------------------------------------------------
+;; Per-item grounding context (view / edit the Tunabrain grounding)
+;;
+;; Tunabrain is stateless: it grounds tagging/categorization on a MediaContext
+;; (a resolved Wikipedia summary, operator notes, or reference links) and
+;; returns whatever it used. The scheduler persists that context per media item
+;; so a bad auto-match is inspectable and correctable. Operator edits here are
+;; marked sticky (operator-edited) so an automatic re-tag will not overwrite
+;; them; the corrected context is sent back on the next retag/recategorize.
+;; ---------------------------------------------------------------------------
+
+(defn- context-response
+  "Build the context response body for a media item."
+  [media-id context]
+  {:media-id media-id
+   :context  context})
+
+(defn get-media-item-context-handler
+  "Return the stored grounding context for a media item (nil when none has been
+   captured yet)."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            {:status 200 :body (context-response catalog-id
+                                                 (catalog/get-media-context catalog catalog-id))})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error fetching media item context")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn delete-media-item-context-handler
+  "Delete the stored grounding context for a media item entirely. The next
+   retag/recategorize will fall back to Tunabrain's Wikipedia auto-search."
+  [{:keys [catalog pseudovision]}]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)]
+            (catalog/delete-media-context! catalog catalog-id)
+            {:status 200 :body (context-response catalog-id nil)})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e "Error deleting media item context")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn- context-mutation-handler
+  "Build a handler that resolves the media item, applies `f` to its stored
+   context (an empty map when none is stored yet), marks the result
+   operator-edited so an automatic re-tag will not clobber it, persists it, and
+   returns the freshly stored context. `f` receives [existing-context request]
+   and returns the new context map. This is the common read-modify-write path
+   behind every per-field context add/remove endpoint."
+  [{:keys [catalog pseudovision]} error-label f]
+  (fn [req]
+    (try
+      (let [media-id (get-in req [:parameters :path :media-id])]
+        (if-let [media (resolve-media-by-id catalog pseudovision media-id)]
+          (let [catalog-id (::media/id media)
+                existing   (or (catalog/get-media-context catalog catalog-id) {})
+                updated    (-> (f existing req)
+                               (update :links #(vec (or % [])))
+                               (assoc :operator-edited true))]
+            (catalog/set-media-context! catalog catalog-id updated)
+            {:status 200 :body (context-response catalog-id
+                                                 (catalog/get-media-context catalog catalog-id))})
+          {:status 404 :body {:error (str "Media not found: " media-id)}}))
+      (catch Exception e
+        (log/error e error-label)
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn set-media-item-context-handler
+  "PUT — replace the whole grounding context for a media item with
+   operator-supplied text / links / summary. Marks it operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error setting media item context"
+   (fn [_existing req]
+     (let [body (get-in req [:parameters :body])]
+       {:text    (:text body)
+        :links   (vec (or (:links body) []))
+        :summary (:summary body)
+        :source  "operator"}))))
+
+(defn add-media-item-context-link-handler
+  "Add a single reference URL to the stored context's link list (merged with
+   any existing links). Marks the context operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error adding context link to media item"
+   (fn [existing req]
+     (let [link (get-in req [:parameters :body :link])]
+       (update existing :links #(vec (distinct (conj (vec %) link))))))))
+
+(defn delete-media-item-context-link-handler
+  "Remove a single reference URL from the stored context's link list. Marks the
+   context operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error removing context link from media item"
+   (fn [existing req]
+     (let [link (get-in req [:parameters :body :link])]
+       (update existing :links #(vec (remove #{link} %)))))))
+
+(defn set-media-item-context-text-handler
+  "Set the free-form operator text note on the stored context. Marks it
+   operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error setting context text on media item"
+   (fn [existing req]
+     (assoc existing :text (get-in req [:parameters :body :text])))))
+
+(defn delete-media-item-context-text-handler
+  "Clear the operator text note from the stored context (leaving links/summary
+   intact). Marks the context operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error clearing context text on media item"
+   (fn [existing _req]
+     (assoc existing :text nil))))
+
+(defn set-media-item-context-summary-handler
+  "Pin the grounding summary on the stored context. A non-blank summary takes
+   precedence over links/text on the next re-tag. Marks it operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error setting context summary on media item"
+   (fn [existing req]
+     (assoc existing :summary (get-in req [:parameters :body :summary])))))
+
+(defn delete-media-item-context-summary-handler
+  "Clear the pinned summary from the stored context (leaving links/text intact),
+   so the next re-tag grounds on the links/text instead. Marks the context
+   operator-edited."
+  [ctx]
+  (context-mutation-handler
+   ctx "Error clearing context summary on media item"
+   (fn [existing _req]
+     (assoc existing :summary nil))))
+
 (defn sync-media-item-pseudovision-handler
   "Sync a single media item's tags to Pseudovision."
   [{:keys [catalog pseudovision]}]

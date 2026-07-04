@@ -256,6 +256,21 @@
                  :usage-count (count (filter #(some #{val} (get-in % [dimension]))
                                               (vals (get @state :categories {}))))}))))
 
+  (get-media-context [_ media-id]
+    (get-in @state [:context media-id]))
+
+  (set-media-context! [_ media-id context]
+    (swap! state assoc-in [:context media-id]
+           (-> context
+               (update :links #(vec (or % [])))
+               (update :operator-edited boolean)
+               (assoc :updated-at (str (java.time.Instant/now)))))
+    nil)
+
+  (delete-media-context! [_ media-id]
+    (swap! state update :context dissoc media-id)
+    nil)
+
   (close-catalog! [_]
     (reset! state {:media {}})
     nil))

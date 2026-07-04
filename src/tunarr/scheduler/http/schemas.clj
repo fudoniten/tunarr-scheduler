@@ -527,6 +527,57 @@
    [:category :string]
    [:values [:vector :string]]])
 
+;; ---------------------------------------------------------------------------
+;; Per-item grounding context (Tunabrain tagging/categorization grounding)
+;; ---------------------------------------------------------------------------
+
+(def MediaContext
+  "The grounding context stored for a media item. Mirrors Tunabrain's
+   MediaContext wire object plus two locally-managed fields:
+   `operator-edited` (a human correction is sticky and not auto-overwritten)
+   and `updated-at`. `source` is Tunabrain-provided provenance, one of
+   provided-summary/provided-text/provided-link/wikipedia/none (kept as a
+   permissive string)."
+  [:map {:closed false}
+   [:text            {:optional true} [:maybe :string]]
+   [:links           {:optional true} [:vector :string]]
+   [:summary         {:optional true} [:maybe :string]]
+   [:source          {:optional true} [:maybe :string]]
+   [:operator-edited {:optional true} [:maybe :boolean]]
+   [:updated-at      {:optional true} [:maybe :string]]])
+
+(def MediaContextResponse
+  "The stored context for a media item (nil when none has been captured yet)."
+  [:map
+   [:media-id :string]
+   [:context [:maybe MediaContext]]])
+
+(def MediaContextRequest
+  "PUT body to set/replace the stored context on a media item. Sending this
+   marks the context operator-edited so a subsequent automatic re-tag will not
+   clobber it. Absent fields are treated as empty/null."
+  [:map
+   [:text    {:optional true} [:maybe :string]]
+   [:links   {:optional true} [:vector :string]]
+   [:summary {:optional true} [:maybe :string]]])
+
+(def MediaContextLinkRequest
+  "Body carrying a single reference URL to add to or remove from the stored
+   context's link list."
+  [:map
+   [:link [:string {:min 1}]]])
+
+(def MediaContextTextRequest
+  "Body carrying the free-form operator text note to store on the context."
+  [:map
+   [:text [:string {:min 1}]]])
+
+(def MediaContextSummaryRequest
+  "Body carrying the resolved grounding summary to pin on the context. A
+   non-blank summary takes precedence over links/text on the next re-tag."
+  [:map
+   [:summary [:string {:min 1}]]])
+
 (def ForceQuery
   [:map
    [:force {:optional true} [:enum "true" "false"]]])

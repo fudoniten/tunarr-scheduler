@@ -180,6 +180,72 @@
                               500 {:body s/APIError}}
                   :handler   (media/delete-media-item-category-value-handler ctx)}}]
 
+   ["/api/media-item/:media-id/context"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :get        {:summary   "Get the stored Tunabrain grounding context for a media item"
+                  :responses {200 {:body s/MediaContextResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/get-media-item-context-handler ctx)}
+     :put        {:summary    "Replace the grounding context on a media item (marks it operator-edited)"
+                  :parameters {:body s/MediaContextRequest}
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/set-media-item-context-handler ctx)}
+     :delete     {:summary   "Delete the grounding context on a media item"
+                  :responses {200 {:body s/MediaContextResponse}
+                              404 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/delete-media-item-context-handler ctx)}}]
+
+   ["/api/media-item/:media-id/context/links"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :post       {:summary    "Add a reference link to a media item's grounding context"
+                  :parameters {:body s/MediaContextLinkRequest}
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/add-media-item-context-link-handler ctx)}
+     :delete     {:summary    "Remove a reference link from a media item's grounding context"
+                  :parameters {:body s/MediaContextLinkRequest}
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/delete-media-item-context-link-handler ctx)}}]
+
+   ["/api/media-item/:media-id/context/text"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :put        {:summary    "Set the operator text note on a media item's grounding context"
+                  :parameters {:body s/MediaContextTextRequest}
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/set-media-item-context-text-handler ctx)}
+     :delete     {:summary    "Clear the operator text note from a media item's grounding context"
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/delete-media-item-context-text-handler ctx)}}]
+
+   ["/api/media-item/:media-id/context/summary"
+    {:tags       ["media"]
+     :parameters {:path [:map [:media-id s/MediaId]]}
+     :put        {:summary    "Pin the grounding summary on a media item's context (takes precedence over links/text)"
+                  :parameters {:body s/MediaContextSummaryRequest}
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/set-media-item-context-summary-handler ctx)}
+     :delete     {:summary    "Clear the pinned summary from a media item's grounding context"
+                  :responses  {200 {:body s/MediaContextResponse}
+                               404 {:body s/APIError}
+                               500 {:body s/APIError}}
+                  :handler    (media/delete-media-item-context-summary-handler ctx)}}]
+
    ["/api/media-item/:media-id/sync-pseudovision"
     {:tags       ["media"]
      :parameters {:path [:map [:media-id s/MediaId]]}

@@ -273,6 +273,71 @@
         (is (= :exciting (get-in result [:dimensions :mood 0 ::media/category-value])))
         (is (= "Fast paced" (get-in result [:dimensions :mood 0 ::media/rationale])))))))
 
+;; ---------------------------------------------------------------------------
+;; MediaContext threading (handoff: context on /tags and /categorize)
+;; ---------------------------------------------------------------------------
+
+(deftest request-tags-sends-and-parses-context-test
+  (testing "request-tags! sends stored context and parses the returned context"
+    (let [posted (atom nil)]
+      (with-redefs [http/post (fn [_ opts]
+                                (reset! posted (clojure.walk/keywordize-keys
+                                                (cheshire.core/parse-string (:body opts))))
+                                {:status 200
+                                 :body "{\"tags\": [\"crime-drama\"],
+                                         \"context\": {\"text\": null,
+                                                       \"links\": [\"https://en.wikipedia.org/wiki/Juice_(1992_film)\"],
+                                                       \"summary\": \"Juice (1992) is a crime drama.\",
+                                                       \"source\": \"wikipedia\"}}"})]
+        (let [client (tunabrain/create! {:endpoint "http://test.local"})
+              media  {::media/name "Juice"}
+              result (tunabrain/request-tags!
+                      client media
+                      :context {:summary "Juice (1992) is a violent crime drama."
+                                :links [] :operator-edited true})]
+          ;; request carries only the wire-relevant fields (summary here)
+          (is (= "Juice (1992) is a violent crime drama."
+                 (get-in @posted [:context :summary])))
+          (is (nil? (get-in @posted [:context :operator-edited]))
+              "internal-only keys are not sent to Tunabrain")
+          ;; response context is parsed back out
+          (is (= [:crime-drama] (:tags result)))
+          (is (= "wikipedia" (get-in result [:context :source])))
+          (is (= ["https://en.wikipedia.org/wiki/Juice_(1992_film)"]
+                 (get-in result [:context :links]))))))))
+
+(deftest request-tags-omits-empty-context-test
+  (testing "request-tags! omits :context entirely when the stored context is empty"
+    (let [posted (atom nil)]
+      (with-redefs [http/post (fn [_ opts]
+                                (reset! posted (clojure.walk/keywordize-keys
+                                                (cheshire.core/parse-string (:body opts))))
+                                {:status 200 :body "{\"tags\": []}"})]
+        (let [client (tunabrain/create! {:endpoint "http://test.local"})]
+          (tunabrain/request-tags! client {::media/name "X"}
+                                   :context {:text nil :links [] :summary nil})
+          (is (not (contains? @posted :context))
+              "an empty context must not be sent (preserves Wikipedia auto-search)"))))))
+
+(deftest request-categorization-sends-and-parses-context-test
+  (testing "request-categorization! sends context and parses the returned context"
+    (let [posted (atom nil)]
+      (with-redefs [http/post (fn [_ opts]
+                                (reset! posted (clojure.walk/keywordize-keys
+                                                (cheshire.core/parse-string (:body opts))))
+                                {:status 200
+                                 :body "{\"dimensions\": [],
+                                         \"context\": {\"links\": [\"https://en.wikipedia.org/wiki/Juice_(1992_film)\"],
+                                                       \"summary\": \"resolved\",
+                                                       \"source\": \"provided-link\"}}"})]
+        (let [client (tunabrain/create! {:endpoint "http://test.local"})
+              result (tunabrain/request-categorization!
+                      client {::media/name "Juice"}
+                      :context {:links ["https://en.wikipedia.org/wiki/Juice_(1992_film)"]})]
+          (is (= ["https://en.wikipedia.org/wiki/Juice_(1992_film)"]
+                 (get-in @posted [:context :links])))
+          (is (= "provided-link" (get-in result [:context :source]))))))))
+
 (deftest request-tag-triage-test
   (testing "request-tag-triage! parses triage response"
     (with-redefs [http/post (fn [_ _]

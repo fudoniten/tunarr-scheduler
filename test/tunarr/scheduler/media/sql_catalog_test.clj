@@ -94,6 +94,16 @@
       category TEXT,
       category_value TEXT,
       PRIMARY KEY (media_id, category, category_value)
+    )"])
+  (jdbc/execute! db ["
+    CREATE TABLE IF NOT EXISTS media_context (
+      media_id TEXT PRIMARY KEY REFERENCES media(id),
+      text TEXT,
+      links TEXT NOT NULL DEFAULT '[]',
+      summary TEXT,
+      source TEXT,
+      operator_edited BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMP DEFAULT NOW()
     )"]))
 
 (defn test-fixture [f]
@@ -680,3 +690,62 @@
       (is (= "Movie v2" (::media/name movie)))
       (is (= "Test Series" (::media/name series)))
       (is (contains? tags :curated) "curation tag survives batch upsert"))))
+
+;; ---------------------------------------------------------------------------
+;; Per-media grounding context (media_context)
+;; ---------------------------------------------------------------------------
+
+(deftest media-context-round-trip-test
+  (testing "set/get context round-trips, decoding the JSON links column"
+    (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
+    (catalog/add-media! *test-catalog* sample-movie)
+    (is (nil? (catalog/get-media-context *test-catalog* "movie-1"))
+        "no context stored yet")
+
+    (catalog/set-media-context!
+     *test-catalog* "movie-1"
+     {:text            "Operator note"
+      :links           ["https://en.wikipedia.org/wiki/Juice_(1992_film)"]
+      :summary         "Juice (1992) is a crime drama set in Harlem."
+      :source          "provided-summary"
+      :operator-edited true})
+
+    (let [ctx (catalog/get-media-context *test-catalog* "movie-1")]
+      (is (= "Operator note" (:text ctx)))
+      (is (= ["https://en.wikipedia.org/wiki/Juice_(1992_film)"] (:links ctx)))
+      (is (= "Juice (1992) is a crime drama set in Harlem." (:summary ctx)))
+      (is (= "provided-summary" (:source ctx)))
+      (is (true? (:operator-edited ctx)))
+      (is (some? (:updated-at ctx)) "updated-at is stamped"))))
+
+(deftest media-context-upsert-replaces-test
+  (testing "set-media-context! upserts (replaces) an existing row"
+    (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
+    (catalog/add-media! *test-catalog* sample-movie)
+    (catalog/set-media-context! *test-catalog* "movie-1"
+                                {:summary "first" :links ["a"]})
+    (catalog/set-media-context! *test-catalog* "movie-1"
+                                {:summary "second" :links [] :operator-edited true})
+    (let [ctx (catalog/get-media-context *test-catalog* "movie-1")]
+      (is (= "second" (:summary ctx)))
+      (is (= [] (:links ctx)))
+      (is (true? (:operator-edited ctx))))))
+
+(deftest media-context-defaults-test
+  (testing "a context stored with only a summary reads back sane defaults"
+    (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
+    (catalog/add-media! *test-catalog* sample-movie)
+    (catalog/set-media-context! *test-catalog* "movie-1" {:summary "only summary"})
+    (let [ctx (catalog/get-media-context *test-catalog* "movie-1")]
+      (is (= "only summary" (:summary ctx)))
+      (is (= [] (:links ctx)) "absent links default to an empty vector")
+      (is (false? (:operator-edited ctx)) "operator-edited defaults to false"))))
+
+(deftest media-context-delete-test
+  (testing "delete-media-context! removes the stored context"
+    (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
+    (catalog/add-media! *test-catalog* sample-movie)
+    (catalog/set-media-context! *test-catalog* "movie-1" {:summary "x"})
+    (is (some? (catalog/get-media-context *test-catalog* "movie-1")))
+    (catalog/delete-media-context! *test-catalog* "movie-1")
+    (is (nil? (catalog/get-media-context *test-catalog* "movie-1")))))

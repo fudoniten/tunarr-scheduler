@@ -102,7 +102,15 @@
   ;; NEW: Browse dimensions across the catalog
   (get-all-dimensions [catalog])
   (get-dimension-values [catalog dimension])
-  (get-media-by-category-value [catalog category value]))
+  (get-media-by-category-value [catalog category value])
+
+  ;; Per-media grounding context for Tunabrain tagging/categorization.
+  ;; A context is a map: {:text :links :summary :source :operator-edited
+  ;; :updated-at}. Tunabrain is stateless, so the resolved grounding is
+  ;; persisted here and sent back on subsequent /tags and /categorize calls.
+  (get-media-context [catalog media-id])
+  (set-media-context! [catalog media-id context])
+  (delete-media-context! [catalog media-id]))
 
 (defmulti initialize-catalog! :type)
 
@@ -305,6 +313,22 @@
                     [:value ::media/category-value]
                     [:usage-count int?]]))
 
+(s/def ::media-context (s/nilable map?))
+
+(s/fdef get-media-context
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id)
+  :ret  ::media-context)
+
+(s/fdef set-media-context!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id
+               :context  map?))
+
+(s/fdef delete-media-context!
+  :args (s/cat :catalog  ::catalog
+               :media-id ::media/id))
+
 (instrument 'add-media)
 (instrument 'add-media-batch)
 (instrument 'get-media)
@@ -339,3 +363,6 @@
 (instrument 'get-effective-categories)
 (instrument 'get-all-dimensions)
 (instrument 'get-dimension-values)
+(instrument 'get-media-context)
+(instrument 'set-media-context!)
+(instrument 'delete-media-context!)
