@@ -567,6 +567,17 @@
   [:map
    [:link [:string {:min 1}]]])
 
+(def MediaContextTextRequest
+  "Body carrying the free-form operator text note to store on the context."
+  [:map
+   [:text [:string {:min 1}]]])
+
+(def MediaContextSummaryRequest
+  "Body carrying the resolved grounding summary to pin on the context. A
+   non-blank summary takes precedence over links/text on the next re-tag."
+  [:map
+   [:summary [:string {:min 1}]]])
+
 (def ForceQuery
   [:map
    [:force {:optional true} [:enum "true" "false"]]])
