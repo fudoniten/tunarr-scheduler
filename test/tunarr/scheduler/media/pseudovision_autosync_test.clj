@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.pseudovision-autosync :as autosync])
-  (:import [java.util.concurrent LinkedBlockingQueue]))
+  (:import [java.util.concurrent LinkedBlockingQueue]
+           [tunarr.scheduler.media.pseudovision_autosync SyncingCatalog]))
 
 (def reconcile-token @#'autosync/reconcile-token)
 (def drain-into! @#'autosync/drain-into!)
@@ -107,47 +108,58 @@
 ;; positional and the inner SqlCatalog's :executor is only accessible via
 ;; (:executor inner). This breaks the weekly/monthly/quarterly scheduling
 ;; tasks and the read endpoints in http.api.plans / http.api.strategy.
+;; A defrecord (like the real SqlCatalog) so it carries an :executor field and
+;; supports keyword lookup / assoc — a reify would not be Associative, which is
+;; what wrap-catalog-exposes-inner-executor exercises. Method arities mirror the
+;; Catalog protocol exactly; the bodies are inert stubs (this test only checks
+;; the :executor passthrough, never invokes protocol methods).
+(defrecord StubExecutorCatalog [executor]
+  catalog/Catalog
+  (get-media-tags [_ _] [])
+  (add-media! [_ _] nil)
+  (add-media-batch! [_ _] nil)
+  (get-media [_] [])
+  (get-media-by-id [_ _] nil)
+  (get-media-by-library-id [_ _] nil)
+  (get-media-by-library [_ _] nil)
+  (get-media-by-kind [_ _ _] [])
+  (get-filler-items [_ _] [])
+  (count-media-by-kind [_ _] 0)
+  (search-media-by-library-id [_ _ _] [])
+  (get-tags [_] [])
+  (get-channels [_] [])
+  (get-genres [_] [])
+  (update-channels! [_ _] nil)
+  (update-libraries! [_ _] nil)
+  (add-media-channels! [_ _ _] nil)
+  (add-media-genres! [_ _ _] nil)
+  (add-media-taglines! [_ _ _] nil)
+  (get-media-by-channel [_ _] [])
+  (get-media-by-tag [_ _] [])
+  (get-media-by-genre [_ _] [])
+  (get-media-process-timestamps [_ _] nil)
+  (get-tag-samples [_] [])
+  (update-process-timestamp! [_ _ _] nil)
+  (delete-process-timestamp! [_ _ _] nil)
+  (delete-library-process-timestamps! [_ _ _] nil)
+  (close-catalog! [_] nil)
+  (get-media-category-values [_ _ _] [])
+  (get-media-categories [_ _] [])
+  (get-episodes-by-series [_ _] [])
+  (get-episode [_ _ _ _] nil)
+  (get-effective-tags [_ _] [])
+  (get-effective-categories [_ _] [])
+  (get-library-id [_ _] nil)
+  (enrich-media-with-timestamps [_ m] m)
+  (get-all-dimensions [_] [])
+  (get-dimension-values [_ _] [])
+  (get-media-by-category-value [_ _ _] [])
+  (get-media-context [_ _] nil)
+  (set-media-context! [_ _ _] nil)
+  (delete-media-context! [_ _] nil))
+
 (defn- executor-bearing-catalog [executor]
-  (reify catalog/Catalog
-    (get-media-tags [_ _] [])
-    (add-media! [_ _] nil)
-    (add-media-batch! [_ _] nil)
-    (get-media [_] [])
-    (get-media-by-id [_ _] nil)
-    (get-media-by-library-id [_ _] nil)
-    (get-media-by-library [_ _] nil)
-    (get-media-by-kind [_ _ _] [])
-    (get-filler-items [_] [])
-    (count-media-by-kind [_] 0)
-    (search-media-by-library-id [_ _ _] [])
-    (get-tags [_] [])
-    (get-channels [_] [])
-    (get-genres [_] [])
-    (update-channels! [_ _] nil)
-    (update-libraries! [_ _] nil)
-    (add-media-channels! [_ _ _] nil)
-    (add-media-genres! [_ _ _] nil)
-    (add-media-taglines! [_ _ _] nil)
-    (get-media-by-channel [_] [])
-    (get-media-by-tag [_] [])
-    (get-media-by-genre [_] [])
-    (get-media-process-timestamps [_ _] nil)
-    (get-tag-samples [_] [])
-    (update-process-timestamp! [_ _ _] nil)
-    (delete-process-timestamp! [_ _] nil)
-    (delete-library-process-timestamps! [_ _] nil)
-    (close-catalog! [_] nil)
-    (get-media-category-values [_ _ _] [])
-    (get-media-categories [_] [])
-    (get-episodes-by-series [_] [])
-    (get-episode [_ _ _ _] nil)
-    (get-effective-tags [_] [])
-    (get-effective-categories [_] [])
-    (get-library-id [_] nil)
-    (enrich-media-with-timestamps [_ m] m)
-    (get-all-dimensions [_] [])
-    (get-dimension-values [_] [])
-    (get-media-by-category-value [_ _ _] [])))
+  (->StubExecutorCatalog executor))
 
 (def ^:private sentinel-executor
   ;; A unique sentinel — an Object identity we can compare with identical?.
@@ -160,7 +172,7 @@
     (let [inner (assoc (executor-bearing-catalog nil) :executor sentinel-executor)
           worker (test-worker)
           cat    (autosync/wrap-catalog inner worker)]
-      (is (instance? autosync/SyncingCatalog cat))
+      (is (instance? SyncingCatalog cat))
       (is (identical? sentinel-executor (:executor cat))
           "(:executor wrapped) must return the inner's :executor so scheduling tasks can issue SQL")
       (is (identical? inner (:inner cat))

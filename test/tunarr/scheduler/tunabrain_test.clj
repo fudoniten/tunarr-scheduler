@@ -239,7 +239,9 @@
         (let [client (tunabrain/create! {:endpoint "http://test.local"})
               media {::media/name "Test Movie"}]
           (tunabrain/request-tags! client media :catalog-tags [:existing-tag])
-          (is (= [:existing-tag] (:existing_tags @posted-data))))))))
+          ;; Tags go over the wire as JSON strings (request-tags! calls `name`),
+          ;; so the round-tripped payload holds strings, not keywords.
+          (is (= ["existing-tag"] (:existing_tags @posted-data))))))))
 
 (deftest request-tags-error-handling-test
   (testing "request-tags! throws on non-2xx response"
@@ -253,7 +255,10 @@
                              (tunabrain/request-tags! client media)))))))
 
 (deftest request-categorization-test
-  (testing "request-categorization! parses categorization response"
+  (testing "request-categorization! parses the dimensions from the response"
+    ;; The response may still carry a legacy `mappings` (channel) block, but
+    ;; channels are dimensions now, so the client ignores it and returns only
+    ;; `:dimensions` (and `:context`). Extra keys must be tolerated.
     (with-redefs [http/post (fn [_ _]
                              {:status 200
                               :body "{\"mappings\": [{\"channel_name\": \"action_channel\",
@@ -265,13 +270,12 @@
             media {::media/name "Test Movie"}
             result (tunabrain/request-categorization! client media
                                                      :categories {:mood {:description "Overall mood"
-                                                                         :values ["exciting" "calm"]}})]
-        (is (= 1 (count (:mappings result))))
-        (is (= :action_channel (get-in result [:mappings 0 ::media/channel-name])))
-        (is (= "High action content" (get-in result [:mappings 0 ::media/rationale])))
+                                                                         :values ["exciting" "calm"]}})
+            mood   (first (get-in result [:dimensions :mood]))]
+        (is (nil? (:mappings result)) "channel mappings are no longer parsed")
         (is (contains? (:dimensions result) :mood))
-        (is (= :exciting (get-in result [:dimensions :mood 0 ::media/category-value])))
-        (is (= "Fast paced" (get-in result [:dimensions :mood 0 ::media/rationale])))))))
+        (is (= :exciting (::media/category-value mood)))
+        (is (= "Fast paced" (::media/rationale mood)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; MediaContext threading (handoff: context on /tags and /categorize)
