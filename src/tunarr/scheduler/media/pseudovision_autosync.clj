@@ -238,6 +238,15 @@
   (get-dimension-values [_ dimension] (catalog/get-dimension-values inner dimension))
   (get-media-by-category-value [_ category value] (catalog/get-media-by-category-value inner category value))
 
+  ;; Per-media grounding context is TS-internal grounding for Tunabrain
+  ;; tagging/categorization; it is not part of the tag/metadata that syncs to
+  ;; Pseudovision, so these delegate straight through without marking the item
+  ;; dirty. (Omitting them entirely makes every context call throw
+  ;; AbstractMethodError on the wrapped catalog.)
+  (get-media-context [_ media-id] (catalog/get-media-context inner media-id))
+  (set-media-context! [_ media-id context] (catalog/set-media-context! inner media-id context))
+  (delete-media-context! [_ media-id] (catalog/delete-media-context! inner media-id))
+
   ;; --- item-level tag mutations: sync the touched item ---
   (add-media-tags! [_ media-id tags]
     (let [r (catalog/add-media-tags! inner media-id tags)] (mark-dirty! worker media-id) r))

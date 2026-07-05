@@ -61,7 +61,12 @@
           (log/error e "Handler exception" data)
           {:status (or (:status data) 500)
            :body   {:error (util/error-message e)}}))
-      (catch Exception e
+      ;; Catch Throwable, not just Exception: a handler that calls a protocol
+      ;; method the concrete catalog doesn't implement throws AbstractMethodError
+      ;; (an Error). If that escapes uncaught it reaches the servlet layer as a
+      ;; raw Jetty HTML 500 with nothing logged, which is near-impossible to
+      ;; diagnose. Catching it here turns it into a logged, structured response.
+      (catch Throwable e
         (log/error e "Unexpected exception")
         {:status 500
          :body   {:error (util/error-message e)}}))))
@@ -111,8 +116,15 @@
   (fn [request]
     (try
       (handler request)
-      (catch Exception e
+      ;; Catch Throwable (Errors too) and JSON-encode the body explicitly. This
+      ;; is the outermost wrapper, so its response bypasses both the Muuntaja
+      ;; format middleware and wrap-json-response — a raw map body here would
+      ;; reach ring-jetty unencoded and blow up in the servlet writer with
+      ;; "No implementation of write-body-to-stream ... PersistentArrayMap",
+      ;; surfacing to the client as an opaque Jetty HTML 500. Emit a String body
+      ;; so the error boundary always produces a well-formed JSON response.
+      (catch Throwable e
         (log/error e "Unhandled exception in handler")
-        {:status 500
-         :headers {"Content-Type" "application/json"}
-         :body   {:error "Internal server error"}}))))
+        {:status  500
+         :headers {"Content-Type" "application/json; charset=utf-8"}
+         :body    (json/generate-string {:error "Internal server error"})}))))
