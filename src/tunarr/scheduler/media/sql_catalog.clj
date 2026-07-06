@@ -221,7 +221,7 @@
   [media-id channels]
   (-> (insert-into :media_channels)
       (columns :media_id :channel)
-      (values (map (fn [channel] [media-id channel]) channels))
+      (values (map (fn [channel] [media-id (name channel)]) channels))
       (on-conflict :media_id :channel) (do-nothing)))
 
 (defn sql:insert-media-taglines
@@ -442,6 +442,16 @@
    :item_kind :production_year :subtitles :premiere :library_id :kid_friendly
    :parent_id :season_number :episode_number])
 
+(def ^:private media-join-columns
+  "Keys that media->row emits from the multi-valued field-map entries but which
+   are NOT columns on the `media` table — they are association collections
+   (tags, channels, genres, taglines) persisted into their own join tables. They
+   must be stripped from the media INSERT/upsert row; honey.sql would otherwise
+   render a value like [:action :adventure] as the SQL function call
+   `action(adventure)`. The join tables are populated by the separate
+   sql:insert-media-* statements."
+  [:tags :channels :genres :taglines])
+
 (defn sql:add-media
   "Upsert a single media item.
 
@@ -455,8 +465,7 @@
            ::media/genres
            ::media/taglines]
     :as media}]
-  (let [row (-> media
-                (media->row)
+  (let [row (-> (apply dissoc (media->row media) media-join-columns)
                 (update :media_type name)
                 (update :item_kind name))  ; NEW: Convert item_kind keyword to string
         update-cols (filterv #(contains? row %) media-upsert-columns)
@@ -508,8 +517,7 @@
         ;; This ensures parent records exist before child FK references
         sorted-items (sort-by #(if (= :episode (::media/type %)) 1 0) media-items)
         rows (mapv (fn [media]
-                     (-> media
-                         (media->row)
+                     (-> (apply dissoc (media->row media) media-join-columns)
                          (update :media_type name)
                          (update :item_kind name)))
                    sorted-items)
@@ -633,7 +641,10 @@
     (sql:exec-with-tx! executor (sql:add-media-batch media-items)))
 
   (get-media [_]
-    (sql:fetch! executor (sql:get-media)))
+    ;; Transform rows like every other getter: callers (e.g. the Pseudovision
+    ;; full-reconcile sync) read namespaced ::media/* keys and expect the tag/
+    ;; genre/channel aggregates decoded from Postgres arrays into keyword vectors.
+    (mapv row->media (sql:fetch! executor (sql:get-media))))
 
   (get-media-by-library-id [this library-id]
     (->> (sql:fetch! executor
@@ -723,8 +734,11 @@
                         (sql:insert-media-tags media-id tags)]))
 
   (set-media-tags! [_ media-id tags]
+    ;; "set" replaces the whole tag set: clear every existing association for
+    ;; this item first (delete-media-tags! only removes the tags passed to it,
+    ;; which would leave the previous tags in place), then insert the new set.
     (sql:exec-with-tx! executor
-                       [(sql:delete-media-tags! media-id tags)
+                       [(-> (delete-from :media_tags) (where [:= :media_id media-id]))
                         (sql:insert-tags tags)
                         (sql:insert-media-tags media-id tags)]))
 
@@ -759,7 +773,11 @@
   ;; DEPRECATED: Hardcoded genre assignment. Genres are dimensions now.
   ;; See protocol note in media/catalog.clj.
   (add-media-genres! [_ media-id genres]
-    (sql:exec! executor (sql:insert-media-genres media-id genres)))
+    ;; Insert the genre vocabulary rows first: media_genres.genre is an FK to
+    ;; genre(name), so the referenced genres must exist before the association.
+    (sql:exec-with-tx! executor
+                       [(sql:insert-genres genres)
+                        (sql:insert-media-genres media-id genres)]))
 
   ;; DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
   ;; See protocol note in media/catalog.clj.

@@ -30,7 +30,19 @@
            :test {:extra-paths ["test"]
                   :extra-deps {eftest/eftest {:mvn/version "0.6.0"}
                                ring/ring-mock {:mvn/version "0.4.0"}
-                               com.h2database/h2 {:mvn/version "2.2.220"}}
-                  :main-opts ["-e" "(require '[eftest.runner :refer [find-tests run-tests]]) (run-tests (find-tests \"test\"))"]}
+                               com.h2database/h2 {:mvn/version "2.2.220"}
+                               ;; Embedded PostgreSQL for SQL-catalog tests: H2 cannot run the
+                               ;; `INSERT ... ON CONFLICT ... DO UPDATE` upserts the production SQL
+                               ;; uses, so those tests run against a real (throwaway) Postgres.
+                               ;; Binary jars are per-platform; add your platform's classifier if it
+                               ;; is not listed (see io.zonky.test.postgres artifacts).
+                               io.zonky.test/embedded-postgres {:mvn/version "2.0.7"}
+                               io.zonky.test.postgres/embedded-postgres-binaries-linux-amd64 {:mvn/version "16.2.0"}
+                               io.zonky.test.postgres/embedded-postgres-binaries-darwin-amd64 {:mvn/version "16.2.0"}
+                               io.zonky.test.postgres/embedded-postgres-binaries-darwin-arm64v8 {:mvn/version "16.2.0"}}
+                  ;; Run serially: several suites use `with-redefs` (e.g. on clj-http),
+                  ;; which mutates a global root binding and is not thread-safe under
+                  ;; eftest's default parallel runner.
+                  :main-opts ["-e" "(require '[eftest.runner :refer [find-tests run-tests]]) (run-tests (find-tests \"test\") {:multithread? false})"]}
            :migrate {:exec-fn app.migrate/run
                      :exec-args {}}}}

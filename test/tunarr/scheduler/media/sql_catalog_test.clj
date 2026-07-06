@@ -4,118 +4,23 @@
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.sql-catalog :as sql-catalog]
             [tunarr.scheduler.sql.executor :as executor]
-            [next.jdbc :as jdbc])
+            [tunarr.scheduler.test-support.db :as test-db])
   (:import java.time.LocalDate))
 
-;; Test database setup and teardown
-(def ^:dynamic *test-db* nil)
+;; Test database: a real (embedded) Postgres, because the SqlCatalog emits
+;; Postgres-only `ON CONFLICT ... DO UPDATE` upserts that H2 cannot parse. The
+;; shared harness applies the production migrations once; each test gets a clean
+;; schema via test-db/reset!.
 (def ^:dynamic *test-catalog* nil)
 
-(defn create-test-db []
-  "Create an in-memory H2 database for testing"
-  (jdbc/get-datasource {:dbtype "h2:mem"
-                        :dbname "test"
-                        :DB_CLOSE_DELAY "-1"}))
-
-(defn setup-schema [db]
-  "Set up the test database schema"
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS library (
-      id TEXT PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS channel (
-      name TEXT PRIMARY KEY,
-      full_name TEXT,
-      id TEXT,
-      description TEXT
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      overview TEXT,
-      community_rating DOUBLE,
-      critic_rating DOUBLE,
-      rating TEXT,
-      media_type TEXT NOT NULL,
-      production_year INTEGER,
-      subtitles BOOLEAN,
-      premiere DATE,
-      kid_friendly BOOLEAN,
-      library_id TEXT REFERENCES library(id),
-      parent_id TEXT REFERENCES media(id),
-      season_number INTEGER,
-      episode_number INTEGER
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS tag (
-      name TEXT PRIMARY KEY
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS genre (
-      name TEXT PRIMARY KEY
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_tags (
-      media_id TEXT REFERENCES media(id),
-      tag TEXT REFERENCES tag(name),
-      PRIMARY KEY (media_id, tag)
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_genres (
-      media_id TEXT REFERENCES media(id),
-      genre TEXT REFERENCES genre(name),
-      PRIMARY KEY (media_id, genre)
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_channels (
-      media_id TEXT REFERENCES media(id),
-      channel TEXT REFERENCES channel(name),
-      PRIMARY KEY (media_id, channel)
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_taglines (
-      media_id TEXT REFERENCES media(id),
-      tagline TEXT,
-      PRIMARY KEY (media_id, tagline)
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_process_timestamp (
-      media_id TEXT REFERENCES media(id),
-      process TEXT,
-      last_run_at TIMESTAMP,
-      PRIMARY KEY (media_id, process)
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_categorization (
-      media_id TEXT REFERENCES media(id),
-      category TEXT,
-      category_value TEXT,
-      PRIMARY KEY (media_id, category, category_value)
-    )"])
-  (jdbc/execute! db ["
-    CREATE TABLE IF NOT EXISTS media_context (
-      media_id TEXT PRIMARY KEY REFERENCES media(id),
-      text TEXT,
-      links TEXT NOT NULL DEFAULT '[]',
-      summary TEXT,
-      source TEXT,
-      operator_edited BOOLEAN NOT NULL DEFAULT FALSE,
-      updated_at TIMESTAMP DEFAULT NOW()
-    )"]))
-
 (defn test-fixture [f]
-  (let [db (create-test-db)
-        exec (executor/create-executor db :worker-count 2 :queue-size 10)]
-    (setup-schema db)
-    (binding [*test-db* db
-              *test-catalog* (sql-catalog/->SqlCatalog exec)]
+  (test-db/reset!)
+  (let [exec (executor/create-executor (test-db/datasource) :worker-count 2 :queue-size 10)]
+    (binding [*test-catalog* (sql-catalog/->SqlCatalog exec)]
       (try
         (f)
         (finally
-          (catalog/close-catalog! *test-catalog*))))))
+          (executor/close! exec))))))
 
 (use-fixtures :each test-fixture)
 
@@ -124,11 +29,12 @@
   {::media/id "movie-1"
    ::media/name "Test Movie"
    ::media/overview "A test movie"
-   ::media/community-rating 85.5
-   ::media/critic-rating 90.0
+   ::media/community-rating 8.5
+   ::media/critic-rating 9.0
    ::media/rating "PG-13"
    ::media/type :movie
    ::media/media-type :movie
+   ::media/item-kind :movie
    ::media/production-year 2023
    ::media/subtitles? true
    ::media/premiere (LocalDate/of 2023 1 15)
@@ -143,11 +49,12 @@
   {::media/id "series-1"
    ::media/name "Test Series"
    ::media/overview "A test series"
-   ::media/community-rating 92.0
-   ::media/critic-rating 88.5
+   ::media/community-rating 9.2
+   ::media/critic-rating 8.8
    ::media/rating "TV-MA"
    ::media/type :series
    ::media/media-type :series
+   ::media/item-kind :series
    ::media/production-year 2022
    ::media/subtitles? false
    ::media/premiere (LocalDate/of 2022 5 10)
@@ -167,8 +74,8 @@
     (catalog/add-media! *test-catalog* sample-movie)
     (let [media (catalog/get-media *test-catalog*)]
       (is (= 1 (count media)))
-      (is (= "movie-1" (get-in media [0 :media/id])))
-      (is (= "Test Movie" (get-in media [0 :media/name]))))))
+      (is (= "movie-1" (get-in media [0 ::media/id])))
+      (is (= "Test Movie" (get-in media [0 ::media/name]))))))
 
 (deftest add-media-batch-test
   (testing "add multiple media items in a batch"
@@ -178,7 +85,7 @@
     (let [media (catalog/get-media *test-catalog*)]
       (is (= 2 (count media)))
       (is (= #{"movie-1" "series-1"}
-             (set (map :media/id media)))))))
+             (set (map ::media/id media)))))))
 
 (deftest get-media-by-id-test
   (testing "retrieve specific media by id"
@@ -210,11 +117,11 @@
 
     (let [library-id (catalog/get-library-id *test-catalog* :test-library)]
       (is (= ["movie-1"]
-             (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "movie"}))))
+             (map ::media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "movie"}))))
       (is (= ["series-1"]
-             (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "SERIES"}))))
+             (map ::media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "SERIES"}))))
       (is (= #{"movie-1" "series-1"}
-             (set (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "test"})))))
+             (set (map ::media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "test"})))))
       (is (empty? (catalog/search-media-by-library-id *test-catalog* library-id {:q "nonexistent-text"})))))
 
   (testing "filters by overview match too"
@@ -223,7 +130,7 @@
 
     (let [library-id (catalog/get-library-id *test-catalog* :test-library)]
       (is (= ["movie-1"]
-             (map :media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "A test movie"})))))))
+             (map ::media/id (catalog/search-media-by-library-id *test-catalog* library-id {:q "A test movie"})))))))
 
 ;; Tag management tests
 (deftest add-media-tags-test
@@ -351,7 +258,8 @@
                                     ::media/channel-id "ch-1"
                                     ::media/channel-description "Action"}}]
       (catalog/update-channels! *test-catalog* channels)
-      (catalog/add-media! *test-catalog* sample-movie))
+      (catalog/add-media! *test-catalog* sample-movie)
+      (catalog/add-media-channels! *test-catalog* "movie-1" [:action-channel]))
 
     (let [media (catalog/get-media-by-channel *test-catalog* :action-channel)]
       (is (seq media)))))
@@ -363,7 +271,7 @@
 
     (let [media (catalog/get-media-by-tag *test-catalog* :action)]
       (is (= 1 (count media)))
-      (is (= "movie-1" (:media/id (first media)))))))
+      (is (= "movie-1" (::media/id (first media)))))))
 
 (deftest get-media-by-genre-test
   (testing "retrieve media by genre"
@@ -395,13 +303,19 @@
       (is (seq timestamps))
       (is (some #(= :process/tagging (::media/process-name %)) timestamps)))))
 
+(defn- cvs
+  "Build the category-value maps the catalog API expects (each value carries a
+   non-null rationale, which the media_categorization schema requires)."
+  [& values]
+  (mapv (fn [v] {::media/category-value v ::media/rationale "test rationale"}) values))
+
 ;; Category value tests
 (deftest add-media-category-value-test
   (testing "add single category value to media"
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (catalog/add-media-category-value! *test-catalog* "movie-1" :mood :exciting nil)
+    (catalog/add-media-category-value! *test-catalog* "movie-1" :mood :exciting "test rationale")
 
     (let [values (catalog/get-media-category-values *test-catalog* "movie-1" :mood)]
       (is (= 1 (count values)))
@@ -412,7 +326,7 @@
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood [:exciting :intense :dramatic])
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood (cvs :exciting :intense :dramatic))
 
     (let [values (catalog/get-media-category-values *test-catalog* "movie-1" :mood)]
       (is (= 3 (count values)))
@@ -425,8 +339,8 @@
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood [:exciting :intense])
-    (catalog/set-media-category-values! *test-catalog* "movie-1" :mood [:calm :peaceful])
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood (cvs :exciting :intense))
+    (catalog/set-media-category-values! *test-catalog* "movie-1" :mood (cvs :calm :peaceful))
 
     (let [values (catalog/get-media-category-values *test-catalog* "movie-1" :mood)]
       (is (= 2 (count values)))
@@ -440,8 +354,8 @@
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood [:exciting])
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :tone [:dark])
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood (cvs :exciting))
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :tone (cvs :dark))
 
     (let [categories (catalog/get-media-categories *test-catalog* "movie-1")]
       (is (= 2 (count categories)))
@@ -455,7 +369,7 @@
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood [:exciting :intense])
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood (cvs :exciting :intense))
     (catalog/delete-media-category-value! *test-catalog* "movie-1" :mood :exciting)
 
     (let [values (catalog/get-media-category-values *test-catalog* "movie-1" :mood)]
@@ -467,7 +381,7 @@
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
 
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood [:exciting :intense])
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood (cvs :exciting :intense))
     (catalog/delete-media-category-values! *test-catalog* "movie-1" :mood)
 
     (let [values (catalog/get-media-category-values *test-catalog* "movie-1" :mood)]
@@ -496,8 +410,8 @@
     (catalog/add-media! *test-catalog* sample-movie)
 
     (let [media (first (catalog/get-media *test-catalog*))]
-      (is (vector? (:tags media)))
-      (is (every? keyword? (:tags media))))))
+      (is (vector? (::media/tags media)))
+      (is (every? keyword? (::media/tags media))))))
 
 ;; --- Episode-level tagging tests ---
 
@@ -505,11 +419,12 @@
   {::media/id "episode-1"
    ::media/name "The Pilot"
    ::media/overview "The first episode"
-   ::media/community-rating 88.0
-   ::media/critic-rating 85.0
+   ::media/community-rating 8.8
+   ::media/critic-rating 8.5
    ::media/rating "TV-MA"
    ::media/type :episode
    ::media/media-type :episode
+   ::media/item-kind :episode
    ::media/production-year 2022
    ::media/subtitles? false
    ::media/premiere (LocalDate/of 2022 5 10)
@@ -625,12 +540,13 @@
                         (assoc sample-movie
                                ::media/name "Renamed Movie"
                                ::media/overview "Updated overview"
-                               ::media/community-rating 99.0))
+                               ::media/community-rating 9.9))
 
     (let [m (catalog/get-media-by-id *test-catalog* "movie-1")]
       (is (= "Renamed Movie" (::media/name m)))
       (is (= "Updated overview" (::media/overview m)))
-      (is (= 99.0 (::media/community-rating m))))))
+      ;; Postgres NUMERIC comes back as BigDecimal, so compare numerically.
+      (is (== 9.9 (::media/community-rating m))))))
 
 (deftest upsert-preserves-curation-tags-test
   (testing "upserting an item does not drop tags added later by curation"
@@ -666,7 +582,7 @@
   (testing "upsert does not disturb media_categorization entries"
     (catalog/update-libraries! *test-catalog* {:test-library "lib-1"})
     (catalog/add-media! *test-catalog* sample-movie)
-    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood [:exciting :intense])
+    (catalog/add-media-category-values! *test-catalog* "movie-1" :mood (cvs :exciting :intense))
 
     (catalog/add-media! *test-catalog*
                         (assoc sample-movie ::media/name "Renamed"))
