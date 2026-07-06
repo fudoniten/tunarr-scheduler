@@ -143,7 +143,9 @@
 ;; Helper functions
 (defn- parse-json-response [response]
   (when-let [body (:body response)]
-    (json/parse-string body true)))
+    ;; Muuntaja encodes response bodies to an InputStream; the 404/405 fallbacks
+    ;; return an already-encoded JSON string. Handle both.
+    (json/parse-string (if (string? body) body (slurp body)) true)))
 
 (defn- await-job [job-runner job-id timeout-ms]
   (loop [remaining timeout-ms]
@@ -163,7 +165,7 @@
                                  :tunabrain mock-tunabrain})
         response (handler (mock/request :get "/healthz"))]
     (is (= 200 (:status response)))
-    (is (= "application/json" (get-in response [:headers "Content-Type"])))
+    (is (clojure.string/starts-with? (get-in response [:headers "Content-Type"]) "application/json"))
     (is (= {:status "ok"}
            (parse-json-response response)))))
 
@@ -179,7 +181,7 @@
       (let [body (parse-json-response response)]
         (is (contains? body :job))
         (is (contains? (:job body) :id))
-        (is (= :media/rescan (get-in body [:job :type])))))))
+        (is (= "media/rescan" (get-in body [:job :type])))))))
 
 (deftest rescan-endpoint-job-has-library-metadata-test
   (testing "rescan job includes library metadata"
@@ -204,7 +206,7 @@
       (is (= 202 (:status response)))
       (let [body (parse-json-response response)]
         (is (contains? body :job))
-        (is (= :media/retag (get-in body [:job :type])))))))
+        (is (= "media/retag" (get-in body [:job :type])))))))
 
 (deftest retag-endpoint-job-has-library-metadata-test
   (testing "retag job includes library metadata"
@@ -229,7 +231,7 @@
       (is (= 202 (:status response)))
       (let [body (parse-json-response response)]
         (is (contains? body :job))
-        (is (= :media/taglines (get-in body [:job :type])))))))
+        (is (= "media/taglines" (get-in body [:job :type])))))))
 
 (deftest add-taglines-endpoint-job-has-library-metadata-test
   (testing "tagline job includes library metadata"
@@ -256,7 +258,7 @@
         (is (= 202 (:status response)))
         (let [body (parse-json-response response)]
           (is (contains? body :job))
-          (is (= :media/tag-audit (get-in body [:job :type])))
+          (is (= "media/tag-audit" (get-in body [:job :type])))
           (let [job-info (await-job *job-runner* (get-in body [:job :id]) 5000)]
             (is (= :succeeded (:status job-info)))
             (is (contains? (:result job-info) :tags-audited))
@@ -332,7 +334,7 @@
             response (handler (mock/request :post "/api/media/tags/triage?target-limit=50"))
             body (parse-json-response response)]
         (is (= 202 (:status response)))
-        (is (= :media/tag-triage (get-in body [:job :type])))
+        (is (= "media/tag-triage" (get-in body [:job :type])))
         (let [job-info (await-job *job-runner* (get-in body [:job :id]) 5000)
               result (:result job-info)]
           (is (= :succeeded (:status job-info)))
@@ -418,7 +420,7 @@
       (is (= 200 (:status info-response)))
       (is (contains? body :job))
       (is (= job-id (get-in body [:job :id])))
-      (is (= :media/rescan (get-in body [:job :type]))))))
+      (is (= "media/rescan" (get-in body [:job :type]))))))
 
 (deftest get-job-info-not-found-test
   (testing "GET /api/jobs/:job-id returns 404 for nonexistent job"
@@ -462,7 +464,7 @@
                        "/api/jobs"]]
         (let [method (if (clojure.string/starts-with? endpoint "/healthz") :get :post)
               response (handler (mock/request method endpoint))]
-          (is (= "application/json" (get-in response [:headers "Content-Type"]))))))))
+          (is (clojure.string/starts-with? (get-in response [:headers "Content-Type"]) "application/json")))))))
 
 ;; 404 Not Found tests
 (deftest not-found-endpoint-test
@@ -474,7 +476,7 @@
           response (handler (mock/request :get "/api/nonexistent"))
           body (parse-json-response response)]
       (is (= 404 (:status response)))
-      (is (= "application/json" (get-in response [:headers "Content-Type"])))
+      (is (clojure.string/starts-with? (get-in response [:headers "Content-Type"]) "application/json"))
       (is (= "Not found" (:error body))))))
 
 ;; 405 Method Not Allowed tests
@@ -487,7 +489,7 @@
           response (handler (mock/request :delete "/api/jobs"))
           body (parse-json-response response)]
       (is (= 405 (:status response)))
-      (is (= "application/json" (get-in response [:headers "Content-Type"])))
+      (is (clojure.string/starts-with? (get-in response [:headers "Content-Type"]) "application/json"))
       (is (= "Method not allowed" (:error body))))))
 
 ;; List libraries endpoint tests
