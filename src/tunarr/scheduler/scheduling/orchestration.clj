@@ -57,8 +57,12 @@
     (loop [grid (:grid proposed), repairs 0]
       (let [report (feasibility/check grid profile (str hstart) (str hend))]
         (if (or (= "ok" (:overall_status report)) (>= repairs max-repairs))
-          (let [stored (storage/freeze-grid! executor channel quarter year grid
-                                             :grid-id grid-id :feasibility report)]
+          ;; Fill in show titles (from the CatalogProfile we already have) so the
+          ;; frozen grid is self-describing in operator views; display-only, so it
+          ;; runs after feasibility and never affects the check or playout.
+          (let [labeled (integ/label-grid-content grid profile)
+                stored  (storage/freeze-grid! executor channel quarter year labeled
+                                              :grid-id grid-id :feasibility report)]
             (log/info "quarterly grid frozen"
                       {:channel channel :quarter quarter :year year
                        :status (:overall_status report) :repairs repairs})

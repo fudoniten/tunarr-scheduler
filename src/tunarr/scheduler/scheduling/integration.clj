@@ -82,6 +82,42 @@
     profile))
 
 ;; ---------------------------------------------------------------------------
+;; Display labels — resolve show ids to titles for operator-facing views
+;; ---------------------------------------------------------------------------
+
+(defn- profile-titles
+  "media_id → title lookup drawn from a CatalogProfile's :shows (e.g.
+   \"series:42\" → \"Cheers\"). Empty when the profile carries no shows."
+  [profile]
+  (into {} (keep (fn [{:keys [media_id title]}]
+                   (when (and media_id (not (str/blank? title)))
+                     [media_id title])))
+        (:shows profile)))
+
+(defn label-grid-content
+  "Return `grid` with a human `:label` filled in on every strip's Content — and
+   on `:default_content` — whose `:media_id` names a show in `profile` and that
+   doesn't already carry a label. Additive and display-only: already-labelled
+   content, `random:<category>`, and ids absent from the profile are left
+   untouched, and `:label` never reaches Pseudovision (it isn't part of
+   DailySlot). This is what lets the operator's quarterly outline show
+   \"Cheers\" rather than the opaque \"series:42\"."
+  [grid profile]
+  (let [titles  (profile-titles profile)
+        relabel (fn [{:keys [media_id label] :as content}]
+                  (if (and (map? content)
+                           (str/blank? label)
+                           (contains? titles media_id))
+                    (assoc content :label (get titles media_id))
+                    content))]
+    (cond-> grid
+      (seq (:strips grid))
+      (update :strips (fn [strips] (mapv #(update % :content relabel) strips)))
+
+      (:default_content grid)
+      (update :default_content relabel))))
+
+;; ---------------------------------------------------------------------------
 ;; DailySlot publication (expander → kebab-case → Pseudovision)
 ;; ---------------------------------------------------------------------------
 

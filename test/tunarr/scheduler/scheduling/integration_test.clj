@@ -54,6 +54,51 @@
       (is (nil? (-> snake :runtime_histogram second :max_minutes))))))
 
 ;; ---------------------------------------------------------------------------
+;; label-grid-content — resolve show ids to titles for operator views
+;; ---------------------------------------------------------------------------
+
+(def ^:private title-profile
+  {:total_items 100 :total_episodes 80
+   :shows [{:media_id "series:42" :title "Cheers"}
+           {:media_id "series:7"  :title "Frasier"}]})
+
+(deftest ^:eftest/synchronized label-grid-content-fills-show-titles
+  (let [grid {:channel "Classic Comedy"
+              :strips [{:strip_id "a" :days "weekdays" :start "17:00" :end "18:00"
+                        :content {:media_id "series:42" :strategy "sequential"}}
+                       {:strip_id "b" :days "weekdays" :start "18:00" :end "19:00"
+                        :content {:media_id "random:comedy" :strategy "random"}}
+                       {:strip_id "c" :days "weekends" :start "18:00" :end "19:00"
+                        :content {:media_id "series:7" :strategy "sequential"
+                                  :label "Operator's own name"}}
+                       {:strip_id "d" :days "daily" :start "02:00" :end "03:00"
+                        :content {:media_id "series:999" :strategy "sequential"}}]
+              :default_content {:media_id "series:42" :strategy "random"}}
+        out  (integ/label-grid-content grid title-profile)
+        strip #(-> out :strips (nth %) :content)]
+    (testing "an unlabelled series id gets the show title"
+      (is (= "Cheers" (:label (strip 0)))))
+    (testing "random:<category> is left untouched"
+      (is (nil? (:label (strip 1)))))
+    (testing "an existing operator label is not overwritten"
+      (is (= "Operator's own name" (:label (strip 2)))))
+    (testing "an id absent from the profile is left untouched"
+      (is (nil? (:label (strip 3)))))
+    (testing "default_content is labelled too"
+      (is (= "Cheers" (-> out :default_content :label))))))
+
+(deftest ^:eftest/synchronized label-grid-content-tolerates-sparse-grids
+  (testing "a grid with no strips and no default_content is returned unchanged"
+    (let [grid {:channel "X"}]
+      (is (= grid (integ/label-grid-content grid title-profile)))))
+  (testing "a profile with no shows leaves every id untouched"
+    (let [grid {:channel "X"
+                :strips [{:strip_id "a" :days "daily" :start "00:00" :end "01:00"
+                          :content {:media_id "series:42" :strategy "sequential"}}]}]
+      (is (nil? (-> (integ/label-grid-content grid {:total_items 0 :total_episodes 0})
+                    :strips first :content :label))))))
+
+;; ---------------------------------------------------------------------------
 ;; fetch-catalog-profile
 ;; ---------------------------------------------------------------------------
 
