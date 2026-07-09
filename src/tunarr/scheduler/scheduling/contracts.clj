@@ -153,6 +153,24 @@
    [:channel :string]
    [:blocks {:optional true} [:vector DaypartBlock]]])
 
+;; ---------------------------------------------------------------------------
+;; DaypartCandidate — Pass B input, computed here from tag_runtime_histograms
+;; (§4.2/§4.3 of DURATION_AWARE_SCHEDULING.md). Sent TO Tunabrain's
+;; propose-strip-fill endpoint; never invented by Tunabrain, never stored.
+;; ---------------------------------------------------------------------------
+
+(def CandidateSlot
+  [:map
+   [:duration_minutes [:int {:min 0}]]
+   [:category :string]
+   [:available_count [:int {:min 0}]]])
+
+(def DaypartCandidate
+  [:map
+   [:layout_id :string]
+   [:slots [:vector CandidateSlot]]
+   [:weight {:optional true} number?]])
+
 (def GridStrip
   [:map
    [:strip_id :string]
@@ -259,6 +277,8 @@
    :CatalogProfile    CatalogProfile
    :DaypartBlock      DaypartBlock
    :DaypartSkeleton   DaypartSkeleton
+   :CandidateSlot     CandidateSlot
+   :DaypartCandidate  DaypartCandidate
    :GridStrip         GridStrip
    :Grid              Grid
    :OverrideScope     OverrideScope

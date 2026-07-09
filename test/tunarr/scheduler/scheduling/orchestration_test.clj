@@ -6,7 +6,8 @@
             [next.jdbc :as jdbc]
             [tunarr.scheduler.sql.executor :as executor]
             [tunarr.scheduler.scheduling.storage :as storage]
-            [tunarr.scheduler.scheduling.orchestration :as orch]))
+            [tunarr.scheduler.scheduling.orchestration :as orch]
+            [tunarr.scheduler.tunabrain :as tb]))
 
 (def ^:dynamic *ex* nil)
 
@@ -146,3 +147,112 @@
                {:propose-overrides (fn [_ _] {:overrides_id "ov-empty" :overrides []})})
         stored (orch/run-monthly! comps channel-spec "2026-01")]
     (is (= [] (:overrides stored)))))
+
+;; ---------------------------------------------------------------------------
+;; propose-grid-via-daypart-candidates! — split round trip
+;; (DURATION_AWARE_SCHEDULING.md §4.3, Option A)
+;;
+;; This is an alternative :propose-grid implementation with the SAME calling
+;; contract as tb/propose-quarterly-grid!, so it's tested directly here
+;; (stubbing the tb/* HTTP wrappers it calls internally via with-redefs, same
+;; pattern as tunabrain_scheduling_test.clj) rather than only through
+;; run-quarterly!'s component injection.
+;; ---------------------------------------------------------------------------
+
+(def two-block-skeleton
+  {:channel "Classic Comedy"
+   :blocks [{:name "daytime" :start "06:00" :end "17:00" :role "reruns"
+             :genre_focus ["sitcom"]}
+            {:name "prime" :start "17:00" :end "22:00" :role "movie night"
+             :genre_focus ["movie"]}]})
+
+(def profile-with-histograms
+  (assoc profile
+         :tag_runtime_histograms
+         [{:tag "genre:sitcom"
+           :buckets [{:label "15-30min" :min_minutes 15 :max_minutes 30 :item_count 200}]}
+          {:tag "genre:movie"
+           :buckets [{:label "90-105min" :min_minutes 90 :max_minutes 105 :item_count 12}]}]))
+
+(defn- stub-tb-post [response]
+  (fn [_client _path _payload & _] response))
+
+(deftest propose-grid-via-daypart-candidates-calls-skeleton-then-strip-fill-per-block
+  (let [strip-fill-calls (atom [])]
+    (with-redefs [tb/json-post!
+                  (fn [_client path payload & _]
+                    (cond
+                      (= path "/api/scheduling/propose-daypart-skeleton")
+                      {:skeleton two-block-skeleton :cost_estimate {}}
+
+                      (= path "/api/scheduling/propose-strip-fill")
+                      (do
+                        (swap! strip-fill-calls conj payload)
+                        {:strips [{:strip_id (str (get-in payload [:block :name]) "-0")
+                                  :days "weekdays" :start "00:00" :end "01:00"
+                                  :content {:media_id "random:sitcom" :strategy "random"}}]
+                         :cost_estimate {}})
+
+                      :else (throw (ex-info "unexpected path" {:path path}))))]
+      (let [result (orch/propose-grid-via-daypart-candidates!
+                    ::tunabrain
+                    {:channel channel-spec :quarter "Q1" :year 2026
+                     :catalog-profile profile-with-histograms})]
+        (testing "one strip-fill call per daypart block, in order"
+          (is (= 2 (count @strip-fill-calls)))
+          (is (= "daytime" (get-in (first @strip-fill-calls) [:block :name])))
+          (is (= "prime" (get-in (second @strip-fill-calls) [:block :name]))))
+        (testing "each block's call carries a duration-feasible candidate menu
+                  computed from ITS OWN genre_focus"
+          (let [daytime-candidates (:candidates (first @strip-fill-calls))
+                prime-candidates   (:candidates (second @strip-fill-calls))]
+            (is (seq daytime-candidates))
+            (is (every? #(= "sitcom" (:category %))
+                       (mapcat :slots daytime-candidates)))
+            (is (seq prime-candidates))
+            (is (every? #(= "movie" (:category %))
+                       (mapcat :slots prime-candidates)))))
+        (testing "prior_strips accumulates across blocks"
+          (is (= [] (:prior_strips (first @strip-fill-calls))))
+          (is (= 1 (count (:prior_strips (second @strip-fill-calls))))
+              "the daytime block's strip is prior context for the prime block"))
+        (testing "the assembled grid carries both blocks' strips and the skeleton"
+          (is (= 2 (count (:strips (:grid result)))))
+          (is (= two-block-skeleton (:skeleton result)))
+          (is (= "success" (:status result)))
+          (is (empty? (:warnings result))))))))
+
+(deftest propose-grid-via-daypart-candidates-warns-on-empty-daypart
+  (with-redefs [tb/json-post!
+                (fn [_client path _payload & _]
+                  (cond
+                    (= path "/api/scheduling/propose-daypart-skeleton")
+                    {:skeleton two-block-skeleton :cost_estimate {}}
+                    (= path "/api/scheduling/propose-strip-fill")
+                    {:strips [] :cost_estimate {}}
+                    :else (throw (ex-info "unexpected path" {:path path}))))]
+    (let [result (orch/propose-grid-via-daypart-candidates!
+                  ::tunabrain
+                  {:channel channel-spec :quarter "Q1" :year 2026
+                   :catalog-profile profile-with-histograms})]
+      (is (= 2 (count (:warnings result))))
+      (is (= "partial" (:status result))))))
+
+(deftest propose-grid-via-daypart-candidates-works-as-run-quarterly-propose-grid
+  (testing "drop-in compatibility with run-quarterly!'s :propose-grid component"
+    (with-redefs [tb/json-post!
+                  (fn [_client path _payload & _]
+                    (cond
+                      (= path "/api/scheduling/propose-daypart-skeleton")
+                      {:skeleton {:channel "Classic Comedy" :blocks []} :cost_estimate {}}
+                      :else (throw (ex-info "unexpected path" {:path path}))))]
+      (let [comps (base-components {:propose-grid orch/propose-grid-via-daypart-candidates!
+                                    :repair-grid (fn [_ _] (throw (ex-info "should not repair" {})))})
+            out (orch/run-quarterly! comps channel-spec "Q1" 2026
+                                     :default-media-id "random:sitcom")]
+        ;; An empty-blocks skeleton produces an empty-strip grid; with
+        ;; default_content present (via :default-media-id) there are no
+        ;; uncovered intervals either, so it's fully feasible and freezes
+        ;; without a repair round.
+        (is (= "ok" (:feasibility-status out)))
+        (is (= 0 (:repairs out)))))))

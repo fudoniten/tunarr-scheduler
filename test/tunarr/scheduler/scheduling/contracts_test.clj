@@ -99,6 +99,11 @@
    :category_filters []
    :notes []})
 
+(def daypart-candidate-example
+  {:layout_id "genre-movie-90-105min"
+   :weight 12.0
+   :slots [{:duration_minutes 90 :category "movie" :available_count 12}]})
+
 ;; ---------------------------------------------------------------------------
 ;; Conformance
 ;; ---------------------------------------------------------------------------
@@ -106,6 +111,7 @@
 (deftest spec-examples-conform
   (testing "Content"           (check c/Content content-example))
   (testing "CatalogProfile"    (check c/CatalogProfile catalog-profile-example))
+  (testing "DaypartCandidate"  (check c/DaypartCandidate daypart-candidate-example))
   (testing "Grid"              (check c/Grid grid-example))
   (testing "Override"          (check c/ScheduleOverride override-example))
   (testing "FeasibilityReport" (check c/FeasibilityReport feasibility-report-example))
