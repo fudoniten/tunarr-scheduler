@@ -78,6 +78,84 @@
       (is (= "ok" (:status (finding-for report "r-unk"))))
       (is (str/includes? (:message (finding-for report "r-unk")) "not found")))))
 
+;; ---------------------------------------------------------------------------
+;; Duration fit (random:<category> strips, tag_runtime_histograms)
+;; ---------------------------------------------------------------------------
+
+(def catalog-with-histograms
+  (assoc catalog
+         :tag_runtime_histograms
+         [{:tag "genre:movie"
+           :buckets [{:label "90-105min" :min_minutes 90 :max_minutes 105 :item_count 12}
+                     {:label "180-195min" :min_minutes 180 :max_minutes 195 :item_count 1}]}
+          {:tag "genre:sitcom"
+           :buckets [{:label "15-30min" :min_minutes 15 :max_minutes 30 :item_count 200}]}
+          {:tag "genre:rare-length"
+           :buckets [{:label "45-60min" :min_minutes 45 :max_minutes 60 :item_count 2}]}]))
+
+(deftest duration-fit-ok-when-content-exists-near-strip-length
+  (testing "a 90-minute random:movie strip is fine when the category has plenty near that length"
+    (let [report (f/check (grid [(strip "movie-slot" "weekdays" "20:00" "21:30" "random:movie"
+                                        :strategy "random")])
+                          catalog-with-histograms week-start week-end)]
+      (is (= "ok" (:status (finding-for report "movie-slot")))))))
+
+(deftest duration-fit-shortfall-when-nothing-near-strip-length
+  (testing "a 60-minute random:movie strip is a shortfall when the category's
+            content is all 90+/180+ minutes — exactly the reported bug
+            (a movie strip sized for nothing the category actually has)"
+    (let [report (f/check (grid [(strip "movie-slot" "weekdays" "20:00" "21:00" "random:movie"
+                                        :strategy "random")])
+                          catalog-with-histograms week-start week-end)
+          found (finding-for report "movie-slot")]
+      (is (= "shortfall" (:status found)))
+      (is (str/includes? (:message found) "no 'movie' content within"))
+      (is (= "blocked" (:overall_status report))
+          "a duration shortfall blocks overall_status same as any other shortfall"))))
+
+(deftest duration-fit-tight-when-few-items-near-strip-length
+  (testing "a strip whose category has only a couple of matching-length items
+            (below duration-fit-floor) is tight, not a full shortfall"
+    (let [report (f/check (grid [(strip "rare-slot" "weekdays" "20:00" "21:00" "random:rare-length"
+                                        :strategy "random")])
+                          catalog-with-histograms week-start week-end)]
+      (is (= "tight" (:status (finding-for report "rare-slot")))))))
+
+(deftest duration-fit-combines-with-pool-floor-taking-the-worse-status
+  (testing "random:rare is already 'tight' on pool-floor (episode_count 3 < 10);
+            when it ALSO has no matching-length content, the worse (shortfall)
+            status wins and both messages are present"
+    (let [catalog-both (assoc catalog-with-histograms
+                              :tag_runtime_histograms
+                              (conj (:tag_runtime_histograms catalog-with-histograms)
+                                    {:tag "genre:rare" :buckets []}))
+          report (f/check (grid [(strip "r-thin" "weekdays" "11:00" "12:00" "random:rare"
+                                        :strategy "random")])
+                          catalog-both week-start week-end)
+          found (finding-for report "r-thin")]
+      (is (= "shortfall" (:status found))
+          "duration shortfall (empty buckets) outranks the pool-floor 'tight'")
+      (is (str/includes? (:message found) "small pool"))
+      (is (str/includes? (:message found) "no 'rare' content within")))))
+
+(deftest duration-fit-skipped-when-no-histogram-data-for-category
+  (testing "a category with no tag_runtime_histograms entry at all is not
+            penalized — nothing to check against, so pool-floor status alone
+            stands (matches the pre-existing 'unknown category' behavior)"
+    (let [report (f/check (grid [(strip "r-ok" "weekdays" "10:00" "11:00" "random:sitcom"
+                                        :strategy "random")])
+                          catalog week-start week-end) ; original `catalog`, no histograms at all
+          found (finding-for report "r-ok")]
+      (is (= "ok" (:status found))))))
+
+(deftest duration-fit-handles-cross-midnight-strips
+  (testing "a strip crossing midnight still computes a sane wall-clock duration"
+    (let [report (f/check (grid [(strip "late-movie" "weekdays" "23:15" "00:45" "random:movie"
+                                        :strategy "random")])
+                          catalog-with-histograms week-start week-end)]
+      ;; 23:15 -> 00:45 is 90 minutes, which the movie histogram has plenty of.
+      (is (= "ok" (:status (finding-for report "late-movie")))))))
+
 (deftest movie-capacity
   (let [report (f/check (grid [(strip "m-once"  ["mon"]    "20:00" "22:00" "movie:classic")
                                (strip "m-multi" "weekdays" "20:00" "22:00" "movie:overplayed")])

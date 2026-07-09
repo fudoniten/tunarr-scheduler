@@ -44,7 +44,12 @@
             :avg_runtime_minutes 22.0
             :tags ["classic"]}]
    :genres [{:genre "comedy" :show_count 2 :episode_count 450}]
-   :runtime_histogram [{:label "20-30min" :min_minutes 20 :max_minutes 30 :item_count 450}]
+   :tag_aggregates [{:tag "genre:comedy" :show_count 2 :episode_count 450}]
+   :runtime_histogram [{:label "20-30min" :min_minutes 20 :max_minutes 30 :item_count 450}
+                       {:label "210+min" :min_minutes 210 :max_minutes nil :item_count 1}]
+   :tag_runtime_histograms [{:tag "genre:movie"
+                             :buckets [{:label "90-105min" :min_minutes 90 :max_minutes 105
+                                       :item_count 12}]}]
    :generated_at "2026-06-24T12:00:00"})
 
 (def grid-example
