@@ -199,6 +199,19 @@ UI gets read access to the plans plus a per-channel manual-input surface that
 - `plans_test.clj` (7 tests); full ring handler assembles without route
   conflicts. 55 scheduling tests / 232 assertions green.
 
+### Duration-aware scheduling — 🚧 PROPOSED (design doc, not yet built)
+Grid authoring is still blind to content runtime: a strip can be authored at a
+length the catalog has no matching-duration content for (e.g. a 60-minute
+`random:movie` strip when nothing is within 15 minutes of that length). A
+first fix landed at air time — pseudovision
+[#119](https://github.com/fudoniten/pseudovision/pull/119) makes Pseudovision
+pick duration-fitting content per slot and stamp truthful event end times
+instead of overlapping the next slot. The remaining work — a per-category
+runtime histogram, a feasibility duration-fit finding, and (larger) having
+Tunabrain author against a precomputed duration-feasible slot menu instead of
+inventing lengths freeform — is designed in full in
+[`DURATION_AWARE_SCHEDULING.md`](./DURATION_AWARE_SCHEDULING.md). Not started.
+
 ---
 
 ## Open decisions
