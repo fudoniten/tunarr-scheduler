@@ -15,7 +15,18 @@
          shortfall if available < slots_required; tight if
          available < slots_required × MARGIN; else ok.
        - random:<category> (pooled): repeats are fine, so check the pool is
-         non-trivial — episode_count for that category ≥ a small floor.
+         non-trivial — episode_count for that category ≥ a small floor. ALSO
+         checked for duration fit: does the category's per-tag runtime
+         histogram (CatalogProfile.tag_runtime_histograms) have content within
+         a tolerance of the strip's own wall-clock length? This is the
+         grid-authoring-time half of the duration-aware scheduling work (see
+         DURATION_AWARE_SCHEDULING.md §3.4) — Pseudovision's air-time
+         selection (pseudovision#119) already fits content to slots, but
+         without this check a strip could still be authored at a length its
+         category has no content anywhere near, which Pseudovision's
+         selection can only paper over (falling back to closest available),
+         not fix. The worse of the two random-kind statuses wins; messages
+         concatenate.
        - movie:<id>: a single item; tight if it would air more than once.
    • Overlap — base-grid strips whose day-patterns intersect AND whose time
      windows overlap (ambiguous authoring worth surfacing).
@@ -42,6 +53,21 @@
   "Minimum pooled episode_count for a random:<category> strip to be comfortable."
   10)
 
+(def ^:const duration-fit-tolerance-minutes
+  "Slack around a strip's own wall-clock length when checking whether its
+   random:<category> pool has content at roughly that duration. Mirrors
+   Pseudovision's air-time tolerance (daily-slots.clj's
+   default-fit-tolerance-minutes) so a 'tight' finding here and a
+   'closest available' fallback at air time describe the same boundary."
+  15)
+
+(def ^:const duration-fit-floor
+  "Minimum in-tolerance item_count for a random:<category> strip's duration to
+   be comfortable, not just technically non-empty (mirrors random-pool-floor's
+   role for the episode-count check, at a smaller scale since this counts
+   items within one narrow duration window rather than the whole category)."
+  3)
+
 ;; ---------------------------------------------------------------------------
 ;; Horizon + media helpers
 ;; ---------------------------------------------------------------------------
@@ -65,6 +91,10 @@
 (defn- media-arg [media-id]
   (second (str/split (str media-id) #":" 2)))
 
+(defn- parse-mins [hhmm]
+  (let [[h m] (map parse-long (str/split hhmm #":"))]
+    (+ (* 60 h) m)))
+
 (defn- show-available [catalog media-id]
   (some #(when (= media-id (:media_id %)) (:available_episode_count %))
         (:shows catalog)))
@@ -83,6 +113,103 @@
 
 (defn- headroom [available required]
   (when (pos? required) (double (/ available required))))
+
+;; ---------------------------------------------------------------------------
+;; Duration fit (random:<category> strips only)
+;;
+;; Episode-count/pool-floor checks above answer "is there enough content in
+;; this category"; this answers a different question the old checker never
+;; asked at all — "is any of it roughly the right LENGTH for this strip".
+;; Without it, a random:movie strip could be authored at 60 minutes even when
+;; every movie in the catalog runs 90+ — Pseudovision's air-time selection
+;; (daily-slots.clj) can only fall back to "closest available" for a mismatch
+;; like that, not fix the strip itself.
+;; ---------------------------------------------------------------------------
+
+(defn- strip-duration-minutes
+  "A strip's own wall-clock length in minutes. `end <= start` wraps past
+   midnight, same convention as `minute-spans`."
+  [strip]
+  (let [s (parse-mins (:start strip)) e (parse-mins (:end strip))]
+    (if (> e s) (- e s) (+ (- 1440 s) e))))
+
+(defn- tag-runtime-histogram
+  "The {:tag :buckets [...]} entry for `category` in
+   catalog_profile.tag_runtime_histograms, or nil if the category has no
+   dimensioned histogram data (an older CatalogProfile, or a category with no
+   matching tag at all).
+
+   `random:<category>` carries a bare category name (e.g. 'movie'), but
+   Pseudovision's tag storage — and therefore every :tag value this field
+   contains — is prefix-qualified ('genre:movie'). Matching only the bare
+   form would silently never find anything for the common case. Mirrors the
+   same bare-or-`genre:`-prefixed duality
+   `pseudovision.http.api.daily-slots/resolve-by-category` already matches
+   against at air time."
+  [catalog category]
+  (when category
+    (let [needle (str/lower-case category)
+          prefixed (str "genre:" needle)]
+      (some #(let [tag (str/lower-case (:tag %))]
+               (when (or (= tag needle) (= tag prefixed)) %))
+            (:tag_runtime_histograms catalog)))))
+
+(defn- bucket-overlaps-window? [bucket lo hi]
+  (let [bmin (:min_minutes bucket)
+        bmax (or (:max_minutes bucket) Long/MAX_VALUE)]
+    (and (<= bmin hi) (<= lo bmax))))
+
+(defn- fitting-item-count
+  "Sum of item_count across every bucket in `histogram` whose runtime range
+   overlaps [lo, hi] (an open-ended top bucket's nil max_minutes is treated
+   as unbounded)."
+  [histogram lo hi]
+  (reduce + 0 (keep (fn [b] (when (bucket-overlaps-window? b lo hi) (:item_count b)))
+                     (:buckets histogram))))
+
+(def ^:private status-rank {"ok" 0, "tight" 1, "shortfall" 2})
+
+(defn- worse-status [a b]
+  (if (>= (status-rank a 0) (status-rank b 0)) a b))
+
+(defn- combine-findings
+  "Merges two finding maps (each carrying at least :status/:message) into one:
+   :status is the worse of the two, :message concatenates both non-blank
+   messages. Other keys (:episodes_available, :headroom_ratio, ...) come from
+   `a` unchanged."
+  [a b]
+  (let [status (worse-status (:status a) (:status b))
+        msgs   (remove str/blank? [(:message a) (:message b)])]
+    (assoc a :status status :message (str/join "; " msgs))))
+
+(defn- duration-fit-finding
+  "Whether `catalog`'s per-tag runtime histogram for `category` has content
+   within `duration-fit-tolerance-minutes` of `strip`'s own wall-clock length.
+
+   Returns nil (nothing to merge) when the catalog profile carries no
+   histogram data for this category at all — an older Pseudovision build, or
+   simply no matching tag — rather than manufacturing a false shortfall out of
+   an absent signal. Otherwise a {:status :message} finding to combine with
+   the pool-floor finding via `combine-findings`."
+  [strip catalog category]
+  (when-let [histogram (tag-runtime-histogram catalog category)]
+    (let [target    (strip-duration-minutes strip)
+          lo        (max 0 (- target duration-fit-tolerance-minutes))
+          hi        (+ target duration-fit-tolerance-minutes)
+          fit-count (fitting-item-count histogram lo hi)]
+      (cond
+        (zero? fit-count)
+        {:status "shortfall"
+         :message (format "no '%s' content within %dmin of the strip's %dmin length"
+                          category duration-fit-tolerance-minutes target)}
+
+        (< fit-count duration-fit-floor)
+        {:status "tight"
+         :message (format "only %d '%s' item(s) within %dmin of the strip's %dmin length"
+                          fit-count category duration-fit-tolerance-minutes target)}
+
+        :else
+        {:status "ok" :message ""}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-strip capacity finding
@@ -125,25 +252,31 @@
           :status (if (zero? available) "shortfall" "ok")
           :message (if (zero? available) "no available episodes for this series" "")})
 
-       ;; Pooled rotation: repeats fine, just confirm the pool is non-trivial.
+       ;; Pooled rotation: repeats fine, just confirm the pool is non-trivial
+       ;; AND that some of it is roughly the right length for the strip.
        (= kind "random")
        (let [category (media-arg media-id)
-             pool     (category-episode-count catalog category)]
-         (if (nil? pool)
-           {:episodes_available 0
-            :headroom_ratio (headroom 0 required)
-            :status "ok"
-            :message (format "category '%s' not found in catalog profile; pool not assessed"
-                             category)}
-           {:episodes_available pool
-            :headroom_ratio (headroom pool required)
-            :status (cond (zero? pool)               "shortfall"
-                          (< pool random-pool-floor) "tight"
-                          :else                       "ok")
-            :message (cond (zero? pool) (format "no content in category '%s'" category)
-                           (< pool random-pool-floor)
-                           (format "small pool: %d items in category '%s'" pool category)
-                           :else "")}))
+             pool     (category-episode-count catalog category)
+             pool-finding
+             (if (nil? pool)
+               {:episodes_available 0
+                :headroom_ratio (headroom 0 required)
+                :status "ok"
+                :message (format "category '%s' not found in catalog profile; pool not assessed"
+                                 category)}
+               {:episodes_available pool
+                :headroom_ratio (headroom pool required)
+                :status (cond (zero? pool)               "shortfall"
+                              (< pool random-pool-floor) "tight"
+                              :else                       "ok")
+                :message (cond (zero? pool) (format "no content in category '%s'" category)
+                               (< pool random-pool-floor)
+                               (format "small pool: %d items in category '%s'" pool category)
+                               :else "")})
+             duration-finding (duration-fit-finding strip catalog category)]
+         (if duration-finding
+           (combine-findings pool-finding duration-finding)
+           pool-finding))
 
        ;; Single movie: fine once, suspicious if it repeats.
        (= kind "movie")
@@ -163,10 +296,6 @@
 ;; ---------------------------------------------------------------------------
 ;; Overlap detection (within the base grid)
 ;; ---------------------------------------------------------------------------
-
-(defn- parse-mins [hhmm]
-  (let [[h m] (map parse-long (str/split hhmm #":"))]
-    (+ (* 60 h) m)))
 
 (defn- ->hhmm [mins]
   (format "%02d:%02d" (quot mins 60) (mod mins 60)))

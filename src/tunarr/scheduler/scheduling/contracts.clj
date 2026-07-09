@@ -102,6 +102,26 @@
    [:max_minutes [:maybe [:int {:min 0}]]]
    [:item_count [:int {:min 0}]]])
 
+(def TagAggregate
+  "Per-tag rollup in the dimension model (e.g. 'genre:comedy',
+   'channel:goldenreels') — the generalization of the deprecated `genres`
+   field to any dimension, not just genre. `feasibility.clj`'s
+   `category-episode-count` reads this off the profile map already; it was
+   missing from this schema until now, a drift between what's actually sent
+   on the wire and what this contract described."
+  [:map
+   [:tag :string]
+   [:show_count [:int {:min 0}]]
+   [:episode_count [:int {:min 0}]]])
+
+(def TagRuntimeHistogram
+  "Runtime distribution for one tag (e.g. 'genre:movie', 'genre:sitcom'), for
+   slot-fit reasoning within a specific `random:<category>` pool rather than
+   the catalog as a whole. See `feasibility.clj`'s duration-fit finding."
+  [:map
+   [:tag :string]
+   [:buckets [:vector RuntimeBucket]]])
+
 (def CatalogProfile
   [:map
    [:channel_scope {:optional true} [:maybe :string]]
@@ -110,7 +130,9 @@
    [:movie_count {:optional true} [:int {:min 0}]]
    [:shows {:optional true} [:vector ShowProfile]]
    [:genres {:optional true} [:vector GenreProfile]]
+   [:tag_aggregates {:optional true} [:vector TagAggregate]]
    [:runtime_histogram {:optional true} [:vector RuntimeBucket]]
+   [:tag_runtime_histograms {:optional true} [:vector TagRuntimeHistogram]]
    [:generated_at {:optional true} [:maybe IsoDateTime]]])
 
 ;; ---------------------------------------------------------------------------
@@ -130,6 +152,24 @@
   [:map
    [:channel :string]
    [:blocks {:optional true} [:vector DaypartBlock]]])
+
+;; ---------------------------------------------------------------------------
+;; DaypartCandidate — Pass B input, computed here from tag_runtime_histograms
+;; (§4.2/§4.3 of DURATION_AWARE_SCHEDULING.md). Sent TO Tunabrain's
+;; propose-strip-fill endpoint; never invented by Tunabrain, never stored.
+;; ---------------------------------------------------------------------------
+
+(def CandidateSlot
+  [:map
+   [:duration_minutes [:int {:min 0}]]
+   [:category :string]
+   [:available_count [:int {:min 0}]]])
+
+(def DaypartCandidate
+  [:map
+   [:layout_id :string]
+   [:slots [:vector CandidateSlot]]
+   [:weight {:optional true} number?]])
 
 (def GridStrip
   [:map
@@ -231,10 +271,14 @@
    :Content           Content
    :ShowProfile       ShowProfile
    :GenreProfile      GenreProfile
+   :TagAggregate      TagAggregate
    :RuntimeBucket     RuntimeBucket
+   :TagRuntimeHistogram TagRuntimeHistogram
    :CatalogProfile    CatalogProfile
    :DaypartBlock      DaypartBlock
    :DaypartSkeleton   DaypartSkeleton
+   :CandidateSlot     CandidateSlot
+   :DaypartCandidate  DaypartCandidate
    :GridStrip         GridStrip
    :Grid              Grid
    :OverrideScope     OverrideScope

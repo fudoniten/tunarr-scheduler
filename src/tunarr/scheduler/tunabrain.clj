@@ -417,6 +417,33 @@
    :default_media_id    default-media-id
    :cost_tier           cost-tier})
 
+(defn daypart-skeleton-request
+  "Build a DaypartSkeletonRequest payload (DURATION_AWARE_SCHEDULING.md §4.3,
+   Option A — Pass A alone, the first half of the split round-trip)."
+  [{:keys [channel catalog-profile quarterly-theme strategic-guidance
+           broadcast-day-start cost-tier]
+    :or   {broadcast-day-start "06:00" cost-tier "balanced"}}]
+  {:channel             (channel->payload channel)
+   :catalog_profile     catalog-profile
+   :quarterly_theme     quarterly-theme
+   :strategic_guidance  strategic-guidance
+   :broadcast_day_start broadcast-day-start
+   :cost_tier           cost-tier})
+
+(defn strip-fill-request
+  "Build a StripFillRequest payload (DURATION_AWARE_SCHEDULING.md §4.3,
+   Option A — Pass B for one daypart, the second half of the split round-trip).
+   `candidates` is the duration-feasible menu from
+   `scheduling.candidates/propose-daypart-candidates` for this exact block."
+  [{:keys [channel catalog-profile block candidates prior-strips cost-tier]
+    :or   {candidates [] prior-strips [] cost-tier "balanced"}}]
+  {:channel         (channel->payload channel)
+   :catalog_profile catalog-profile
+   :block           block
+   :candidates      (vec candidates)
+   :prior_strips    (vec prior-strips)
+   :cost_tier       cost-tier})
+
 (defn repair-grid-request
   "Build a QuarterlyGridRepairRequest payload (handoff §5.2)."
   [{:keys [channel catalog-profile current-grid feasibility-report cost-tier]
@@ -454,6 +481,39 @@
       (throw (ex-info "tunabrain propose-quarterly-grid returned no grid"
                       {:response response})))
     (warn-if-invalid contracts/Grid (:grid response) :grid)
+    response))
+
+(defn propose-daypart-skeleton!
+  "Ask Tunabrain for Pass A alone: the coarse dayparting for a channel
+   (DURATION_AWARE_SCHEDULING.md §4.3, Option A). `opts` are the keys consumed
+   by `daypart-skeleton-request`. Returns the parsed DaypartSkeletonResponse:
+   {:skeleton :cost_estimate}."
+  [client opts]
+  (let [response (json-post! client "/api/scheduling/propose-daypart-skeleton"
+                             (daypart-skeleton-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
+    (when (nil? (:skeleton response))
+      (throw (ex-info "tunabrain propose-daypart-skeleton returned no skeleton"
+                      {:response response})))
+    (warn-if-invalid contracts/DaypartSkeleton (:skeleton response) :skeleton)
+    response))
+
+(defn propose-strip-fill!
+  "Ask Tunabrain for Pass B for one daypart block, against a precomputed
+   candidate menu (DURATION_AWARE_SCHEDULING.md §4.3, Option A). `opts` are the
+   keys consumed by `strip-fill-request`. Returns the parsed
+   StripFillResponse: {:strips :cost_estimate}. An empty :strips list is
+   valid (the caller should warn, not fail, same as propose-quarterly-grid's
+   per-daypart handling)."
+  [client opts]
+  (let [response (json-post! client "/api/scheduling/propose-strip-fill"
+                             (strip-fill-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
+    (when (nil? (:strips response))
+      (throw (ex-info "tunabrain propose-strip-fill returned no strips list"
+                      {:response response})))
+    (doseq [s (:strips response)]
+      (warn-if-invalid contracts/GridStrip s :strip))
     response))
 
 (defn repair-quarterly-grid!

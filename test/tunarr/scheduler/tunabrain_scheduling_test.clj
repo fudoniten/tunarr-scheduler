@@ -39,6 +39,42 @@
       (is (= "balanced" (:cost_tier req)))
       (is (contains? req :strategic_guidance)))))
 
+(deftest ^:eftest/synchronized daypart-skeleton-request-shape
+  (let [req (tb/daypart-skeleton-request
+             {:channel channel :catalog-profile catalog-profile
+              :quarterly-theme "New year, classic laughs"})]
+    (testing "channel is reduced to {name, description}"
+      (is (= {:name "Classic Comedy" :description "24/7 vintage sitcoms"} (:channel req))))
+    (testing "no quarter/year/default_media_id — Pass A alone doesn't need them"
+      (is (not (contains? req :quarter)))
+      (is (not (contains? req :year)))
+      (is (not (contains? req :default_media_id))))
+    (testing "snake_case wire keys + defaults"
+      (is (= catalog-profile (:catalog_profile req)))
+      (is (= "New year, classic laughs" (:quarterly_theme req)))
+      (is (= "06:00" (:broadcast_day_start req)))
+      (is (= "balanced" (:cost_tier req))))))
+
+(deftest ^:eftest/synchronized strip-fill-request-shape
+  (let [block {:name "prime" :start "17:00" :end "22:00" :role "marquee sitcoms"}
+        candidates [{:layout_id "movie-90min" :weight 12.0
+                     :slots [{:duration_minutes 90 :category "movie" :available_count 12}]}]
+        prior [{:strip_id "daytime-0" :days "weekdays" :start "10:00" :end "12:00"
+                :content {:media_id "series:cheers"}}]
+        req (tb/strip-fill-request
+             {:channel channel :catalog-profile catalog-profile :block block
+              :candidates candidates :prior-strips prior})]
+    (is (= {:name "Classic Comedy" :description "24/7 vintage sitcoms"} (:channel req)))
+    (is (= block (:block req)))
+    (is (= candidates (:candidates req)))
+    (is (= prior (:prior_strips req)))
+    (is (= "balanced" (:cost_tier req)))
+    (testing "candidates/prior-strips default to empty vectors"
+      (let [defaults (tb/strip-fill-request
+                      {:channel channel :catalog-profile catalog-profile :block block})]
+        (is (= [] (:candidates defaults)))
+        (is (= [] (:prior_strips defaults)))))))
+
 (deftest ^:eftest/synchronized repair-grid-request-shape
   (let [report {:horizon_start "2026-01-01" :horizon_end "2026-04-01"
                 :overall_status "blocked" :strip_findings [] :overlaps []
@@ -69,7 +105,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- stub-post [capture response]
-  (fn [_client path payload]
+  ;; Variadic to tolerate json-post!'s trailing `:timeout-ms ms` kwargs — the
+  ;; scheduling endpoints all pass these (scheduling-timeout-ms), so a fixed
+  ;; 3-arity stub throws ArityException the moment it's actually exercised.
+  (fn [_client path payload & _]
     (reset! capture {:path path :payload payload})
     response))
 
@@ -84,6 +123,61 @@
         (is (= "/api/scheduling/propose-quarterly-grid" (:path @capture)))
         (is (= "Q1" (get-in @capture [:payload :quarter])))
         (is (= resp out))))))
+
+(def a-skeleton
+  {:channel "Classic Comedy"
+   :blocks [{:name "prime" :start "17:00" :end "22:00" :role "marquee sitcoms"}]})
+
+(deftest ^:eftest/synchronized propose-daypart-skeleton-posts-and-returns
+  (let [capture (atom nil)
+        resp {:skeleton a-skeleton :cost_estimate {}}]
+    (with-redefs [tb/json-post! (stub-post capture resp)]
+      (let [out (tb/propose-daypart-skeleton! ::client
+                                              {:channel channel
+                                               :catalog-profile catalog-profile})]
+        (is (= "/api/scheduling/propose-daypart-skeleton" (:path @capture)))
+        (is (= resp out))))))
+
+(deftest ^:eftest/synchronized missing-skeleton-in-response-throws
+  (with-redefs [tb/json-post! (stub-post (atom nil) {:skeleton nil})]
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (tb/propose-daypart-skeleton! ::client
+                                               {:channel channel
+                                                :catalog-profile catalog-profile})))))
+
+(deftest ^:eftest/synchronized propose-strip-fill-posts-and-returns
+  (let [capture (atom nil)
+        block {:name "prime" :start "17:00" :end "22:00" :role "marquee sitcoms"}
+        candidates [{:layout_id "movie-90min" :weight 12.0
+                     :slots [{:duration_minutes 90 :category "movie" :available_count 12}]}]
+        strips [{:strip_id "prime-0" :days "weekdays" :start "20:00" :end "21:30"
+                 :content {:media_id "movie:classic" :strategy "specific"}}]
+        resp {:strips strips :cost_estimate {}}]
+    (with-redefs [tb/json-post! (stub-post capture resp)]
+      (let [out (tb/propose-strip-fill! ::client
+                                        {:channel channel :catalog-profile catalog-profile
+                                         :block block :candidates candidates})]
+        (is (= "/api/scheduling/propose-strip-fill" (:path @capture)))
+        (is (= candidates (get-in @capture [:payload :candidates])))
+        (is (= resp out))))))
+
+(deftest ^:eftest/synchronized propose-strip-fill-accepts-empty-strips-list
+  (testing "an empty strips list is valid (caller warns, doesn't fail) — matches
+            propose-quarterly-grid's per-daypart handling"
+    (with-redefs [tb/json-post! (stub-post (atom nil) {:strips [] :cost_estimate {}})]
+      (let [out (tb/propose-strip-fill! ::client
+                                        {:channel channel :catalog-profile catalog-profile
+                                         :block {:name "prime" :start "17:00" :end "22:00"
+                                                 :role "marquee sitcoms"}})]
+        (is (= [] (:strips out)))))))
+
+(deftest ^:eftest/synchronized missing-strips-list-in-response-throws
+  (with-redefs [tb/json-post! (stub-post (atom nil) {:strips nil})]
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (tb/propose-strip-fill! ::client
+                                         {:channel channel :catalog-profile catalog-profile
+                                          :block {:name "prime" :start "17:00" :end "22:00"
+                                                  :role "marquee sitcoms"}})))))
 
 (deftest ^:eftest/synchronized repair-quarterly-grid-posts-and-returns
   (let [capture (atom nil)

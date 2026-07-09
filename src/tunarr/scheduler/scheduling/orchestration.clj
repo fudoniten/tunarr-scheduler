@@ -19,8 +19,10 @@
    `:propose-overrides`) and default to the real implementations, so callers can
    inject stubs without global redefs. `channel-spec` is the {:name :description}
    stub Tunabrain expects; its :name is also the storage key."
-  (:require [taoensso.timbre :as log]
+  (:require [clojure.string :as str]
+            [taoensso.timbre :as log]
             [tunarr.scheduler.tunabrain :as tb]
+            [tunarr.scheduler.scheduling.candidates :as candidates]
             [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.feasibility :as feasibility]
             [tunarr.scheduler.scheduling.storage :as storage]
@@ -28,6 +30,70 @@
 
 (defn- guidance [executor channel]
   (or (storage/get-guidance executor channel) {}))
+
+(defn- slugify [s]
+  (-> s str/lower-case (str/replace #"[^a-z0-9]+" "-") (str/replace #"(^-+)|(-+$)" "")))
+
+(defn propose-grid-via-daypart-candidates!
+  "Alternative `:propose-grid` implementation for `run-quarterly!`, using the
+   split round-trip (DURATION_AWARE_SCHEDULING.md §4.3, Option A) instead of
+   the single monolithic `tb/propose-quarterly-grid!` call: Pass A alone
+   (`tb/propose-daypart-skeleton!`) gets real daypart bounds, then for each
+   block, `scheduling.candidates/propose-daypart-candidates` computes a
+   duration-feasible slot-tiling menu from the catalog's runtime histogram
+   BEFORE Pass B (`tb/propose-strip-fill!`) runs against that exact block —
+   so the LLM has real per-daypart inventory to work from, not just the
+   whole-catalog shape.
+
+   Has the same calling contract as `tb/propose-quarterly-grid!` (a function
+   of `[tunabrain opts] -> {:grid_id :grid :skeleton :warnings ...}`), so it's
+   a drop-in for `run-quarterly!`'s `:propose-grid` component —
+   opt in explicitly (`:propose-grid propose-grid-via-daypart-candidates!`)
+   rather than the default; per DURATION_AWARE_SCHEDULING.md §4.5 this should
+   land as an additive alternative, validated against real catalogs, before
+   any channel is switched over."
+  [tunabrain {:keys [channel quarter year catalog-profile quarterly-theme
+                     strategic-guidance broadcast-day-start default-media-id
+                     cost-tier]
+              :or   {broadcast-day-start "06:00" cost-tier "balanced"}}]
+  (let [skeleton (:skeleton (tb/propose-daypart-skeleton!
+                             tunabrain
+                             {:channel channel :catalog-profile catalog-profile
+                              :quarterly-theme quarterly-theme
+                              :strategic-guidance strategic-guidance
+                              :broadcast-day-start broadcast-day-start
+                              :cost-tier cost-tier}))]
+    (loop [blocks (:blocks skeleton), all-strips [], warnings []]
+      (if-let [block (first blocks)]
+        (let [block-candidates (candidates/propose-daypart-candidates catalog-profile block)
+              block-strips     (:strips (tb/propose-strip-fill!
+                                         tunabrain
+                                         {:channel channel :catalog-profile catalog-profile
+                                          :block block :candidates block-candidates
+                                          :prior-strips all-strips :cost-tier cost-tier}))]
+          (recur (rest blocks)
+                 (into all-strips block-strips)
+                 (cond-> warnings
+                   (empty? block-strips)
+                   (conj (format "Daypart '%s' returned no strips" (:name block))))))
+        (let [grid {:channel (:name channel)
+                    :broadcast_day_start broadcast-day-start
+                    :skeleton skeleton
+                    :strips all-strips
+                    :default_content (when default-media-id
+                                       {:media_id default-media-id :strategy "random"})}
+              grid-id (format "grid-%s-%s-%s-%s"
+                             (slugify (:name channel)) quarter year
+                             (subs (str (random-uuid)) 0 8))]
+          (log/info "grid proposed via daypart candidates"
+                    {:channel (:name channel) :quarter quarter :year year
+                     :strips (count all-strips) :dayparts (count (:blocks skeleton))
+                     :warnings (count warnings)})
+          {:grid_id grid-id
+           :status  (if (seq warnings) "partial" "success")
+           :grid    grid
+           :skeleton skeleton
+           :warnings warnings})))))
 
 (defn run-quarterly!
   "Propose → check → repair → freeze a quarterly Grid for one channel. Bounds the

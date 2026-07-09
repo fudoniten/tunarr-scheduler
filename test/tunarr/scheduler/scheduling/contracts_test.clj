@@ -44,7 +44,12 @@
             :avg_runtime_minutes 22.0
             :tags ["classic"]}]
    :genres [{:genre "comedy" :show_count 2 :episode_count 450}]
-   :runtime_histogram [{:label "20-30min" :min_minutes 20 :max_minutes 30 :item_count 450}]
+   :tag_aggregates [{:tag "genre:comedy" :show_count 2 :episode_count 450}]
+   :runtime_histogram [{:label "20-30min" :min_minutes 20 :max_minutes 30 :item_count 450}
+                       {:label "210+min" :min_minutes 210 :max_minutes nil :item_count 1}]
+   :tag_runtime_histograms [{:tag "genre:movie"
+                             :buckets [{:label "90-105min" :min_minutes 90 :max_minutes 105
+                                       :item_count 12}]}]
    :generated_at "2026-06-24T12:00:00"})
 
 (def grid-example
@@ -94,6 +99,11 @@
    :category_filters []
    :notes []})
 
+(def daypart-candidate-example
+  {:layout_id "genre-movie-90-105min"
+   :weight 12.0
+   :slots [{:duration_minutes 90 :category "movie" :available_count 12}]})
+
 ;; ---------------------------------------------------------------------------
 ;; Conformance
 ;; ---------------------------------------------------------------------------
@@ -101,6 +111,7 @@
 (deftest spec-examples-conform
   (testing "Content"           (check c/Content content-example))
   (testing "CatalogProfile"    (check c/CatalogProfile catalog-profile-example))
+  (testing "DaypartCandidate"  (check c/DaypartCandidate daypart-candidate-example))
   (testing "Grid"              (check c/Grid grid-example))
   (testing "Override"          (check c/ScheduleOverride override-example))
   (testing "FeasibilityReport" (check c/FeasibilityReport feasibility-report-example))

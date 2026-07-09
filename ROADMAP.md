@@ -199,6 +199,27 @@ UI gets read access to the plans plus a per-channel manual-input surface that
 - `plans_test.clj` (7 tests); full ring handler assembles without route
   conflicts. 55 scheduling tests / 232 assertions green.
 
+### Duration-aware scheduling — ✅ DONE
+Grid authoring used to be blind to content runtime: a strip could be authored
+at a length the catalog had no matching-duration content for (e.g. a
+60-minute `random:movie` strip when nothing is within 15 minutes of that
+length). Fixed in three layers, full design and as-built record in
+[`DURATION_AWARE_SCHEDULING.md`](./DURATION_AWARE_SCHEDULING.md):
+
+- **Air time** (pseudovision
+  [#119](https://github.com/fudoniten/pseudovision/pull/119)): duration-fit
+  selection + truthful event end times instead of overlapping the next slot.
+- **Grid authoring, deterministic backstop:** a per-category runtime
+  histogram (`tag_runtime_histograms`) and a feasibility duration-fit finding
+  (`feasibility.clj`) that catches a mismatch before it's ever frozen.
+- **Grid authoring, structural fix:** Tunabrain's quarterly-grid proposal
+  split into two round trips so Tunarr Scheduler can hand Pass B a
+  duration-feasible candidate menu (`scheduling/candidates.clj`) built from
+  the real per-daypart bounds, instead of the LLM inventing strip lengths
+  freeform. Landed as an opt-in alternative
+  (`orchestration/propose-grid-via-daypart-candidates!`) — not yet the
+  default for `run-quarterly!`, pending validation against a real catalog.
+
 ---
 
 ## Open decisions
