@@ -1,8 +1,9 @@
 # Duration-Aware Scheduling — Phases 2 & 3 Design
 
-**Status:** Proposed — not yet implemented. This is a design doc for review, not
-a build log; nothing below should be treated as decided until the open
-questions in §5 are answered.
+**Status:** ✅ Implemented (Phase 2 and Phase 3/Option A). This started as a
+design doc; §6's sequencing table below now doubles as the as-built record.
+§5's open questions were resolved before implementation (Option A chosen for
+§5.3) or resolved pragmatically during implementation (see each item's note).
 
 **Builds on:** Phase 1 shipped as
 [pseudovision#119](https://github.com/fudoniten/pseudovision/pull/119) —
@@ -347,38 +348,55 @@ to the prompt text.
 
 ---
 
-## 5. Open questions (need a decision before implementation)
+## 5. Open questions — resolutions
 
-1. **Candidate weighting function (§4.2).** Minimum availability across a
-   layout's slots, a product, or something else? Affects how strongly a thin
-   bucket suppresses an entire layout versus just the slot that uses it.
-2. **Histogram payload shape (§3.2).** Grow the existing
-   `GET /api/catalog/aggregate` response inline (bigger payload on every call,
-   including ones that don't need it) vs. a separate endpoint Tunarr Scheduler
-   calls only during quarterly planning (smaller, rarer, but a new route to
-   maintain)?
-3. **Option A vs. B for Phase 3 (§4.3).** Recommendation above is B-first;
-   confirm before any Tunabrain prompt-contract work starts, since the two
-   options touch different files and neither is a strict subset of the other.
-4. **Long-term status of free-form authoring (§4.5).** Does hand-authored /
-   free-form grid authoring stay supported indefinitely (useful for operator
-   overrides or catalogs too small for meaningful candidate menus), or is
-   Phase 3's candidate menu meant to fully replace it once validated?
+1. **Candidate weighting function (§4.2).** Resolved pragmatically:
+   `propose-daypart-candidates` (tunarr-scheduler `scheduling/candidates.clj`)
+   weights each homogeneous candidate by its bucket's raw `item_count`. Since
+   v1 only generates single-category (homogeneous) layouts, "minimum vs.
+   product across slots" doesn't yet arise — every slot in a v1 layout shares
+   the same bucket, hence the same count. Revisit when mixed-category layouts
+   are added (see §4.2's noted future extension).
+2. **Histogram payload shape (§3.2).** Resolved: shipped inline on
+   `CatalogProfile` (`tag_runtime_histograms`), additive to the existing
+   aggregate response, not a separate endpoint. Simpler, ships with the rest
+   of Phase 2, and the payload growth is bounded (tags × buckets, not items).
+3. **Option A vs. B for Phase 3 (§4.3).** Resolved: **Option A** (two round
+   trips) — decided explicitly over the doc's own B-first recommendation.
+   Implemented as two new Tunabrain endpoints
+   (`propose-daypart-skeleton`/`propose-strip-fill`) plus tunarr-scheduler's
+   `orchestration/propose-grid-via-daypart-candidates!`, landed as an
+   additive alternative — see §4.5's resolution below for how it's wired in.
+4. **Long-term status of free-form authoring (§4.5).** Resolved for now:
+   **kept, not replaced.** `run-quarterly!`'s default `:propose-grid` is still
+   `tb/propose-quarterly-grid!` (unconstrained, single round trip);
+   `propose-grid-via-daypart-candidates!` is available with the identical
+   calling contract but must be opted into explicitly per the migration
+   guidance in §4.5. No channel has been switched over as part of this work —
+   that's a separate decision once the candidate-menu path has been validated
+   against a real catalog.
 
 ---
 
-## 6. Sequencing summary
+## 6. Sequencing summary — as built
 
-| Step | Repo(s) | Independently shippable? |
+| Step | Repo(s) | Where it landed |
 |---|---|---|
-| 3.2 Histogram dimensioning | pseudovision | Yes — additive to aggregate response |
-| 3.3 Wire contract mirror | tunabrain, tunarr-scheduler | Yes — optional fields |
-| 3.4 Feasibility duration finding | tunarr-scheduler | Yes — pure function, own test suite |
-| 4.2 `propose-daypart-candidates` | tunarr-scheduler | Yes — pure function, prototype against a real profile snapshot before touching the LLM prompt |
-| 4.3/4.4 Pass B contract change | tunabrain (+ tunarr-scheduler if Option A) | No — depends on §5.3 and 4.2 |
+| 3.2 Histogram dimensioning | pseudovision | `db/catalog.clj`: `list-tag-runtime-histogram`, 15-min buckets |
+| 3.3 Wire contract mirror | tunabrain, tunarr-scheduler | `grid.py`/`contracts.clj`: `TagAggregate`, `TagRuntimeHistogram` (+ fixed `RuntimeBucket.max_minutes` nullability) |
+| 3.4 Feasibility duration finding | tunarr-scheduler | `feasibility.clj`: `duration-fit-finding`, combined with the pool-floor finding via `combine-findings` |
+| 4.2 `propose-daypart-candidates` | tunarr-scheduler | `scheduling/candidates.clj` (homogeneous layouts; mixed-category is a documented future extension) |
+| 4.3 Split round trip (Option A) | tunabrain | New `CandidateSlot`/`DaypartCandidate` contracts; `propose_daypart_skeleton`/`propose_strip_fill` (refactored out of `propose_quarterly_grid`, which is unchanged); two new endpoints |
+| 4.3 Split round trip (Option A) | tunarr-scheduler | `tunabrain.clj`: `propose-daypart-skeleton!`/`propose-strip-fill!` client fns; `orchestration.clj`: `propose-grid-via-daypart-candidates!` (opt-in `:propose-grid`, not the default — see §5.4) |
+| 4.4 Pass B prompt guidance | tunabrain | `quarterly_grid.py`: `render_candidate_menu` + a system-prompt rule; guidance only (GridStrip's output schema is unchanged), enforced by 3.4's feasibility check as backstop |
 
-Recommend building and testing 3.2–3.4 and 4.2 as standalone, independently
-mergeable pieces (each has the same "pure function + fixture-based test suite"
-shape as the existing `feasibility.clj`/`expander.clj` work) before committing
-to the Pass B contract change, which is the one piece here that can't be
-partially landed.
+Every piece landed with its own test suite (pure-function/fixture style
+matching `feasibility.clj`/`expander.clj`'s existing convention) and was
+verified against each repo's pre-existing baseline before merging — see the
+commit history on `claude/tunarr-scheduler-overlap-u8diag` across all three
+repos for the exact regression-verification notes per commit.
+
+**What's next, if anything:** switching a real channel's `:propose-grid` to
+`propose-grid-via-daypart-candidates!` and observing it against production
+data; extending `propose-daypart-candidates` to mixed-category layouts once
+homogeneous candidates prove out.
