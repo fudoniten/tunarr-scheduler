@@ -257,3 +257,41 @@
        distinct
        sort
        vec))
+
+;; ---------------------------------------------------------------------------
+;; Channel lookup (used by the read API to translate URL slugs/names to the
+;; canonical channel.id UUID that the storage tables are keyed by).
+;; ---------------------------------------------------------------------------
+
+(defn find-channel-id
+  "Look up the `channel.id` UUID by matching `name-or-slug` against
+   `full_name` (exact or case-insensitive) or `name` (the config-key slug,
+   exact match). Returns the UUID string or nil. The DB is the source of
+   truth for this mapping when the configmap doesn't carry
+   `::media/channel-uuid` for a given channel."
+  [ex name-or-slug]
+  (let [rows (-> (h/select :id)
+                 (h/from :channel)
+                 (h/where [:or
+                           [:= :full_name name-or-slug]
+                           [:= :lower :full_name (str/lower-case name-or-slug)]
+                           [:= :name name-or-slug]])
+                 fetch!)
+        hit  (first rows)]
+    (when hit
+      (or (:channel/id hit) (:id hit) (some-> hit vals first)))))
+
+(defn find-channel-full-name
+  "Look up the `channel.full_name` display name by `channel.id` UUID.
+   Returns the display name string or nil. Used by the read API to
+   include a human-readable channel name in responses when the channel
+   was resolved via the DB fallback (configmap didn't have
+   `::media/channel-uuid` for it)."
+  [ex channel-uuid]
+  (let [rows (-> (h/select :full_name)
+                 (h/from :channel)
+                 (h/where [:= :id channel-uuid])
+                 fetch!)
+        hit  (first rows)]
+    (when hit
+      (or (:channel/full_name hit) (:full_name hit) (some-> hit vals first)))))
