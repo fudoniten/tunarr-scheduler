@@ -124,3 +124,46 @@
     (is (= "g-1" (-> d :grid :grid_id)))
     (is (= [sat-override] (-> d :overrides :overrides)))
     (is (= "cozy january" (-> d :guidance :monthly_theme)))))
+
+;; ---------------------------------------------------------------------------
+;; Regression: the layered-grid storage now uses the channel UUID as the
+;; canonical key, not the display name. Earlier revisions stored the
+;; human-readable `full_name` (e.g. "Enigma TV") in `grids.channel` etc.,
+;; which collided with the slug used in HTTP URLs and the case-insensitive
+;; fullname form used by older guidance rows. This test exercises the
+;; UUID-as-key contract.
+;; ---------------------------------------------------------------------------
+
+(def uuid-grid
+  {:channel "Enigma TV"                       ; display name (content)
+   :strips [{:strip_id "prime" :days "weekdays" :start "17:00" :end "18:00"
+             :content {:media_id "series:enigma" :strategy "sequential"}}]
+   :default_content {:media_id "random:enigma" :strategy "random"}})
+
+(deftest storage-keys-by-uuid-not-display-name
+  (testing "freeze-grid! / current-grid round-trip on a UUID key"
+    (storage/freeze-grid! *ex* "321b6f56-96bb-49bd-b826-72cbfcb786c6" "Q3" 2026 uuid-grid
+                          :grid-id "g-uuid-1")
+    (let [stored (storage/current-grid *ex* "321b6f56-96bb-49bd-b826-72cbfcb786c6" "Q3" 2026)]
+      (is (= "g-uuid-1" (:grid_id stored)))
+      (is (= "321b6f56-96bb-49bd-b826-72cbfcb786c6" (:channel stored)))
+      (is (= "Enigma TV" (-> stored :grid :channel)))))
+  (testing "store-overrides! / current-overrides round-trip on a UUID key"
+    (storage/store-overrides! *ex* "321b6f56-96bb-49bd-b826-72cbfcb786c6" "2026-07" [sat-override])
+    (let [stored (storage/current-overrides *ex* "321b6f56-96bb-49bd-b826-72cbfcb786c6" "2026-07")]
+      (is (= "321b6f56-96bb-49bd-b826-72cbfcb786c6" (:channel stored)))))
+  (testing "set-guidance! / get-guidance round-trip on a UUID key"
+    (storage/set-guidance! *ex* "321b6f56-96bb-49bd-b826-72cbfcb786c6"
+                            {:monthly_theme "mystery in july"})
+    (let [g (storage/get-guidance *ex* "321b6f56-96bb-49bd-b826-72cbfcb786c6")]
+      (is (= "321b6f56-96bb-49bd-b826-72cbfcb786c6" (:channel g)))
+      (is (= "mystery in july" (:monthly_theme g)))))
+  (testing "two distinct channels keyed by UUID stay distinct even if their
+            display names share a token ('Enigma TV' vs 'enigma tv' — the
+            case that broke the pre-fix read paths)"
+    (let [uuid-a "11111111-1111-1111-1111-111111111111"
+          uuid-b "22222222-2222-2222-2222-222222222222"]
+      (storage/set-guidance! *ex* uuid-a {:strategic_guidance "A"})
+      (storage/set-guidance! *ex* uuid-b {:strategic_guidance "B"})
+      (is (= "A" (:strategic_guidance (storage/get-guidance *ex* uuid-a))))
+      (is (= "B" (:strategic_guidance (storage/get-guidance *ex* uuid-b)))))))

@@ -35,7 +35,8 @@
         (binding [*ex* ex]
           (try (t) (finally (executor/close! ex))))))))
 
-(def channel-spec {:name "Classic Comedy" :description "vintage sitcoms"})
+(def channel-spec {:name "Classic Comedy" :description "vintage sitcoms"
+                     :uuid "00000000-0000-0000-0000-000000000001"})
 
 ;; series:42 has only 5 available episodes — far short of a quarter of weekdays.
 (def profile
