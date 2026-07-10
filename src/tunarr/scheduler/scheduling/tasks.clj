@@ -26,6 +26,7 @@
             [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.orchestration :as orch]
             [tunarr.scheduler.scheduling.plans :as plans]
+            [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.http.util :as util]))
 
@@ -49,11 +50,18 @@
 
 (defn- channel-storage-uuid
   "The canonical TS `channel.id` UUID for a channel's config entry, used
-   as the storage key for grids/overrides/guidance. Returns the value
-   verbatim from the config; if the entry is missing the field, returns
-   nil (and the storage call will fail loudly with a useful error)."
-  [cfg]
-  (::media/channel-uuid cfg))
+   as the storage key for grids/overrides/guidance. Reads
+   `::media/channel-uuid` from the config first; falls back to a
+   `channel` table lookup by `full_name` (case-insensitive) or
+   `name` (the config-key slug) when the configmap doesn't carry
+   `::media/channel-uuid` — the DB row is the source of truth in that
+   case. The fallback keeps the run-weekly!/run-monthly!/run-quarterly!
+   paths working without a configmap rollout."
+  [executor cfg]
+  (or (::media/channel-uuid cfg)
+      (let [name-or-slug (::media/channel-fullname cfg)]
+        (when name-or-slug
+          (storage/find-channel-id executor name-or-slug)))))
 
 (defn- channel-catalog-tag
   "The catalog-aggregate filter tag for a channel, `channel:<slug>`. In
@@ -113,7 +121,7 @@
         end      (.plusDays start 7)]
     (into {}
           (for [[channel-key cfg] channels]
-            (let [channel-uuid (channel-storage-uuid cfg)
+            (let [channel-uuid (channel-storage-uuid executor cfg)
                   pv-id        (get index (str (::media/channel-id cfg)))]
               [channel-key
                (cond

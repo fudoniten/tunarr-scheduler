@@ -26,16 +26,20 @@
 
 (defn- channel-storage-uuid
   "Translate a URL `:channel` param to the storage key (the TS
-   `channel.id` UUID, e.g. 'e2d423d2-...').
+   `channel.id` UUID, e.g. 'e2d423d2-f373-49fa-8c2a-b2ea1ed8c144').
    - If `channel` matches a configured channel key (e.g. 'goldenreels'),
      return the `::media/channel-uuid` from that config entry.
    - If `channel` already looks like a UUID (36 chars, 4 dashes), return
      it as-is so direct UUID lookups work.
    - If `channel` matches a configured `::media/channel-fullname`
      (case-insensitive), resolve via that.
-   - Otherwise return `channel` unchanged as a last-ditch attempt; the
-     storage call will fail with a useful error if it doesn't match."
-  [ctx channel]
+   - Otherwise, look the UUID up in the `channel` table by `full_name`
+     or `name` (case-insensitive) — the configmap may not carry
+     `::media/channel-uuid` yet, and the DB is the source of truth.
+   - Returns `nil` as a last-ditch signal that no resolution was possible;
+     handlers will then return a 404 with a clear error rather than
+     querying storage with an untranslated key."
+  [ex ctx channel]
   (or (some-> (get-in ctx [:channels (keyword channel)])
               (::media/channel-uuid))
       (when (and channel (re-matches #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" channel))
@@ -46,18 +50,23 @@
                        (when (= (str/lower-case (::media/channel-fullname cfg))
                                 (str/lower-case channel))
                          (::media/channel-uuid cfg)))))
-      channel))
+      (storage/find-channel-id ex channel)))
 
 (defn- resolve-channel-params
   "Extract the channel UUID and display name from the request. Honors
    `?channel_id=<uuid>` (direct UUID) and the `:channel` path param (slug
    or display name). Returns a map with `:channel-uuid` and `:channel-name`
    (the display name) so handlers can include the human-readable name in
-   responses without an extra DB round-trip."
-  [ctx req]
+   responses without an extra DB round-trip.
+
+   When the URL value is a slug and the configmap doesn't carry
+   `::media/channel-uuid`, the UUID is looked up in the `channel` table.
+   The display name is then read from the same row, so the response stays
+   self-describing (e.g. `Enigma TV` rather than `enigma`)."
+  [ex ctx req]
   (let [path-channel   (get-in req [:parameters :path :channel])
         query-uuid     (get-in req [:parameters :query :channel_id])
-        path-uuid      (when path-channel (channel-storage-uuid ctx path-channel))
+        path-uuid      (when path-channel (channel-storage-uuid ex ctx path-channel))
         chosen-uuid    (or query-uuid path-uuid)
         ;; The slug-lookup is the common case (the URL contains a config
         ;; key like 'goldenreels'). The UUID-iterating fallback handles
@@ -68,7 +77,11 @@
                            (some (fn [[_ c]]
                                    (when (= (::media/channel-uuid c) chosen-uuid) c))
                                  (:channels ctx)))
+        ;; Display name: configmap first, then DB row (in case the
+        ;; channel was resolved via the DB fallback), then the raw
+        ;; URL value as a last resort.
         display-name   (or (and cfg (::media/channel-fullname cfg))
+                           (when chosen-uuid (storage/find-channel-full-name ex chosen-uuid))
                            path-channel)]
     {:channel-uuid chosen-uuid
      :channel-name display-name}))
@@ -105,7 +118,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error getting grid"
-        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ctx req)
+        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ex ctx req)
               today   (plans/today)
               quarter (get-in req [:parameters :query :quarter] (plans/quarter-of today))
               year    (get-in req [:parameters :query :year] (plans/year-of today))]
@@ -121,7 +134,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error listing grids"
-        (let [{:keys [channel-uuid]} (resolve-channel-params ctx req)]
+        (let [{:keys [channel-uuid]} (resolve-channel-params ex ctx req)]
           {:status 200 :body {:grids (storage/list-grids ex :channel channel-uuid)}})))))
 
 ;; ---------------------------------------------------------------------------
@@ -136,7 +149,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error getting overrides"
-        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ctx req)
+        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ex ctx req)
               month   (get-in req [:parameters :query :month] (plans/month-of (plans/today)))]
           (if-let [o (storage/current-overrides ex channel-uuid month)]
             {:status 200 :body (assoc o :channel-name channel-name)}
@@ -150,7 +163,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error listing overrides"
-        (let [{:keys [channel-uuid]} (resolve-channel-params ctx req)]
+        (let [{:keys [channel-uuid]} (resolve-channel-params ex ctx req)]
           {:status 200 :body {:overrides (storage/list-overrides ex :channel channel-uuid)}})))))
 
 ;; ---------------------------------------------------------------------------
@@ -165,7 +178,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error building schedule preview"
-        (let [{:keys [channel-uuid]} (resolve-channel-params ctx req)
+        (let [{:keys [channel-uuid]} (resolve-channel-params ex ctx req)
               today   (plans/today)
               start   (get-in req [:parameters :query :start] (str today))
               end     (get-in req [:parameters :query :end] (str (.plusDays today 7)))]
@@ -179,7 +192,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error building channel plan"
-        (let [{:keys [channel-uuid]} (resolve-channel-params ctx req)]
+        (let [{:keys [channel-uuid]} (resolve-channel-params ex ctx req)]
           {:status 200 :body (plans/dashboard ex channel-uuid)})))))
 
 ;; ---------------------------------------------------------------------------
@@ -196,7 +209,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error getting guidance"
-        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ctx req)]
+        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ex ctx req)]
           {:status 200 :body (or (storage/get-guidance ex channel-uuid)
                                  (assoc empty-guidance
                                         :channel channel-uuid
@@ -211,7 +224,7 @@
   (let [ex (executor-of ctx)]
     (fn [req]
       (with-handler "Error setting guidance"
-        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ctx req)
+        (let [{:keys [channel-uuid channel-name]} (resolve-channel-params ex ctx req)
               fields  (get-in req [:parameters :body])]
           {:status 200 :body
            (assoc (storage/set-guidance! ex channel-uuid fields)

@@ -23,7 +23,14 @@
       created_at TEXT NOT NULL, UNIQUE (channel, cal_month, version))"])
   (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_guidance (
       channel VARCHAR(128) PRIMARY KEY, strategic_guidance TEXT, quarterly_theme TEXT,
-      monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"]))
+      monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"])
+  ;; The `channel` table mirrors the live TS schema (see PSEUDOVISION_INTEGRATION.md
+  ;; and channels/sync.clj). `find-channel-id` and `find-channel-full-name` look
+  ;; up the canonical `id` UUID from this table.
+  (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel (
+      id VARCHAR(64) PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,
+      full_name VARCHAR(128) NOT NULL, description TEXT,
+      created_at TEXT, updated_at TEXT)"]))
 
 (use-fixtures :each
   (fn [t]
@@ -167,3 +174,34 @@
       (storage/set-guidance! *ex* uuid-b {:strategic_guidance "B"})
       (is (= "A" (:strategic_guidance (storage/get-guidance *ex* uuid-a))))
       (is (= "B" (:strategic_guidance (storage/get-guidance *ex* uuid-b)))))))
+
+;; ---------------------------------------------------------------------------
+;; Channel lookup (DB fallback for the URL → UUID resolver)
+;; ---------------------------------------------------------------------------
+
+(defn- seed-channel [id name full-name]
+  (deref (executor/exec! *ex*
+                         {:insert-into :channel
+                          :values [{:id id :name name :full_name full-name
+                                    :description "" :created_at "" :updated_at ""}]})))
+
+(deftest find-channel-id-looks-up-uuid-by-name-or-slug
+  (testing "matches the config-key slug exactly"
+    (seed-channel "321b6f56-96bb-49bd-b826-72cbfcb786c6" "enigma" "Enigma TV")
+    (is (= "321b6f56-96bb-49bd-b826-72cbfcb786c6"
+           (storage/find-channel-id *ex* "enigma"))))
+  (testing "matches the display name exactly"
+    (seed-channel "e2d423d2-f373-49fa-8c2a-b2ea1ed8c144" "goldenreels" "Golden Reels")
+    (is (= "e2d423d2-f373-49fa-8c2a-b2ea1ed8c144"
+           (storage/find-channel-id *ex* "Golden Reels"))))
+  (testing "matches the display name case-insensitively (the pre-fix bug)"
+    (is (= "e2d423d2-f373-49fa-8c2a-b2ea1ed8c144"
+           (storage/find-channel-id *ex* "golden reels"))))
+  (testing "returns nil when nothing matches"
+    (is (nil? (storage/find-channel-id *ex* "nonexistent")))))
+
+(deftest find-channel-full-name-returns-display-name
+  (seed-channel "321b6f56-96bb-49bd-b826-72cbfcb786c6" "enigma" "Enigma TV")
+  (is (= "Enigma TV" (storage/find-channel-full-name *ex*
+                                                     "321b6f56-96bb-49bd-b826-72cbfcb786c6")))
+  (is (nil? (storage/find-channel-full-name *ex* "00000000-0000-0000-0000-000000000000"))))
