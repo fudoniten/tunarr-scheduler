@@ -11,10 +11,19 @@
 (s/def ::channel-fullname string?)
 (s/def ::channel-description string?)
 (s/def ::channel-id string?)
+;; The canonical channel UUID (from the SQL `channel.id` column) is the
+;; stable internal key for the layered-grid storage layer. The config
+;; carries `::channel-id` (the *PV* UUID used for the daily-slots push) —
+;; the TS `channel.id` is a *separate* UUID and is what storage should
+;; key on, since it never changes when a channel is renamed. Look it up
+;; from the `channel` table by matching `::channel-fullname` (or, as a
+;; fallback, by the config key's slug against `channel.name`).
+(s/def ::channel-uuid string?)
 (s/def ::channel-descriptions
   (s/map-of ::channel-name
             (s/keys :req [::channel-fullname
                           ::channel-id
+                          ::channel-uuid
                           ::channel-description])))
 (s/def ::channel-names (s/coll-of ::channel-name))
 

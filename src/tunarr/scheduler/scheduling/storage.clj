@@ -1,20 +1,27 @@
 (ns tunarr.scheduler.scheduling.storage
   "Persistence for the layered-grid scheduler — the system of record.
 
-   Tunarr Scheduler holds all scheduling state (Tunabrain is stateless). This
-   namespace stores the two durable artifacts:
+  Tunarr Scheduler holds all scheduling state (Tunabrain is stateless). This
+  namespace stores the three durable artifacts:
 
-   • A frozen **Grid** per (channel, quarter, year). Immutable once frozen:
-     re-authoring inserts a new version and supersedes the prior one, rather
-     than mutating in place. Carries Tunabrain's `grid_id` and, optionally, the
-     FeasibilityReport it was frozen against (audit trail).
-   • An **Override[]** set per (channel, month), versioned the same way.
+  • A frozen **Grid** per (channel, quarter, year). Immutable once frozen:
+    re-authoring inserts a new version and supersedes the prior one, rather
+    than mutating in place. Carries Tunabrain's `grid_id` and, optionally, the
+    FeasibilityReport it was frozen against (audit trail).
+  • An **Override[]** set per (channel, month), versioned the same way.
+  • A **ChannelGuidance** record per channel (operator input; no versioning).
 
-   The complex artifacts are stored as JSON text (mirroring
-   `tunarr.scheduler.scheduling.strategy`); the stored Grid / Override list
-   round-trip exactly with the wire contracts in
-   `tunarr.scheduler.scheduling.contracts`. Every public fn takes the shared SQL
-   executor as its first argument."
+  All three tables' `channel` column holds the **TS `channel.id` UUID**
+  (e.g. 'e2d423d2-f373-49fa-8c2a-b2ea1ed8c144'), NOT the display name and
+  NOT the config-key slug. The UUID is the only stable identifier across
+  channel renames; see `tunarr.scheduler.scheduling.tasks/channel-spec`
+  for the call-side convention and AGENTS.md pitfall 8 for the history.
+
+  The complex artifacts are stored as JSON text (mirroring
+  `tunarr.scheduler.scheduling.strategy`); the stored Grid / Override list
+  round-trip exactly with the wire contracts in
+  `tunarr.scheduler.scheduling.contracts`. Every public fn takes the shared SQL
+  executor as its first argument."
   (:require [cheshire.core :as json]
             [honey.sql.helpers :as h]
             [taoensso.timbre :as log]

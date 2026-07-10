@@ -28,8 +28,8 @@
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.plans :as plans]))
 
-(defn- guidance [executor channel]
-  (or (storage/get-guidance executor channel) {}))
+(defn- guidance [executor channel-uuid]
+  (or (storage/get-guidance executor channel-uuid) {}))
 
 (defn- slugify [s]
   (-> s str/lower-case (str/replace #"[^a-z0-9]+" "-") (str/replace #"(^-+)|(-+$)" "")))
@@ -108,8 +108,9 @@
    & {:keys [cost-tier default-media-id max-repairs catalog-tag]
       :or   {cost-tier "balanced" max-repairs 3}}]
   (let [channel        (:name channel-spec)
+        channel-uuid   (:uuid channel-spec)
         profile        (fetch-profile pv-config {:channel channel :tag catalog-tag})
-        g              (guidance executor channel)
+        g              (guidance executor channel-uuid)
         [hstart hend]  (plans/quarter-range quarter year)
         proposed       (propose-grid
                         tunabrain
@@ -127,10 +128,10 @@
           ;; frozen grid is self-describing in operator views; display-only, so it
           ;; runs after feasibility and never affects the check or playout.
           (let [labeled (integ/label-grid-content grid profile)
-                stored  (storage/freeze-grid! executor channel quarter year labeled
+                stored  (storage/freeze-grid! executor channel-uuid quarter year labeled
                                               :grid-id grid-id :feasibility report)]
             (log/info "quarterly grid frozen"
-                      {:channel channel :quarter quarter :year year
+                      {:channel channel :channel-uuid channel-uuid :quarter quarter :year year
                        :status (:overall_status report) :repairs repairs})
             (assoc stored :feasibility-status (:overall_status report) :repairs repairs))
           (let [repaired (repair-grid
@@ -139,7 +140,7 @@
                            :current-grid grid :feasibility-report report
                            :cost-tier cost-tier})]
             (log/info "repairing quarterly grid"
-                      {:channel channel :round (inc repairs) :status (:overall_status report)})
+                      {:channel channel :channel-uuid channel-uuid :round (inc repairs) :status (:overall_status report)})
             (recur (:grid repaired) (inc repairs))))))))
 
 (defn run-monthly!
@@ -152,15 +153,17 @@
    channel-spec month
    & {:keys [cost-tier catalog-tag] :or {cost-tier "balanced"}}]
   (let [channel     (:name channel-spec)
+        channel-uuid (:uuid channel-spec)
         as-of       (str month "-01")
         quarter     (plans/quarter-of as-of)
         year        (plans/year-of as-of)
-        grid-record (storage/current-grid executor channel quarter year)]
+        grid-record (storage/current-grid executor channel-uuid quarter year)]
     (when (nil? grid-record)
       (throw (ex-info "no frozen grid to base monthly overrides on"
-                      {:channel channel :month month :quarter quarter :year year})))
+                      {:channel channel :channel-uuid channel-uuid
+                       :month month :quarter quarter :year year})))
     (let [profile (fetch-profile pv-config {:channel channel :tag catalog-tag})
-          g       (guidance executor channel)
+          g       (guidance executor channel-uuid)
           resp    (propose-overrides
                    tunabrain
                    {:channel channel-spec :month month :grid (:grid grid-record)
@@ -169,8 +172,9 @@
                     :planned-events (:planned_events g)
                     :strategic-guidance (:strategic_guidance g)
                     :cost-tier cost-tier})
-          stored  (storage/store-overrides! executor channel month (:overrides resp)
+          stored  (storage/store-overrides! executor channel-uuid month (:overrides resp)
                                             :overrides-id (:overrides_id resp))]
       (log/info "monthly overrides stored"
-                {:channel channel :month month :count (count (:overrides resp))})
+                {:channel channel :channel-uuid channel-uuid :month month
+                 :count (count (:overrides resp))})
       stored)))

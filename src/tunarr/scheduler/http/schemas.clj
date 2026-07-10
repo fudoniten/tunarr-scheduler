@@ -361,18 +361,22 @@
   [:map [:channels [:vector :string]]])
 
 (def GridRecord
-  "A stored, frozen grid version plus its feasibility snapshot."
+  "A stored, frozen grid version plus its feasibility snapshot. `:channel`
+   is the canonical TS `channel.id` UUID (stable across channel renames);
+   `:channel-name` is the human-readable display name from the config,
+   included for UI convenience."
   [:map {:closed false}
    [:id :string]
    [:channel :string]
+   [:channel-name {:optional true} [:maybe :string]]
    [:quarter :string]
    [:year :int]
    [:version :int]
    [:status :string]
-   [:grid {:optional true} :any]
+   [:grid :any]
+   [:created-at {:optional true} [:maybe :string]]
    [:grid_id {:optional true} [:maybe :string]]
    [:feasibility {:optional true} :any]])
-
 (def GridListResponse
   [:map [:grids [:vector GridRecord]]])
 

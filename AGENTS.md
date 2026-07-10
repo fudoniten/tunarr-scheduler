@@ -178,7 +178,9 @@ Full schema: `GET /openapi.json`.
 5. **`channel_ids` are slug strings, not integers.** Tunarr Scheduler's
    `channel` query param takes the config-key slug (`goldenreels`), not the
    display name (`Golden Reels`) and not PV's integer id. The `channel_id`
-   query param takes PV's integer id.
+   query param takes PV's integer id. Internally, **storage keys on the
+   TS `channel.id` UUID** (not the slug, not the display name, not the
+   PV integer id) — see pitfall 8.
 6. **Tunabrain responses can have explicit `null` in scope fields.** Strip
    them before validating against `Override` (commit `1caf909`). The
    `Tunabrain → Override` step in `scheduling/orchestration.clj` is the
@@ -187,7 +189,23 @@ Full schema: `GET /openapi.json`.
    reitit OpenAPI spec is generated at boot from the route table; if routes
    are added inside `with-redefs` blocks in tests, they won't appear in the
    spec. Define routes at the top level, then add the handler impls.
-8. **Tunabrain is now in `arr` namespace, not `media`.** When looking up
+8. **Storage uses `channel.id` UUID, NOT the display name.** Until the
+   July 2026 fix, `freeze-grid!` / `store-overrides!` / `set-guidance!`
+   stored the `::media/channel-fullname` (e.g. "Enigma TV") in
+   `grids.channel` etc. That collided with the slug used in HTTP URLs
+   (`/api/scheduling/channels/enigma/grid` — exact-match `WHERE channel = ?`
+   returned 0 rows because the stored value was "Enigma TV", not "enigma")
+   and even with `channel-storage-uuid` doing slug→fullname translation,
+   case mismatches and slug-with-spaces values ("enigma tv", "golden reels")
+   in older `channel_guidance` rows still failed. The fix is to use the
+   TS `channel.id` UUID as the canonical storage key. **All new code must
+   pass `::media/channel-uuid` to the storage functions; passing
+   `::media/channel-fullname` is a bug.** The pre-migration data in the
+   `grids` / `overrides` / `channel_guidance` tables is a one-shot
+   migration target — see `references/ts-storage-channel-uuid-2026-07.md`
+   (the SQL lives at `/opt/media/2026-07-10-ts-channel-uuid-migration.*.sql`
+   on the hermes-shares sidecar).
+9. **Tunabrain is now in `arr` namespace, not `media`.** When looking up
    the service, use `tunabrain.arr.svc.cluster.local:5546` (in-cluster) or
    `tunabrain.kube.sea.fudo.link` (ingress). The legacy `media` namespace
    service was a sidecar-only stub that had no endpoints.
