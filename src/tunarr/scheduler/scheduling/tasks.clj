@@ -160,19 +160,29 @@
 
 (defn run-quarterly!
   "Propose → check → repair → freeze the quarterly grid for every channel for the
-   current quarter. Returns channel-key → frozen grid record (with
-   :feasibility-status) / {:error …}."
-  [{:keys [channels] :as ctx}]
+   current quarter, then sync it onto Pseudovision's native schedule/slot
+   model (orch/sync-native-schedule!, via run-quarterly!'s :pv-channel-id).
+   Returns channel-key → frozen grid record (with :feasibility-status and,
+   when synced, :native-sync) / :no-channel-id / :not-found / {:error …}."
+  [{:keys [pseudovision channels] :as ctx}]
   (log/info "task: quarterly grid generation")
   (let [comps   (components ctx)
+        conf    (pv-config pseudovision)
+        index   (uuid->pv-id conf)
         today   (plans/today)
         quarter (plans/quarter-of today)
         year    (plans/year-of today)]
     (into {}
           (for [[channel-key cfg] channels]
-            [channel-key
-             (try (orch/run-quarterly! comps (channel-spec cfg) quarter year
-                                       :catalog-tag (channel-catalog-tag channel-key))
-                  (catch Exception e
-                    (log/error e "task: quarterly grid failed" {:channel channel-key})
-                    {:error (util/error-message e)}))]))))
+            (let [pv-id (get index (str (::media/channel-id cfg)))]
+              [channel-key
+               (cond
+                 (not (::media/channel-id cfg)) :no-channel-id
+                 (not pv-id)                    :not-found
+                 :else
+                 (try (orch/run-quarterly! comps (channel-spec cfg) quarter year
+                                           :catalog-tag (channel-catalog-tag channel-key)
+                                           :pv-channel-id pv-id)
+                      (catch Exception e
+                        (log/error e "task: quarterly grid failed" {:channel channel-key})
+                        {:error (util/error-message e)})))])))))

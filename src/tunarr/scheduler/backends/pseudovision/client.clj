@@ -474,12 +474,13 @@
              :json-params channel-data}))
 
 (defn update-channel!
-  "Update channel configuration.
+  "Update channel configuration (name, number, ffmpeg profile, etc.).
 
-   Common updates:
-     :schedule-id - Attach a schedule to the channel
-     :name - Update channel name
-     :number - Update channel number"
+   NOTE: Pseudovision's channels table has no :schedule-id column — a
+   schedule attaches to the channel's PLAYOUT instead. Use attach-schedule!
+   (PUT .../playout) to attach a schedule; passing :schedule-id here is
+   silently dropped by PV's raw column SET (or errors, depending on driver
+   strictness) rather than doing what the caller intends."
   [config channel-id updates]
   (request! :put
             (api-url config (str "/api/channels/" channel-id))
@@ -492,6 +493,25 @@
   (request! :get
             (api-url config (str "/api/channels/" channel-id "/playout"))
             {}))
+
+(defn attach-schedule!
+  "Attach a schedule to a channel's playout (PUT .../playout — schedule_id
+   lives on the playout row, NOT on the channel; there is no :schedule-id
+   field on Pseudovision's channels table, despite update-channel!'s
+   docstring below). Creates the playout row on first attach.
+
+   Options:
+     :rebuild - when true, also triggers an async rebuild (default false)
+     :horizon - rebuild horizon in days (default 14, only used if :rebuild)
+
+   Returns the updated Playout record."
+  [config channel-id schedule-id & {:keys [rebuild horizon] :or {rebuild false horizon 14}}]
+  (request! :put
+            (api-url config (str "/api/channels/" channel-id "/playout"))
+            {:content-type :json
+             :json-params {:schedule-id schedule-id}
+             :query-params (cond-> {}
+                             rebuild (assoc "rebuild" "true" "horizon" (str horizon)))}))
 
 (defn rebuild-playout!
   "Trigger playout rebuild for a channel.
@@ -704,8 +724,10 @@
         (add-slot! config schedule-id
                    (assoc slot :slot-index idx)))
 
-      ;; Attach schedule to channel and rebuild
-      (update-channel! config channel-id {:schedule-id schedule-id})
+      ;; Attach schedule to the channel's playout (NOT update-channel! —
+      ;; schedule_id lives on playouts, not channels; see attach-schedule!)
+      ;; and rebuild.
+      (attach-schedule! config channel-id schedule-id)
       (rebuild-playout! config channel-id {:from "now" :horizon 14})
 
       {:success true :schedule-id schedule-id}))

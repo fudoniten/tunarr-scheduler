@@ -7,6 +7,7 @@
             [tunarr.scheduler.sql.executor :as executor]
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.orchestration :as orch]
+            [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.tunabrain :as tb]))
 
 (def ^:dynamic *ex* nil)
@@ -148,6 +149,91 @@
                {:propose-overrides (fn [_ _] {:overrides_id "ov-empty" :overrides []})})
         stored (orch/run-monthly! comps channel-spec "2026-01")]
     (is (= [] (:overrides stored)))))
+
+;; ---------------------------------------------------------------------------
+;; run-quarterly! :pv-channel-id -> sync-native-schedule! wiring
+;; ---------------------------------------------------------------------------
+
+(deftest quarterly-syncs-native-schedule-when-pv-channel-id-given
+  (let [sync-calls (atom [])
+        comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
+                :sync-schedule (fn [pv-config pv-channel-id grid channel-tag]
+                                (swap! sync-calls conj [pv-config pv-channel-id grid channel-tag])
+                                {:schedule-id 9 :slot-count 3 :warnings []})})
+        out (orch/run-quarterly! comps channel-spec "Q1" 2026
+                                 :pv-channel-id 42 :catalog-tag "channel:classic-comedy")]
+    (is (= 1 (count @sync-calls)))
+    (is (= [::pv 42 "channel:classic-comedy"]
+           (let [[pv-config pv-channel-id _grid channel-tag] (first @sync-calls)]
+             [pv-config pv-channel-id channel-tag])))
+    (is (= {:ok {:schedule-id 9 :slot-count 3 :warnings []}} (:native-sync out)))))
+
+(deftest quarterly-skips-native-sync-without-pv-channel-id
+  (let [sync-calls (atom 0)
+        comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
+                :sync-schedule (fn [& _] (swap! sync-calls inc) {})})
+        out (orch/run-quarterly! comps channel-spec "Q1" 2026)]
+    (is (= 0 @sync-calls))
+    (is (not (contains? out :native-sync)))))
+
+(deftest quarterly-native-sync-failure-does-not-fail-the-freeze
+  (let [comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
+                :sync-schedule (fn [& _] (throw (ex-info "pv unreachable" {})))})
+        out (orch/run-quarterly! comps channel-spec "Q1" 2026 :pv-channel-id 42)]
+    (is (= "ok" (:feasibility-status out)) "the grid still froze")
+    (is (= "pv unreachable" (:error (:native-sync out))))
+    (is (some? (storage/current-grid *ex* "Classic Comedy" "Q1" 2026))
+        "the frozen grid is durable regardless of PV sync outcome")))
+
+;; ---------------------------------------------------------------------------
+;; ensure-collection! / sync-native-schedule! — the PV-facing collaborators,
+;; stubbed via with-redefs since they call backends.pseudovision.client
+;; directly rather than through the components map (same pattern
+;; tunabrain_scheduling_test.clj uses for tb/json-post!).
+;; ---------------------------------------------------------------------------
+
+(deftest ensure-collection-reuses-existing-by-name
+  (with-redefs [pv/get-collections (fn [_] [{:id 5 :name "auto:series:42"}])
+                pv/create-collection! (fn [_ _] (throw (ex-info "should not create" {})))]
+    (is (= 5 (orch/ensure-collection! ::pv {:name "auto:series:42" :kind :show :show-id 42})))))
+
+(deftest ensure-collection-creates-when-absent
+  (let [created (atom nil)]
+    (with-redefs [pv/get-collections (fn [_] [])
+                  pv/create-collection! (fn [_ data] (reset! created data) {:id 77})]
+      (is (= 77 (orch/ensure-collection! ::pv {:name "auto:category:sitcom:channel:hua"
+                                               :kind :category :category "sitcom"
+                                               :channel-tag "channel:hua"})))
+      (is (= "smart" (:kind @created)))
+      (is (= {:category "sitcom" :channel-tag "channel:hua"} (get-in @created [:config :query]))))))
+
+(def sync-grid
+  {:channel "Classic Comedy"
+   :strips [{:strip_id "prime" :days "weekdays" :start "17:00" :end "17:30"
+             :content {:media_id "series:42" :strategy "sequential"}}]})
+
+(deftest sync-native-schedule-full-round-trip
+  (let [added-slots (atom [])
+        attached    (atom nil)
+        rebuilt     (atom false)
+        deleted     (atom nil)]
+    (with-redefs [pv/get-collections    (fn [_] [{:id 5 :name "auto:series:42"}])
+                  pv/get-playout        (fn [_ _] {:schedule-id 3})
+                  pv/create-schedule!   (fn [_ data] {:id 9 :name (:name data)})
+                  pv/add-slot!          (fn [_ sched-id slot] (swap! added-slots conj [sched-id slot]) {})
+                  pv/attach-schedule!   (fn [_ ch-id sched-id] (reset! attached [ch-id sched-id]) {})
+                  pv/rebuild-playout!   (fn [_ _ _] (reset! rebuilt true) {})
+                  pv/delete-schedule!   (fn [_ id] (reset! deleted id) {})]
+      (let [result (orch/sync-native-schedule! ::pv 42 sync-grid "channel:classic-comedy")]
+        (is (= 9 (:schedule-id result)))
+        (is (= 1 (:slot-count result)))
+        (is (= 1 (count @added-slots)))
+        (is (= [42 9] @attached))
+        (is @rebuilt)
+        (is (= 3 @deleted) "the previously-attached schedule is cleaned up")))))
 
 ;; ---------------------------------------------------------------------------
 ;; propose-grid-via-daypart-candidates! — split round trip
