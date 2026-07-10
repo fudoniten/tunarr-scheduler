@@ -1,18 +1,22 @@
 # Tunarr Scheduler Service
 
-This repository contains the foundations for a Clojure service that automates
-programming for TV channels. The long-term vision is to pull media metadata
-from Jellyfin, categorise the catalogue with the help of a Large Language Model,
-orchestrate weekly schedules per channel, and generate custom bumpers complete
-with text-to-speech narration.
+This repository contains a Clojure service that automates programming for
+Pseudovision TV channels: it categorises the catalogue with the help of a
+Large Language Model (via Tunabrain), authors a layered quarterly/monthly
+schedule "grid" per channel (see [SCHEDULING.md](SCHEDULING.md) and
+[ROADMAP.md](ROADMAP.md) for the current design and delivery status), and
+generates custom bumpers with text-to-speech narration.
 
 ## Features
 
-* **Media ingestion** - pluggable catalog component for Jellyfin data sources.
+* **Media ingestion** - pluggable catalog component (Jellyfin and/or
+  Pseudovision as the source of truth; see
+  [PSEUDOVISION_SYNC.md](PSEUDOVISION_SYNC.md)).
 * **LLM abstraction** - a provider-agnostic interface for Ollama, OpenAI, or
   other Large Language Models via TunaBrain.
-* **Scheduling engine** - multi-level planning (seasonal, monthly, weekly) for
-  balanced programming blocks.
+* **Layered-grid scheduling** - quarterly propose→feasibility-check→repair→freeze
+  loop, sparse monthly overrides, and a deterministic weekly/native-schedule
+  delivery step (see [SCHEDULING.md](SCHEDULING.md)).
 * **Bumper generation** - stubs for script generation and TTS synthesis.
 * **HTTP API** - endpoints to trigger retagging, scheduling, and bumper creation.
 * **Pseudovision integration** - direct sync of tags and schedules to Pseudovision

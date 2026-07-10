@@ -99,8 +99,9 @@ fill.
   interior-boundary re-merge, default-only grid). 22 tests / 121 assertions
   green across the scheduling namespaces.
 - **Remaining:** wire the hand-author-grid → expand-a-week → push milestone once
-  DailySlot ingestion is settled; retire the stub
-  `scheduling/engine.clj::schedule-week!`.
+  DailySlot ingestion is settled.
+- **Done (2026-07):** retired the stub `scheduling/engine.clj::schedule-week!`
+  (unreferenced anywhere; deleted).
 
 ### Phase 2 — CatalogProfile assembly ✅ DONE
 Sourced from Pseudovision's `GET /api/catalog/aggregate`. Pseudovision speaks
@@ -254,6 +255,31 @@ the PV-side variability the expander exists to remove.
 **Action:** confirm/define the exact route + payload with Pseudovision, then add
 a thin `push-daily-slots!` client fn. Until then, the expander output is the
 stable internal artifact and the push is an adapter.
+
+> **Superseded 2026-07 (base grids only):** the reasoning above held while
+> Pseudovision's playout engine had no way to pack a block with multiple
+> sequential episodes — a one-item-per-slot DailySlot push was the only way
+> to avoid dead air. Pseudovision's native engine (block/count/flood fill
+> modes, per-collection enumerators that persist rotation position across
+> airings, variety-aware filler) already solves that better than the
+> expander could without re-implementing it, so `scheduling/native_schedule.clj`
+> now translates a frozen **Grid** onto that engine directly (see
+> `orchestration/sync-native-schedule!`), and `run-quarterly!` calls it
+> whenever a `pv-channel-id` is supplied. This is scoped to base grids only:
+> the DailySlot/`publish-week!`/`run-weekly!` path described above is still
+> live and cron-wired — it is the only mechanism that currently applies
+> monthly **Overrides**, which `native_schedule.clj` does not yet translate.
+> That gap is unresolved; see the open item below.
+
+**Open item:** decide how monthly Overrides reach the native-scheduled
+channels. `native_schedule.clj` only ever sees the frozen Grid, not
+`Override[]`, so a channel synced onto the native engine currently has no
+path for a holiday marathon / theme-week override short of continuing to run
+`run-weekly!` alongside it (which re-introduces the two-mechanism overlap
+this phase's original reasoning tried to avoid) or teaching the native
+translator to layer overrides in as well (e.g. temporary slot swaps, or
+manual events for the override window). Needs a decision before this is
+fully "done," not just cleanup.
 
 ---
 

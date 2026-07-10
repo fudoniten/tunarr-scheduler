@@ -102,13 +102,22 @@ src/tunarr/scheduler/
 │   │   └── ...
 │   └── ...
 ├── scheduling/
-│   ├── orchestration.clj ; run-quarterly! / run-monthly! / run-weekly!
-│   ├── integration.clj   ; publish-week! / publish-daily-slots!  (talks to PV)
+│   ├── orchestration.clj  ; run-quarterly! / run-monthly! / sync-native-schedule!
+│   ├── native_schedule.clj ; Grid -> PV native schedule/slot translator (base
+│   │                        grids; called from run-quarterly! via
+│   │                        sync-native-schedule! when pv-channel-id is given)
+│   ├── integration.clj   ; publish-week! / publish-daily-slots!  (talks to PV;
+│   │                       still the only path for monthly Overrides — see
+│   │                       ROADMAP.md's "DailySlot ingestion" open item)
 │   ├── expander.clj      ; deterministic grid + overrides → DailySlot[]
 │   ├── contracts.clj     ; Malli schemas (CatalogProfile, Grid, Override, DailySlot)
 │   ├── feasibility.clj   ; pre-flight capacity checks
+│   ├── candidates.clj    ; duration-feasible slot-tiling menu (opt-in, not
+│   │                       yet the default — see DURATION_AWARE_SCHEDULING.md)
 │   ├── plans.clj         ; preview + storage layer for frozen grids
-│   └── tasks.clj         ; cron-driven task entry points
+│   └── tasks.clj         ; cron-driven task entry points (also defines
+│                           run-daily!/run-weekly!, not just thin wrappers
+│                           around orchestration.clj)
 ├── backends/
 │   └── pseudovision/
 │       └── client.clj    ; the PV HTTP client; push-daily-slots! lives here
@@ -129,8 +138,10 @@ The 5 cron-driven endpoints (per the [tunarr-scheduler-scheduling-redesign.md](r
 | `POST /api/scheduling/daily` | Extend the playout horizon (1-2 days) | K8s CronJob (frequent) |
 | `POST /api/scheduling/weekly` | Re-apply schedule templates to every channel (deterministic) | K8s CronJob (weekly) |
 | `POST /api/scheduling/monthly` | LLM-proposed sparse overrides | K8s CronJob (monthly) |
-| `POST /api/scheduling/quarterly` | LLM-proposed frozen weekly grid + repair loop | K8s CronJob (quarterly) |
+| `POST /api/scheduling/quarterly` | LLM-proposed frozen weekly grid + repair loop, **plus** syncing the frozen grid onto Pseudovision's native schedule/slot engine (`sync-native-schedule!`) when a `pv-channel-id` is resolvable | K8s CronJob (quarterly) |
 | `GET /api/scheduling/channels` | List channels with stored plan/guidance | Marquee |
+
+`weekly`'s "re-apply schedule templates" description is now only half the story for a channel whose base grid has been native-synced: Pseudovision's own horizon extension (`daily`) keeps that channel's timeline full without a weekly DailySlot push. `weekly` remains the only delivery mechanism for monthly Overrides, so it's still live and cron-wired — see ROADMAP.md's "DailySlot ingestion" open item for the unresolved overlap.
 
 Plus the per-channel control plane (under `/api/scheduling/channels/{slug}/`):
 `grid`, `overrides`, `plan`, `preview`, `guidance` (PUT/GET).

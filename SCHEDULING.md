@@ -37,11 +37,27 @@ catalog aggregate ─► CatalogProfile ─► propose-quarterly-grid ─► Gri
                           │ shortfalls
                           └─► repair-quarterly-grid ─► revised Grid ─► freeze + store
                                           │
+                                          ├─► sync-native-schedule! ─► Pseudovision's
+                                          │    (scheduling.native-schedule)   native schedule/slot
+                                          │                                   engine (base grid)
+                                          │
                      month ─► propose-monthly-overrides ─► Override[] ─► store
                                           │
                      week  ─► expand(grid, overrides, dates) ─► DailySlot[] ─► Pseudovision
                                           (resolves media_id → episode at air time)
 ```
+
+> **2026-07 update:** the frozen Grid now reaches Pseudovision two ways. Base
+> strips sync directly onto PV's own native schedule/slot engine
+> (`sync-native-schedule!`, run right after freeze whenever a `pv-channel-id`
+> is available) — this replaces the weekly expand-and-push for those strips,
+> because PV's engine can pack a block with multiple sequential episodes
+> (padding any remainder with filler) where the DailySlot push could only
+> play one item per slot. The weekly `expand(...)` path in the diagram above
+> is **still live**, but only as the delivery mechanism for monthly
+> `Override[]` — `sync-native-schedule!` does not yet translate overrides.
+> See `ROADMAP.md`'s "DailySlot ingestion" section for the open question of
+> how overrides eventually reach a native-scheduled channel.
 
 ## Contracts (mirrored as Clojure/Malli in `scheduling.contracts`)
 
