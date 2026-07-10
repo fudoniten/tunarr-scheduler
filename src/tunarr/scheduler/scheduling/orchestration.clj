@@ -22,9 +22,11 @@
   (:require [clojure.string :as str]
             [taoensso.timbre :as log]
             [tunarr.scheduler.tunabrain :as tb]
+            [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.scheduling.candidates :as candidates]
             [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.feasibility :as feasibility]
+            [tunarr.scheduler.scheduling.native-schedule :as native]
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.plans :as plans]))
 
@@ -95,17 +97,81 @@
            :skeleton skeleton
            :warnings warnings})))))
 
+(defn ensure-collection!
+  "Finds an existing Pseudovision collection named `(:name spec)`, or creates
+   it from `spec` (a native-schedule/content-sources entry: `{:kind :show
+   :show-id ..}` or `{:kind :category :category .. :channel-tag ..}`).
+   Collections are named deterministically (auto:series:<id>,
+   auto:category:<cat>:<channel-tag>) precisely so re-freezing a grid finds
+   and reuses the same collection instead of accumulating duplicates.
+   Returns the collection id."
+  [pv-config spec]
+  (let [existing (some #(when (= (:name spec) (:name %)) %) (pv/get-collections pv-config))]
+    (or (:id existing)
+        (:id (pv/create-collection!
+              pv-config
+              {:name (:name spec)
+               :kind "smart"
+               :config {:query (case (:kind spec)
+                                 :show     {:show-id (:show-id spec)}
+                                 :category {:category (:category spec)
+                                            :channel-tag (:channel-tag spec)})}})))))
+
+(defn sync-native-schedule!
+  "Translates a frozen Grid to Pseudovision's native schedule/slot model
+   (scheduling.native-schedule/->schedule) and syncs it to the channel:
+   ensures every strip's content-source collection exists, creates the
+   schedule + its slots, attaches it to the channel's playout (replacing any
+   previously auto-synced schedule so re-freezing doesn't accumulate
+   orphans), and triggers a playout rebuild. `channel-tag` scopes
+   `random:<category>` strips to this channel's own mapped media — same
+   value as `catalog-tag` passed to `run-quarterly!`.
+
+   Best-effort: a failure here does not un-freeze the grid (the grid is
+   already durable in Tunarr Scheduler's own storage); callers should log
+   and surface it without failing the whole quarterly run.
+
+   Returns `{:schedule-id :slot-count :warnings}`."
+  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name]}]
+  (let [sources (native/content-sources grid channel-tag)
+        source-id-by-name (into {}
+                                 (map (fn [spec] [(:name spec) (ensure-collection! pv-config spec)]))
+                                 sources)
+        {:keys [name slots warnings]} (native/->schedule
+                                       grid channel-tag source-id-by-name
+                                       :schedule-name schedule-name)
+        prior-schedule-id (:schedule-id (pv/get-playout pv-config pv-channel-id))
+        sched   (pv/create-schedule! pv-config {:name name})
+        sched-id (:id sched)]
+    (doseq [[idx slot] (map-indexed vector slots)]
+      (pv/add-slot! pv-config sched-id (assoc slot :slot-index idx)))
+    (pv/attach-schedule! pv-config pv-channel-id sched-id)
+    (pv/rebuild-playout! pv-config pv-channel-id {:from "now" :horizon 14})
+    (when (and prior-schedule-id (not= prior-schedule-id sched-id))
+      (try (pv/delete-schedule! pv-config prior-schedule-id)
+           (catch Exception e
+             (log/warn e "failed to delete prior auto-synced schedule"
+                       {:prior-schedule-id prior-schedule-id}))))
+    (log/info "native schedule synced"
+              {:pv-channel-id pv-channel-id :schedule-id sched-id
+               :slot-count (count slots) :warnings (count warnings)})
+    {:schedule-id sched-id :slot-count (count slots) :warnings warnings}))
+
 (defn run-quarterly!
   "Propose → check → repair → freeze a quarterly Grid for one channel. Bounds the
    repair loop at `:max-repairs` (default 3), then freezes best-effort with the
-   final feasibility status attached. Returns the stored grid record plus
-   `:feasibility-status` and `:repairs`."
-  [{:keys [executor tunabrain pv-config fetch-profile propose-grid repair-grid]
+   final feasibility status attached, and — when `:pv-channel-id` is supplied —
+   syncs the frozen grid onto Pseudovision's native schedule/slot model
+   (sync-native-schedule!) so PV's own playout engine programs the channel
+   directly. Returns the stored grid record plus `:feasibility-status`,
+   `:repairs`, and (when synced) `:native-sync`."
+  [{:keys [executor tunabrain pv-config fetch-profile propose-grid repair-grid sync-schedule]
     :or   {fetch-profile integ/fetch-catalog-profile
            propose-grid  tb/propose-quarterly-grid!
-           repair-grid   tb/repair-quarterly-grid!}}
+           repair-grid   tb/repair-quarterly-grid!
+           sync-schedule sync-native-schedule!}}
    channel-spec quarter year
-   & {:keys [cost-tier default-media-id max-repairs catalog-tag]
+   & {:keys [cost-tier default-media-id max-repairs catalog-tag pv-channel-id]
       :or   {cost-tier "balanced" max-repairs 3}}]
   (let [channel        (:name channel-spec)
         channel-uuid   (:uuid channel-spec)
@@ -129,11 +195,19 @@
           ;; runs after feasibility and never affects the check or playout.
           (let [labeled (integ/label-grid-content grid profile)
                 stored  (storage/freeze-grid! executor channel-uuid quarter year labeled
-                                              :grid-id grid-id :feasibility report)]
+                                              :grid-id grid-id :feasibility report)
+                sync-result (when pv-channel-id
+                             (try
+                               {:ok (sync-schedule pv-config pv-channel-id labeled catalog-tag)}
+                               (catch Exception e
+                                 (log/error e "native schedule sync failed"
+                                           {:channel channel :pv-channel-id pv-channel-id})
+                                 {:error (ex-message e)})))]
             (log/info "quarterly grid frozen"
                       {:channel channel :channel-uuid channel-uuid :quarter quarter :year year
                        :status (:overall_status report) :repairs repairs})
-            (assoc stored :feasibility-status (:overall_status report) :repairs repairs))
+            (cond-> (assoc stored :feasibility-status (:overall_status report) :repairs repairs)
+              sync-result (assoc :native-sync sync-result)))
           (let [repaired (repair-grid
                           tunabrain
                           {:channel channel-spec :catalog-profile profile
