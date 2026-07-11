@@ -93,7 +93,7 @@
 (deftest clean-tag-special-chars-test
   (testing "clean-tag converts special characters"
     (is (= "rock_and_roll" (tags/clean-tag "Rock&Roll")))
-    (is (= "c_plus_plus" (tags/clean-tag "C++Programming")))
+    (is (= "c_plus_plus_programming" (tags/clean-tag "C++Programming")))
     (is (= "email_at_domain" (tags/clean-tag "email@domain")))))
 
 (deftest clean-tag-whitespace-test

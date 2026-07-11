@@ -36,8 +36,9 @@
         (binding [*ex* ex]
           (try (t) (finally (executor/close! ex))))))))
 
+(def channel-uuid "00000000-0000-0000-0000-000000000001")
 (def channel-spec {:name "Classic Comedy" :description "vintage sitcoms"
-                     :uuid "00000000-0000-0000-0000-000000000001"})
+                     :uuid channel-uuid})
 
 ;; series:42 has only 5 available episodes — far short of a quarter of weekdays.
 (def profile
@@ -80,7 +81,7 @@
     (is (= 0 (:repairs out)))
     (is (= 0 @repairs) "repair must not be called for a feasible proposal")
     (testing "it is frozen and retrievable, with the feasibility snapshot"
-      (let [stored (storage/current-grid *ex* "Classic Comedy" "Q1" 2026)]
+      (let [stored (storage/current-grid *ex* channel-uuid "Q1" 2026)]
         (is (= "g-1" (:grid_id stored)))
         (is (= "ok" (-> stored :feasibility :overall_status)))))))
 
@@ -103,10 +104,10 @@
     (is (= 2 @calls))
     (is (= 2 (:repairs out)))
     (is (= "blocked" (:feasibility-status out)) "freezes best-effort, flagged blocked")
-    (is (some? (storage/current-grid *ex* "Classic Comedy" "Q1" 2026)))))
+    (is (some? (storage/current-grid *ex* channel-uuid "Q1" 2026)))))
 
 (deftest quarterly-feeds-operator-guidance-into-proposal
-  (storage/set-guidance! *ex* "Classic Comedy"
+  (storage/set-guidance! *ex* channel-uuid
                          {:quarterly_theme "New year, classic laughs"
                           :strategic_guidance "lean nostalgic"})
   (let [captured (atom nil)
@@ -127,8 +128,8 @@
                (orch/run-monthly! (base-components {}) channel-spec "2026-01"))))
 
 (deftest monthly-stores-overrides-against-grid
-  (storage/freeze-grid! *ex* "Classic Comedy" "Q1" 2026 feasible-grid :grid-id "g-1")
-  (storage/set-guidance! *ex* "Classic Comedy" {:planned_events ["Cheers marathon Jan 10"]})
+  (storage/freeze-grid! *ex* channel-uuid "Q1" 2026 feasible-grid :grid-id "g-1")
+  (storage/set-guidance! *ex* channel-uuid {:planned_events ["Cheers marathon Jan 10"]})
   (let [captured (atom nil)
         override {:override_id "o-1" :scope {:date "2026-01-10"} :start "10:00" :end "22:00"
                   :content {:media_id "series:42" :strategy "sequential"} :mode "replace" :priority 0}
@@ -141,10 +142,10 @@
       (is (= feasible-grid (:grid @captured))))
     (testing "overrides are stored and retrievable"
       (is (= "ov-1" (:overrides_id stored)))
-      (is (= [override] (:overrides (storage/current-overrides *ex* "Classic Comedy" "2026-01")))))))
+      (is (= [override] (:overrides (storage/current-overrides *ex* channel-uuid "2026-01")))))))
 
 (deftest monthly-empty-overrides-is-normal
-  (storage/freeze-grid! *ex* "Classic Comedy" "Q1" 2026 feasible-grid :grid-id "g-1")
+  (storage/freeze-grid! *ex* channel-uuid "Q1" 2026 feasible-grid :grid-id "g-1")
   (let [comps (base-components
                {:propose-overrides (fn [_ _] {:overrides_id "ov-empty" :overrides []})})
         stored (orch/run-monthly! comps channel-spec "2026-01")]
@@ -185,7 +186,7 @@
         out (orch/run-quarterly! comps channel-spec "Q1" 2026 :pv-channel-id 42)]
     (is (= "ok" (:feasibility-status out)) "the grid still froze")
     (is (= "pv unreachable" (:error (:native-sync out))))
-    (is (some? (storage/current-grid *ex* "Classic Comedy" "Q1" 2026))
+    (is (some? (storage/current-grid *ex* channel-uuid "Q1" 2026))
         "the frozen grid is durable regardless of PV sync outcome")))
 
 ;; ---------------------------------------------------------------------------

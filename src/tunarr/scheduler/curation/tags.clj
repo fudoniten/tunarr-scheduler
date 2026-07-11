@@ -45,14 +45,14 @@
 
 (defn clean-tag
   [tag]
-  (let [cleaned (-> (str tag)
+  (let [cleaned (-> (if (keyword? tag) (name tag) (str tag))
                     (str/lower-case)
                     (str/replace #"&" " and ")
                     (str/replace #"\+" " plus ")
                     (str/replace #"@" " at ")
                     (str/replace #"[^\p{L}\p{N}]+" "_")
                     (str/replace #"_+" "_")
-                    (str/replace #"^ +|_+$" ""))]
+                    (str/replace #"^[ _]+|[ _]+$" ""))]
     (if-not (str/blank? cleaned)
       cleaned
       tag)))

@@ -4,10 +4,8 @@
    The handlers in `tunarr.scheduler.http.api.plans` accept a `:channel`
    path param that, in production, is the config **slug** (e.g. 'goldenreels')
    — the same identifier used by POST `/api/scheduling/{daily,weekly,...}`.
-   But the data is **stored** by the display **fullname** (e.g. 'Golden Reels'),
-   so the handlers must translate. Before the fix, the read path was passing
-   the slug straight to the storage layer and getting 404s on data that did
-   exist. These tests pin the translation behavior."
+   Storage keys on the TS `channel.id` UUID. The handler's `channel-storage-uuid`
+   helper translates slug→UUID, and these tests pin that translation behaviour."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [next.jdbc :as jdbc]
             [tunarr.scheduler.media :as media]
@@ -16,6 +14,9 @@
             [tunarr.scheduler.http.api.plans :as plans-api]))
 
 (def ^:dynamic *ctx* nil)
+
+(def ^:private golden-uuid  "e2d423d2-f373-49fa-8c2a")
+(def ^:private spectrum-uuid "4d39eb17-c123-4abc-8def")
 
 (defn- setup-schema [db]
   (jdbc/execute! db ["
@@ -52,7 +53,22 @@
       monthly_theme TEXT,
       planned_events TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT NOT NULL
+    )"])
+  (jdbc/execute! db ["
+    CREATE TABLE IF NOT EXISTS channel (
+      id VARCHAR(64) PRIMARY KEY,
+      name VARCHAR(128) NOT NULL UNIQUE,
+      full_name VARCHAR(128) NOT NULL,
+      description TEXT,
+      created_at TEXT,
+      updated_at TEXT
     )"]))
+
+(defn- seed-channel [ex id slug full-name]
+  (deref (executor/exec! ex
+                         {:insert-into :channel
+                          :values [{:id id :name slug :full_name full-name
+                                    :description "" :created_at "" :updated_at ""}]})))
 
 (defn- grid [media-id]
   {:channel "Golden Reels"
@@ -70,14 +86,14 @@
 (defn- mock-ctx [ex]
   {:catalog  {:executor ex}
    ;; Mirrors the production channels config: the config KEY is the slug
-   ;; (used in URLs and POST endpoint selectors), the value carries the
-   ;; fullname/description/id (what Tunabrain sees and what storage keys on).
+   ;; (used in URLs and POST endpoint selectors); the value carries the
+   ;; fullname/description and the storage-key UUID (`::media/channel-uuid`).
    :channels {:goldenreels {::media/channel-fullname    "Golden Reels"
                             ::media/channel-description "Classic shows and movies"
-                            ::media/channel-id          "e2d423d2-..."}
+                            ::media/channel-uuid        golden-uuid}
               :spectrum    {::media/channel-fullname    "Sitcom Spectrum"
                             ::media/channel-description "Sitcoms"
-                            ::media/channel-id          "4d39eb17-..."}}})
+                            ::media/channel-uuid        spectrum-uuid}}})
 
 (defn- req [channel & [extra]]
   {:parameters (merge {:path {:channel channel}
@@ -90,6 +106,11 @@
                                    :DB_CLOSE_DELAY "-1" :DATABASE_TO_LOWER "TRUE"})]
       (setup-schema db)
       (let [ex (executor/create-executor db :worker-count 1)]
+        ;; Seed the `channel` table so `channel-storage-uuid`'s
+        ;; DB-fallback (`storage/find-channel-id`) can resolve slug and
+        ;; display-name requests that don't have `::media/channel-uuid`
+        ;; populated in the ctx.
+        (seed-channel ex golden-uuid  "goldenreels" "Golden Reels")
         (binding [*ctx* (mock-ctx ex)]
           (try (t) (finally (executor/close! ex))))))))
 
@@ -98,7 +119,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest get-grid-handler-resolves-slug-to-storage-key
-  (storage/freeze-grid! (:executor (:catalog *ctx*)) "Golden Reels" "Q1" 2026
+  (storage/freeze-grid! (:executor (:catalog *ctx*)) golden-uuid "Q1" 2026
                         (grid "series:cheers") :grid-id "tb-grid-1")
   (testing "URL with the config slug 'goldenreels' finds the grid stored by fullname"
     (let [handler (plans-api/get-grid-handler *ctx*)
@@ -122,8 +143,8 @@
 
 (deftest list-grids-handler-resolves-slug-to-storage-key
   (let [ex (:executor (:catalog *ctx*))]
-    (storage/freeze-grid! ex "Golden Reels" "Q1" 2026 (grid "series:cheers") :grid-id "g-1")
-    (storage/freeze-grid! ex "Golden Reels" "Q2" 2026 (grid "series:cosby") :grid-id "g-2"))
+    (storage/freeze-grid! ex golden-uuid "Q1" 2026 (grid "series:cheers") :grid-id "g-1")
+    (storage/freeze-grid! ex golden-uuid "Q2" 2026 (grid "series:cosby") :grid-id "g-2"))
   (testing "list-grids via slug returns both versions newest-first"
     (let [handler (plans-api/list-grids-handler *ctx*)
           resp    (handler (req "goldenreels"))]
@@ -141,7 +162,7 @@
 
 (deftest get-overrides-handler-resolves-slug-to-storage-key
   (let [ex (:executor (:catalog *ctx*))]
-    (storage/store-overrides! ex "Golden Reels" "2026-07" [(override "movie:1776")]
+    (storage/store-overrides! ex golden-uuid "2026-07" [(override "movie:1776")]
                               :overrides-id "ovr-1"))
   (testing "URL slug finds overrides stored by fullname"
     (let [handler (plans-api/get-overrides-handler *ctx*)
@@ -160,8 +181,8 @@
 
 (deftest list-overrides-handler-resolves-slug-to-storage-key
   (let [ex (:executor (:catalog *ctx*))]
-    (storage/store-overrides! ex "Golden Reels" "2026-07" [(override "movie:1776")])
-    (storage/store-overrides! ex "Golden Reels" "2026-08" []))
+    (storage/store-overrides! ex golden-uuid "2026-07" [(override "movie:1776")])
+    (storage/store-overrides! ex golden-uuid "2026-08" []))
   (testing "list-overrides via slug returns the history"
     (let [handler (plans-api/list-overrides-handler *ctx*)
           resp    (handler (req "goldenreels"))]
@@ -177,7 +198,7 @@
     ;; Simulate the cron task: store under the display name (per the storage
     ;; convention). The HTTP PUT path should translate the slug to that name.
     (let [ex (:executor (:catalog *ctx*))]
-      (storage/set-guidance! ex "Golden Reels"
+      (storage/set-guidance! ex golden-uuid
                              {:strategic_guidance "lean into nostalgia"}))
     (testing "GET guidance by slug"
       (let [handler (plans-api/get-guidance-handler *ctx*)
@@ -192,9 +213,8 @@
         (is (= 200 (:status resp)))
         (is (= "summer westerns" (-> resp :body :quarterly_theme)))
         ;; The slug and the display name now both read the same row.
-        (is (= "lean into nostalgia"
-               (-> (plans-api/get-guidance-handler *ctx* (req "goldenreels"))
-                   :body :strategic_guidance)))))))
+        (let [resp-2 ((plans-api/get-guidance-handler *ctx*) (req "goldenreels"))]
+          (is (= "lean into nostalgia" (-> resp-2 :body :strategic_guidance))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Cross-channel isolation
@@ -202,8 +222,11 @@
 
 (deftest slug-translation-is-per-channel
   (let [ex (:executor (:catalog *ctx*))]
-    (storage/freeze-grid! ex "Golden Reels" "Q1" 2026 (grid "series:cheers") :grid-id "g-gold")
-    (storage/freeze-grid! ex "Sitcom Spectrum" "Q1" 2026 (grid "series:friends") :grid-id "g-spec"))
+    (storage/freeze-grid! ex golden-uuid "Q1" 2026 (grid "series:cheers") :grid-id "g-gold")
+    ;; 'spectrum' isn't in mock-ctx in this fixture by default — seed the
+    ;; channel row so the resolver falls through to the DB lookup.
+    (seed-channel ex spectrum-uuid "spectrum" "Sitcom Spectrum")
+    (storage/freeze-grid! ex spectrum-uuid "Q1" 2026 (grid "series:friends") :grid-id "g-spec"))
   (testing "the goldenreels slug resolves to Golden Reels, not Sitcom Spectrum"
     (let [resp (plans-api/get-grid-handler *ctx*)
           r    (resp (req "goldenreels" {:query {:quarter "Q1" :year 2026}}))]

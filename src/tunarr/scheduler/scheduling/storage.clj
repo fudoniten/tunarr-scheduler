@@ -271,13 +271,12 @@
    truth for this mapping when the configmap doesn't carry
    `::media/channel-uuid` for a given channel."
   [ex name-or-slug]
-  (let [rows (-> (h/select :id)
-                 (h/from :channel)
-                 (h/where [:or
-                           [:= :full_name name-or-slug]
-                           [:= :lower :full_name (str/lower-case name-or-slug)]
-                           [:= :name name-or-slug]])
-                 fetch!)
+  (let [rows (fetch! ex (-> (h/select :id)
+                            (h/from :channel)
+                            (h/where [:or
+                                      [:= :full_name name-or-slug]
+                                      [:= [:lower :full_name] (str/lower-case name-or-slug)]
+                                      [:= :name name-or-slug]])))
         hit  (first rows)]
     (when hit
       (or (:channel/id hit) (:id hit) (some-> hit vals first)))))
@@ -289,10 +288,9 @@
    was resolved via the DB fallback (configmap didn't have
    `::media/channel-uuid` for it)."
   [ex channel-uuid]
-  (let [rows (-> (h/select :full_name)
-                 (h/from :channel)
-                 (h/where [:= :id channel-uuid])
-                 fetch!)
-        hit  (first rows)]
+  (let [rows (fetch! ex (-> (h/select :full_name)
+                            (h/from :channel)
+                            (h/where [:= :id channel-uuid])))
+        hit  (first rows)]    
     (when hit
       (or (:channel/full_name hit) (:full_name hit) (some-> hit vals first)))))

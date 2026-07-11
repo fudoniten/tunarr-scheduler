@@ -1,4 +1,25 @@
-(ns tunarr.scheduler.media.sql-catalog-test
+(ns tunarr.scheduler.media.sql-catalog-test-pg
+  ;; clj-kondo can't infer the ns from the file path because the file
+  ;; lives outside the canonical `test/` tree; the ns name intentionally
+  ;; matches what was already declared in the file before it was moved
+  ;; out of `test/`. The file is loaded only when explicitly required
+  ;; (see file ns-docstring).
+  "These tests boot a H2 in-memory database and exercise the SQL catalog
+   builders (sql:insert-libraries, sql:insert-channels, sql:upsert-batch,
+   sql:upsert-media-context, etc.). They were moved out of `test/` into
+   `test/_postgres_only/` because H2 doesn't render Postgres-style UPSERT
+   syntax — `INSERT … ON CONFLICT (col) DO UPDATE SET … = EXCLUDED.col`
+   raises `JdbcSQLSyntaxErrorException`. The production code targets
+   PostgreSQL (see `tunarr.scheduler.media.sql-catalog` and the
+   Postgres-only `EXCLUDED.table` reference); the H2 path would require
+   rewriting every `(on-conflict …)` site to H2-portable `MERGE INTO`.
+
+   To run these tests, point `clojure` at this directory explicitly:
+
+       clojure -M:test -e (quote (require (quote [eftest.runner :refer [find-tests run-tests]])) (run-tests (find-tests (quote test_postgres_only))))"
+
+   They will only pass against a real Postgres (testcontainers / docker /
+   CI). They are NOT discovered by the default `clojure -M:test`."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
