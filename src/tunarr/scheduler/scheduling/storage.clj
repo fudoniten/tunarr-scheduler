@@ -22,7 +22,8 @@
   round-trip exactly with the wire contracts in
   `tunarr.scheduler.scheduling.contracts`. Every public fn takes the shared SQL
   executor as its first argument."
-  (:require [cheshire.core :as json]
+  (:require [clojure.string :as str]
+            [cheshire.core :as json]
             [honey.sql.helpers :as h]
             [taoensso.timbre :as log]
             [tunarr.scheduler.scheduling.contracts :as contracts]
