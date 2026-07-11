@@ -3,6 +3,12 @@
 **Analysis Date:** 2026-01-08
 **Codebase:** tunarr-scheduler (Clojure IPTV scheduling service with Pseudovision integration)
 
+> **Archival note (2026-07):** this is a point-in-time report predating the
+> layered-grid rewrite (ROADMAP.md). Line numbers and even file existence for
+> the flagged issues may no longer match current code — verify against the
+> current source before acting on any finding here rather than trusting the
+> line references as-is.
+
 ## Executive Summary
 
 This analysis identified **7 critical performance anti-patterns** that could significantly impact performance at scale. The most severe issues involve N+1 queries, eager realization of large datasets, unbounded database queries, and blocking I/O operations in loops.

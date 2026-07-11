@@ -7,6 +7,7 @@
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.sql-catalog]
+            [tunarr.scheduler.media.memory-catalog]
             [tunarr.scheduler.media.collection :as collection]
             [tunarr.scheduler.media.pseudovision-autosync :as pv-autosync]
             [tunarr.scheduler.media.pseudovision-collection]
