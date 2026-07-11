@@ -27,6 +27,7 @@
             [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.feasibility :as feasibility]
             [tunarr.scheduler.scheduling.native-schedule :as native]
+            [tunarr.scheduler.scheduling.review :as review]
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.plans :as plans]))
 
@@ -207,22 +208,49 @@
                :slot-count (count slots) :warnings (count warnings)})
     {:schedule-id sched-id :slot-count (count slots) :warnings warnings}))
 
+(defn- settle-feasibility
+  "Run the propose→check→repair loop to a settled grid: returns
+   `[grid report repairs]` where `grid` is the last grid checked and `report`
+   its feasibility. Stops when the grid is `ok` or `:max-repairs` is reached
+   (freezing best-effort even if still blocked, exactly as before)."
+  [tunabrain repair-grid channel-spec profile grid0 hstart hend max-repairs cost-tier]
+  (loop [grid grid0, repairs 0]
+    (let [report (feasibility/check grid profile (str hstart) (str hend))]
+      (if (or (= "ok" (:overall_status report)) (>= repairs max-repairs))
+        [grid report repairs]
+        (let [repaired (repair-grid
+                        tunabrain
+                        {:channel channel-spec :catalog-profile profile
+                         :current-grid grid :feasibility-report report
+                         :cost-tier cost-tier})]
+          (log/info "repairing quarterly grid"
+                    {:channel (:name channel-spec) :round (inc repairs)
+                     :status (:overall_status report)})
+          (recur (:grid repaired) (inc repairs)))))))
+
 (defn run-quarterly!
-  "Propose → check → repair → freeze a quarterly Grid for one channel. Bounds the
-   repair loop at `:max-repairs` (default 3), then freezes best-effort with the
-   final feasibility status attached, and — when `:pv-channel-id` is supplied —
-   syncs the frozen grid onto Pseudovision's native schedule/slot model
-   (sync-native-schedule!) so PV's own playout engine programs the channel
-   directly. Returns the stored grid record plus `:feasibility-status`,
-   `:repairs`, and (when synced) `:native-sync`."
-  [{:keys [executor tunabrain pv-config fetch-profile propose-grid repair-grid sync-schedule]
+  "Propose → check → repair → [review] → freeze a quarterly Grid for one channel.
+   Bounds the feasibility repair loop at `:max-repairs` (default 3). When a
+   `:review-schedule` component is supplied, ALSO runs the taste critique loop
+   (review → revise → re-review, bounded at `:max-reviews`, default 2) on the
+   feasible grid before freezing — see `scheduling.review`. Freezes best-effort
+   with the final feasibility status attached, and — when `:pv-channel-id` is
+   supplied — syncs the frozen grid onto Pseudovision's native schedule/slot
+   model (`sync-native-schedule!`). Returns the stored grid record plus
+   `:feasibility-status`, `:repairs`, `:native-sync` (when synced), and
+   `:review` (when reviewed).
+
+   The review loop is opt-in: with no `:review-schedule` component the behaviour
+   is byte-for-byte the pre-review propose→check→repair→freeze→sync flow."
+  [{:keys [executor tunabrain pv-config fetch-profile propose-grid repair-grid
+           sync-schedule review-schedule revise-schedule]
     :or   {fetch-profile integ/fetch-catalog-profile
            propose-grid  tb/propose-quarterly-grid!
            repair-grid   tb/repair-quarterly-grid!
            sync-schedule sync-native-schedule!}}
    channel-spec quarter year
-   & {:keys [cost-tier default-media-id max-repairs catalog-tag pv-channel-id]
-      :or   {cost-tier "balanced" max-repairs 3}}]
+   & {:keys [cost-tier default-media-id max-repairs max-reviews catalog-tag pv-channel-id]
+      :or   {cost-tier "balanced" max-repairs 3 max-reviews 2}}]
   (let [channel        (:name channel-spec)
         channel-uuid   (:uuid channel-spec)
         profile        (fetch-profile pv-config {:channel channel :tag catalog-tag})
@@ -236,41 +264,52 @@
                          :strategic-guidance (:strategic_guidance g)
                          :default-media-id default-media-id
                          :cost-tier cost-tier})
-        grid-id        (:grid_id proposed)]
-    (loop [grid (:grid proposed), repairs 0]
-      (let [report (feasibility/check grid profile (str hstart) (str hend))]
-        (if (or (= "ok" (:overall_status report)) (>= repairs max-repairs))
-          ;; Post-feasibility, pre-freeze finishing passes on the final grid:
-          ;;  1. sanitize — neutralise any dead random:<category> the repair loop
-          ;;     couldn't fix, so the frozen grid (and the native sync + weekly
-          ;;     expansion built from it) never programs an empty pool.
-          ;;  2. label — fill show titles from the CatalogProfile we already have
-          ;;     so the frozen grid is self-describing in operator views;
-          ;;     display-only, never affecting the check or playout.
-          (let [{sanitized :grid} (sanitize-dead-random-strips grid profile)
-                labeled (integ/label-grid-content sanitized profile)
-                stored  (storage/freeze-grid! executor channel-uuid quarter year labeled
-                                              :grid-id grid-id :feasibility report)
-                sync-result (when pv-channel-id
-                             (try
-                               {:ok (sync-schedule pv-config pv-channel-id labeled catalog-tag)}
-                               (catch Exception e
-                                 (log/error e "native schedule sync failed"
-                                           {:channel channel :pv-channel-id pv-channel-id})
-                                 {:error (ex-message e)})))]
-            (log/info "quarterly grid frozen"
-                      {:channel channel :channel-uuid channel-uuid :quarter quarter :year year
-                       :status (:overall_status report) :repairs repairs})
-            (cond-> (assoc stored :feasibility-status (:overall_status report) :repairs repairs)
-              sync-result (assoc :native-sync sync-result)))
-          (let [repaired (repair-grid
-                          tunabrain
-                          {:channel channel-spec :catalog-profile profile
-                           :current-grid grid :feasibility-report report
-                           :cost-tier cost-tier})]
-            (log/info "repairing quarterly grid"
-                      {:channel channel :channel-uuid channel-uuid :round (inc repairs) :status (:overall_status report)})
-            (recur (:grid repaired) (inc repairs))))))))
+        grid-id        (:grid_id proposed)
+        [grid0 report0 repairs] (settle-feasibility tunabrain repair-grid channel-spec
+                                                    profile (:grid proposed) hstart hend
+                                                    max-repairs cost-tier)
+        ;; Opt-in taste critique on the feasible grid, before freeze/sync.
+        review-result  (when review-schedule
+                         (review/run-review-loop
+                          {:tunabrain tunabrain :channel-spec channel-spec :profile profile
+                           :skeleton (or (:skeleton (:grid proposed)) (:skeleton proposed))
+                           :grid grid0 :hstart hstart :hend hend
+                           :review-fn review-schedule :revise-fn revise-schedule
+                           :cost-tier cost-tier :max-reviews max-reviews}))
+        reviewed-grid  (if review-result (:grid review-result) grid0)
+        ;; A taste revision can change the grid, so the stored feasibility
+        ;; snapshot must reflect the reviewed grid, not the pre-review one.
+        ;; (Deterministic + cheap; only re-run when review actually ran.)
+        report         (if review-result
+                         (feasibility/check reviewed-grid profile (str hstart) (str hend))
+                         report0)
+        ;; Post-feasibility, pre-freeze finishing passes on the final grid:
+        ;;  1. sanitize — neutralise any dead random:<category> the repair loop
+        ;;     couldn't fix, so the frozen grid (and the native sync + weekly
+        ;;     expansion built from it) never programs an empty pool.
+        ;;  2. label — fill show titles from the CatalogProfile we already have
+        ;;     so the frozen grid is self-describing in operator views;
+        ;;     display-only, never affecting the check or playout.
+        {sanitized :grid} (sanitize-dead-random-strips reviewed-grid profile)
+        labeled        (integ/label-grid-content sanitized profile)
+        stored         (storage/freeze-grid! executor channel-uuid quarter year labeled
+                                             :grid-id grid-id :feasibility report)
+        sync-result    (when pv-channel-id
+                         (try
+                           {:ok (sync-schedule pv-config pv-channel-id labeled catalog-tag)}
+                           (catch Exception e
+                             (log/error e "native schedule sync failed"
+                                        {:channel channel :pv-channel-id pv-channel-id})
+                             {:error (ex-message e)})))]
+    (log/info "quarterly grid frozen"
+              {:channel channel :channel-uuid channel-uuid :quarter quarter :year year
+               :status (:overall_status report) :repairs repairs
+               :reviewed (boolean review-result)
+               :review-verdict (:verdict (:review review-result))})
+    (cond-> (assoc stored :feasibility-status (:overall_status report) :repairs repairs)
+      sync-result   (assoc :native-sync sync-result)
+      review-result (assoc :review (:review review-result)
+                           :reviews (:reviews review-result)))))
 
 (defn run-monthly!
   "Ask Tunabrain for sparse monthly Overrides against the channel's frozen grid

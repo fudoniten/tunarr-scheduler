@@ -190,6 +190,51 @@
         "the frozen grid is durable regardless of PV sync outcome")))
 
 ;; ---------------------------------------------------------------------------
+;; Opt-in review loop wiring (:review-schedule component)
+;; ---------------------------------------------------------------------------
+
+(deftest quarterly-without-review-component-does-not-review
+  (let [comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})})
+        out (orch/run-quarterly! comps channel-spec "Q1" 2026)]
+    (is (not (contains? out :review)) "no review runs unless the component is supplied")
+    (is (= "ok" (:feasibility-status out)))))
+
+(deftest quarterly-runs-review-loop-when-component-supplied
+  (let [revises (atom 0)
+        comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
+                :review-schedule (fn [_ _] {:review {:verdict "pass" :score 0.9
+                                                     :summary "good" :findings []}})
+                :revise-schedule (fn [_ _] (swap! revises inc) {:grid feasible-grid})})
+        out (orch/run-quarterly! comps channel-spec "Q1" 2026)]
+    (is (= "pass" (:verdict (:review out))) "the review verdict is attached to the result")
+    (is (= 0 (:reviews out)))
+    (is (= 0 @revises) "a passing review does not revise")
+    (is (= "ok" (:feasibility-status out)))))
+
+(deftest quarterly-review-revises-then-freezes-revised-grid
+  (let [revised-grid {:channel "Classic Comedy" :strips []
+                      :default_content {:media_id "random:sitcom" :strategy "random"}}
+        comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
+                :review-schedule (let [calls (atom 0)]
+                                   (fn [_ _]
+                                     (let [v (if (zero? @calls) "fail" "pass")]
+                                       (swap! calls inc)
+                                       {:review {:verdict v :score 0.5 :summary "s"
+                                                 :findings (if (= v "fail")
+                                                             [{:aspect "series-usage" :severity "major"
+                                                               :message "generic"}] [])}})))
+                :revise-schedule (fn [_ _] {:grid revised-grid})})
+        out (orch/run-quarterly! comps channel-spec "Q1" 2026)]
+    (is (= "pass" (:verdict (:review out))))
+    (is (= 1 (:reviews out)) "one revise round before passing")
+    (testing "the frozen grid is the revised one"
+      (let [stored (storage/current-grid *ex* channel-uuid "Q1" 2026)]
+        (is (= "random:sitcom" (-> stored :grid :default_content :media_id)))))))
+
+;; ---------------------------------------------------------------------------
 ;; ensure-collection! / sync-native-schedule! — the PV-facing collaborators,
 ;; stubbed via with-redefs since they call backends.pseudovision.client
 ;; directly rather than through the components map (same pattern

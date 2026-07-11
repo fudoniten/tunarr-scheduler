@@ -468,6 +468,30 @@
    :strategic_guidance strategic-guidance
    :cost_tier          cost-tier})
 
+(defn review-schedule-request
+  "Build a ScheduleReviewRequest payload (Phase 7). `sample-week` is a vector of
+   ReviewSlot maps ({:day :start :end :label :media_id :strategy :daypart}) that
+   the caller built by expanding + labelling one representative week of `grid`."
+  [{:keys [channel skeleton grid sample-week catalog-profile cost-tier]
+    :or   {sample-week [] cost-tier "balanced"}}]
+  {:channel         (channel->payload channel)
+   :skeleton        skeleton
+   :grid            grid
+   :sample_week     (vec sample-week)
+   :catalog_profile catalog-profile
+   :cost_tier       cost-tier})
+
+(defn revise-schedule-request
+  "Build a ReviewReviseRequest payload (Phase 7). `review` is the parsed
+   ScheduleReview map returned by `review-schedule!`."
+  [{:keys [channel catalog-profile current-grid review cost-tier]
+    :or   {cost-tier "balanced"}}]
+  {:channel         (channel->payload channel)
+   :catalog_profile catalog-profile
+   :current_grid    current-grid
+   :review          review
+   :cost_tier       cost-tier})
+
 (defn propose-quarterly-grid!
   "Ask Tunabrain to propose a frozen quarterly Grid for one channel.
    `opts` are the keys consumed by `quarterly-grid-request`. Returns the parsed
@@ -546,6 +570,35 @@
       (doseq [o overrides]
         (warn-if-invalid contracts/ScheduleOverride o :override))
       (assoc response :overrides overrides))))
+
+(defn review-schedule!
+  "Ask Tunabrain to critique a concrete realized week against its daypart plan
+   (Phase 7). `opts` are the keys consumed by `review-schedule-request`. Returns
+   the parsed ScheduleReviewResponse: {:review_id :status :review :cost_estimate}
+   where :review is {:verdict :score :summary :findings}."
+  [client opts]
+  (let [response (json-post! client "/api/scheduling/review-grid"
+                             (review-schedule-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
+    (when (nil? (:review response))
+      (throw (ex-info "tunabrain review-grid returned no review"
+                      {:response response})))
+    (warn-if-invalid contracts/ScheduleReview (:review response) :review)
+    response))
+
+(defn revise-schedule!
+  "Ask Tunabrain to revise a Grid to address a failed review (Phase 7). `opts`
+   are the keys consumed by `revise-schedule-request`. Returns the parsed
+   ReviewReviseResponse: {:grid_id :status :grid :changes :cost_estimate}."
+  [client opts]
+  (let [response (json-post! client "/api/scheduling/revise-grid"
+                             (revise-schedule-request opts)
+                             :timeout-ms scheduling-timeout-ms)]
+    (when (nil? (:grid response))
+      (throw (ex-info "tunabrain revise-grid returned no grid"
+                      {:response response})))
+    (warn-if-invalid contracts/Grid (:grid response) :grid)
+    response))
 
 (defn generate-bumper!
   "Ask Tunabrain to generate a bumper image for a channel.

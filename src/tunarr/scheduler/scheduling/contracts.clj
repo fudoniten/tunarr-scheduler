@@ -262,6 +262,39 @@
    [:notes [:vector :string]]])
 
 ;; ---------------------------------------------------------------------------
+;; Schedule review — the critique loop's verdict (§Phase 7)
+;;
+;; ReviewSlot is the concrete-week input we SEND; ReviewFinding/ScheduleReview
+;; are the verdict we RECEIVE and validate with `warn-if-invalid`. Mirrors
+;; tunabrain api/models.py's ReviewSlot / ReviewFinding / ScheduleReview.
+;; ---------------------------------------------------------------------------
+
+(def ReviewSlot
+  [:map
+   [:day DayName]
+   [:start ClockTime]
+   [:end ClockTime]
+   [:label :string]
+   [:media_id :string]
+   [:strategy {:optional true} SelectionStrategy]
+   [:daypart {:optional true} [:maybe :string]]])
+
+(def ReviewFinding
+  [:map
+   [:aspect [:enum "variety" "daypart-fit" "genericness" "series-usage"
+             "pacing" "coherence" "other"]]
+   [:severity [:enum "minor" "major"]]
+   [:message :string]
+   [:target {:optional true} [:maybe :string]]])
+
+(def ScheduleReview
+  [:map
+   [:verdict [:enum "pass" "fail"]]
+   [:score [:and number? [:>= 0] [:<= 1]]]
+   [:summary :string]
+   [:findings {:optional true} [:vector ReviewFinding]]])
+
+;; ---------------------------------------------------------------------------
 ;; Registry + validation helpers
 ;; ---------------------------------------------------------------------------
 
@@ -285,7 +318,10 @@
    :Override          ScheduleOverride
    :StripFeasibility  StripFeasibility
    :FeasibilityReport FeasibilityReport
-   :DailySlot         DailySlot})
+   :DailySlot         DailySlot
+   :ReviewSlot        ReviewSlot
+   :ReviewFinding     ReviewFinding
+   :ScheduleReview    ScheduleReview})
 
 (defn valid?
   "True when `value` conforms to `schema`."
