@@ -107,62 +107,15 @@
 ;; positional and the inner SqlCatalog's :executor is only accessible via
 ;; (:executor inner). This breaks the weekly/monthly/quarterly scheduling
 ;; tasks and the read endpoints in http.api.plans / http.api.strategy.
-(defn- executor-bearing-catalog [executor]
-  (reify catalog/Catalog
-    (get-media-tags [_ _] [])
-    (add-media! [_ _] nil)
-    (add-media-batch! [_ _] nil)
-    (get-media [_] [])
-    (get-media-by-id [_ _] nil)
-    (get-media-by-library-id [_ _] nil)
-    (get-media-by-library [_ _] nil)
-    (get-media-by-kind [_ _ _] [])
-    (get-filler-items [_ _] [])
-    (count-media-by-kind [_ _] 0)
-    (search-media-by-library-id [_ _ _] [])
-    (get-tags [_] [])
-    (get-channels [_] [])
-    (get-genres [_] [])
-    (add-media-tags! [_ _ _] nil)
-    (set-media-tags! [_ _ _] nil)
-    (delete-media-tags! [_ _ _] nil)
-    (update-channels! [_ _] nil)
-    (update-libraries! [_ _] nil)
-    (add-media-channels! [_ _ _] nil)
-    (add-media-genres! [_ _ _] nil)
-    (add-media-taglines! [_ _ _] nil)
-    (get-media-by-channel [_ _] [])
-    (get-media-by-tag [_ _] [])
-    (get-media-by-genre [_ _] [])
-    (get-media-process-timestamps [_ _] nil)
-    (get-tag-samples [_] [])
-    (delete-tag! [_ _] nil)
-    (rename-tag! [_ _ _] nil)
-    (batch-rename-tags! [_ _] nil)
-    (update-process-timestamp! [_ _ _] nil)
-    (delete-process-timestamp! [_ _ _] nil)
-    (delete-library-process-timestamps! [_ _ _] nil)
-    (close-catalog! [_] nil)
-    (get-media-category-values [_ _ _] [])
-    (add-media-category-value! [_ _ _ _ _] nil)
-    (add-media-category-values! [_ _ _ _] nil)
-    (set-media-category-values! [_ _ _ _] nil)
-    (get-media-categories [_ _] [])
-    (delete-media-category-value! [_ _ _ _] nil)
-    (delete-media-category-values! [_ _ _] nil)
-    (purge-category-value! [_ _ _] nil)
-    (get-episodes-by-series [_ _] [])
-    (get-episode [_ _ _ _] nil)
-    (get-effective-tags [_ _] [])
-    (get-effective-categories [_ _] [])
-    (get-library-id [_ _] nil)
-    (enrich-media-with-timestamps [_ m] m)
-    (get-all-dimensions [_] [])
-    (get-dimension-values [_ _] [])
-    (get-media-by-category-value [_ _ _] [])
-    (get-media-context [_ _] nil)
-    (set-media-context! [_ _ _] nil)
-    (delete-media-context! [_ _] nil)))
+;;
+;; The wrap-catalog contract only requires that `inner` supports associative
+;; lookup + assoc (so the `->SyncingCatalog` constructor and (:inner cat)
+;; read paths work), so a plain hash-map which carries `:executor` is enough
+;; here — the test does not exercise any catalog protocol methods on the
+;; wrapped object, only on the sentinel.
+(defn- executor-bearing-catalog
+  ([] {})
+  ([executor] {:executor executor}))
 
 (def ^:private sentinel-executor
   ;; A unique sentinel — an Object identity we can compare with identical?.

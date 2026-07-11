@@ -27,10 +27,18 @@
          com.github.seancorfield/honeysql  {:mvn/version "2.6.1126"}
 }
  :aliases {:run {:main-opts ["-m" "tunarr.scheduler.main"]}
-           :test {:extra-paths ["test"]
-                  :extra-deps {eftest/eftest {:mvn/version "0.6.0"}
-                               ring/ring-mock {:mvn/version "0.4.0"}
-                               com.h2database/h2 {:mvn/version "2.2.220"}}
-                  :main-opts ["-e" "(require '[eftest.runner :refer [find-tests run-tests]]) (run-tests (find-tests \"test\"))"]}
+            :test {:extra-paths ["test"]
+                   :extra-deps {eftest/eftest {:mvn/version "0.6.0"}
+                                ring/ring-mock {:mvn/version "0.4.0"}
+                                com.h2database/h2 {:mvn/version "2.2.220"}}
+                   ;; Run the suite sequentially: several test namespaces
+                   ;; blanket-`with-redefs` clj-http.client/post and
+                   ;; tunabrain/http/post, and eftest's namespace-level
+                   ;; parallelism still leaks those redefs across namesapces
+                   ;; (see G.12/G.13 in the cluster report). Until those tests
+                   ;; move to component injection, disable multithreading
+                   ;; entirely so the test failure surfaces are real rather
+                   ;; than cross-test interleaving artefacts.
+                   :main-opts ["-e" "(require '[eftest.runner :refer [find-tests run-tests]]) (run-tests (find-tests \"test\") {:multithread? false})"]}
            :migrate {:exec-fn app.migrate/run
                      :exec-args {}}}}
