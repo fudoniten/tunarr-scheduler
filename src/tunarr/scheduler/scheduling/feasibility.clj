@@ -14,11 +14,20 @@
          available_episode_count; want available ≥ slots_required.
          shortfall if available < slots_required; tight if
          available < slots_required × MARGIN; else ok.
-       - random:<category> (pooled): repeats are fine, so check the pool is
-         non-trivial — episode_count for that category ≥ a small floor. ALSO
-         checked for duration fit: does the category's per-tag runtime
-         histogram (CatalogProfile.tag_runtime_histograms) have content within
-         a tolerance of the strip's own wall-clock length? This is the
+       - random:<category> (pooled): first confirm the category is a real tag
+         in the profile at all (tag_aggregates / genres / tag_runtime_histograms,
+         bare or 'genre:'-prefixed) — a category that exists in none of them is
+         hallucinated, has no media behind it, and is a shortfall. When it does
+         exist: repeats are fine, so check the pool is non-trivial —
+         episode_count for that category ≥ a small floor. ALSO
+         checked for duration fit — but as a *repetition rate*, not mere
+         presence: the combined weekly airings of every same-length
+         same-category strip, divided by how many items the category's per-tag
+         runtime histogram (CatalogProfile.tag_runtime_histograms) actually has
+         within a tolerance of that length. A handful of half-hour comedies is
+         fine behind one occasional slot and a disaster behind three-a-day (the
+         same few shorts grind round 15×/week) — the rate, not the raw count,
+         tells those apart. This is the
          grid-authoring-time half of the duration-aware scheduling work (see
          DURATION_AWARE_SCHEDULING.md §3.4) — Pseudovision's air-time
          selection (pseudovision#119) already fits content to slots, but
@@ -61,12 +70,22 @@
    'closest available' fallback at air time describe the same boundary."
   15)
 
-(def ^:const duration-fit-floor
-  "Minimum in-tolerance item_count for a random:<category> strip's duration to
-   be comfortable, not just technically non-empty (mirrors random-pool-floor's
-   role for the episode-count check, at a smaller scale since this counts
-   items within one narrow duration window rather than the whole category)."
-  3)
+(def ^:const duration-fit-tight-reps-per-week
+  "Weekly repetition rate — airings per week that draw on a random:<category>
+   strip's duration pool, divided by the number of distinct in-tolerance items —
+   above which the strip is 'tight'. At 1.5, a slot may air up to ~1.5× the size
+   of its right-length pool each week before it's flagged; a single occasional
+   short slot backed by a handful of items stays fine, but stacking several a day
+   onto that same handful does not."
+  1.5)
+
+(def ^:const duration-fit-shortfall-reps-per-week
+  "Weekly repetition rate (see `duration-fit-tight-reps-per-week`) at or above
+   which the strip is a 'shortfall', not merely tight — the pool is so thin for
+   how often it airs that the same few items would grind round multiple times a
+   week (the truncated-Simpsons-15×/week failure). Blocks the grid so the repair
+   loop thins the frequency or moves the content to a special/occasional slot."
+  3.0)
 
 ;; ---------------------------------------------------------------------------
 ;; Horizon + media helpers
@@ -99,16 +118,36 @@
   (some #(when (= media-id (:media_id %)) (:available_episode_count %))
         (:shows catalog)))
 
-(defn- category-episode-count [catalog category]
+(defn- tag-matches?
+  "Whether a stored tag value (a tag_aggregate's :tag, a genre's :genre, a
+   histogram's :tag) names `category`, matched case-insensitively in either its
+   bare form ('sitcom') or the dimension-qualified 'genre:'-prefixed form
+   ('genre:sitcom').
+
+   `random:<category>` strips carry a bare category, but the dimension model
+   stores tags prefixed ('genre:sitcom', 'channel:hua') — so a bare-only equality
+   check silently misses every tag_aggregate. This mirrors the same duality
+   pseudovision's `resolve-by-category` accepts at air time (and that
+   `tag-runtime-histogram` below already applied for the duration-fit check)."
+  [tag-value category]
+  (when (and tag-value category)
+    (let [t      (str/lower-case (str tag-value))
+          needle (str/lower-case category)]
+      (or (= t needle) (= t (str "genre:" needle))))))
+
+(defn- category-episode-count
+  "Pooled episode_count for a bare `random:<category>` argument, read from the
+   catalog profile's :tag_aggregates (primary, dimension model) or :genres
+   (deprecated fallback). nil when the category names no tag in either — see
+   `category-known?` for what that means."
+  [catalog category]
   (when category
     (or
       ;; Tag-based lookup (primary)
-      (some #(when (= (str/lower-case (:tag %)) (str/lower-case category))
-               (:episode_count %))
+      (some #(when (tag-matches? (:tag %) category) (:episode_count %))
             (:tag_aggregates catalog))
       ;; Genre-based fallback (backward compat)
-      (some #(when (= (str/lower-case (:genre %)) (str/lower-case category))
-               (:episode_count %))
+      (some #(when (tag-matches? (:genre %) category) (:episode_count %))
             (:genres catalog)))))
 
 (defn- headroom [available required]
@@ -142,17 +181,29 @@
    `random:<category>` carries a bare category name (e.g. 'movie'), but
    Pseudovision's tag storage — and therefore every :tag value this field
    contains — is prefix-qualified ('genre:movie'). Matching only the bare
-   form would silently never find anything for the common case. Mirrors the
-   same bare-or-`genre:`-prefixed duality
-   `pseudovision.http.api.daily-slots/resolve-by-category` already matches
-   against at air time."
+   form would silently never find anything for the common case. `tag-matches?`
+   applies the same bare-or-`genre:`-prefixed duality
+   `pseudovision.http.api.daily-slots/resolve-by-category` matches at air time."
   [catalog category]
   (when category
-    (let [needle (str/lower-case category)
-          prefixed (str "genre:" needle)]
-      (some #(let [tag (str/lower-case (:tag %))]
-               (when (or (= tag needle) (= tag prefixed)) %))
-            (:tag_runtime_histograms catalog)))))
+    (some #(when (tag-matches? (:tag %) category) %)
+          (:tag_runtime_histograms catalog))))
+
+(defn- category-known?
+  "Whether `category` (the bare argument of a `random:<category>` strip) names a
+   real tag anywhere in the catalog profile — its :tag_aggregates, :genres, or
+   :tag_runtime_histograms — matched bare or 'genre:'-prefixed (`tag-matches?`).
+
+   The CatalogProfile is the entire media report the channel is scheduled
+   against, so a category absent from all three of its tag views doesn't exist
+   in the media available to this channel. A `random:<category>` strip naming
+   such a category is scheduling a tag that was hallucinated: at playout it
+   resolves to an empty Pseudovision collection (dead air). `finding` flags it
+   as a shortfall rather than silently letting it through. (A count of 0 is a
+   *known* tag with an empty pool — a different, already-handled case.)"
+  [catalog category]
+  (boolean (or (category-episode-count catalog category)
+               (tag-runtime-histogram catalog category))))
 
 (defn- bucket-overlaps-window? [bucket lo hi]
   (let [bmin (:min_minutes bucket)
@@ -182,31 +233,89 @@
         msgs   (remove str/blank? [(:message a) (:message b)])]
     (assoc a :status status :message (str/join "; " msgs))))
 
-(defn- duration-fit-finding
-  "Whether `catalog`'s per-tag runtime histogram for `category` has content
-   within `duration-fit-tolerance-minutes` of `strip`'s own wall-clock length.
+(defn- weekly-airings
+  "How many times a strip airs in a week — one airing per weekday its day-pattern
+   covers (weekdays ⇒ 5, daily ⇒ 7, [\"sat\"] ⇒ 1). Horizon-independent, so a
+   repetition rate built on it (`duration-fit-finding`) means the same thing
+   whether the grid is checked over one week or a full quarter."
+  [strip]
+  (count (cal/pattern->codes (:days strip))))
 
-   Returns nil (nothing to merge) when the catalog profile carries no
-   histogram data for this category at all — an older Pseudovision build, or
-   simply no matching tag — rather than manufacturing a false shortfall out of
-   an absent signal. Otherwise a {:status :message} finding to combine with
-   the pool-floor finding via `combine-findings`."
-  [strip catalog category]
+(defn- fit-window
+  "The [lo hi] duration-tolerance window (minutes) a strip's content must fall
+   within to be a good length fit, `duration-fit-tolerance-minutes` either side
+   of its own wall-clock length."
+  [strip]
+  (let [target (strip-duration-minutes strip)]
+    [(max 0 (- target duration-fit-tolerance-minutes))
+     (+ target duration-fit-tolerance-minutes)]))
+
+(defn- category-weekly-demand
+  "Total weekly airings across every `random:<category>` strip in `all-strips`
+   sharing `strip`'s bare category whose fit-window overlaps `strip`'s — the
+   combined weekly demand competing for the same handful of right-length items.
+
+   Repetition has to be judged across strips, not one at a time: three separate
+   half-hour comedy strips a day each look individually survivable, but together
+   they pull ~15 airings/week out of the same five or six half-hour comedies, so
+   the same item lands over and over. Judging each strip alone is exactly what
+   let that through."
+  [all-strips strip category]
+  (let [[lo hi] (fit-window strip)]
+    (reduce
+     + 0
+     (for [s all-strips
+           :let [mid (-> s :content :media_id)]
+           :when (= "random" (media-kind mid))
+           :let [c (media-arg mid)]
+           :when (and c (= (str/lower-case c) (str/lower-case category)))
+           :let [[slo shi] (fit-window s)]
+           :when (and (<= slo hi) (<= lo shi))]   ; fit-windows overlap ⇒ shared pool
+       (weekly-airings s)))))
+
+(defn- duration-fit-finding
+  "Whether `catalog`'s per-tag runtime histogram for `category` has enough
+   content at roughly `strip`'s wall-clock length for how often the grid airs a
+   slot of that length. Not just presence (the old flat floor) but a *repetition
+   rate*: the combined weekly airings of every same-length same-category strip
+   (`category-weekly-demand`) divided by the number of distinct in-tolerance
+   items. A pool of five half-hour comedies is fine behind one occasional slot
+   and a disaster behind three-a-day — the rate captures the difference the raw
+   count can't.
+
+   Returns nil (nothing to merge) when the catalog profile carries no histogram
+   data for this category at all — an older Pseudovision build, or simply no
+   matching tag — rather than manufacturing a false shortfall out of an absent
+   signal. Otherwise a {:status :message} finding to combine with the pool-floor
+   finding via `combine-findings`. `all-strips` is the whole grid's strip list,
+   needed to sum cross-strip demand."
+  [strip catalog category all-strips]
   (when-let [histogram (tag-runtime-histogram catalog category)]
     (let [target    (strip-duration-minutes strip)
-          lo        (max 0 (- target duration-fit-tolerance-minutes))
-          hi        (+ target duration-fit-tolerance-minutes)
-          fit-count (fitting-item-count histogram lo hi)]
+          [lo hi]   (fit-window strip)
+          fit-count (fitting-item-count histogram lo hi)
+          demand    (category-weekly-demand all-strips strip category)
+          reps      (when (pos? fit-count) (/ demand (double fit-count)))]
       (cond
         (zero? fit-count)
         {:status "shortfall"
          :message (format "no '%s' content within %dmin of the strip's %dmin length"
                           category duration-fit-tolerance-minutes target)}
 
-        (< fit-count duration-fit-floor)
+        (>= reps duration-fit-shortfall-reps-per-week)
+        {:status "shortfall"
+         :message (format (str "only %d '%s' item(s) within %dmin of the strip's %dmin "
+                               "length for %d airing(s)/week of that length across the grid "
+                               "— each would repeat ~%.1f×/week")
+                          fit-count category duration-fit-tolerance-minutes target
+                          demand reps)}
+
+        (>= reps duration-fit-tight-reps-per-week)
         {:status "tight"
-         :message (format "only %d '%s' item(s) within %dmin of the strip's %dmin length"
-                          fit-count category duration-fit-tolerance-minutes target)}
+         :message (format (str "only %d '%s' item(s) within %dmin of the strip's %dmin "
+                               "length for %d airing(s)/week — repeats ~%.1f×/week")
+                          fit-count category duration-fit-tolerance-minutes target
+                          demand reps)}
 
         :else
         {:status "ok" :message ""}))))
@@ -216,8 +325,11 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- finding
-  "A StripFeasibility map for one strip over the horizon."
-  [strip catalog dates]
+  "A StripFeasibility map for one strip over the horizon. `all-strips` is the
+   whole grid's strip list, so the duration-fit check can weigh this strip's
+   repetition against every other same-length same-category strip drawing on the
+   same pool."
+  [strip catalog dates all-strips]
   (let [media-id (-> strip :content :media_id)
         strategy (-> strip :content (:strategy "sequential"))
         required (slots-required strip dates)
@@ -258,12 +370,31 @@
        (let [category (media-arg media-id)
              pool     (category-episode-count catalog category)
              pool-finding
-             (if (nil? pool)
+             (cond
+               ;; The category names no tag anywhere in the catalog profile ⇒ a
+               ;; hallucinated tag with no media behind it (it resolves to an
+               ;; empty collection at playout). Block on it so the repair loop
+               ;; swaps it for a category that actually exists in the report.
+               (not (category-known? catalog category))
+               {:episodes_available 0
+                :headroom_ratio (headroom 0 required)
+                :status "shortfall"
+                :message (format (str "category '%s' does not exist in the catalog profile — "
+                                      "no such tag in the media available to this channel "
+                                      "(hallucinated?)")
+                                 category)}
+
+               ;; A real tag, but the profile reports no pooled episode_count for
+               ;; it (an older or partial profile) ⇒ can't assess capacity; don't
+               ;; invent one, and don't mistake it for a hallucination either.
+               (nil? pool)
                {:episodes_available 0
                 :headroom_ratio (headroom 0 required)
                 :status "ok"
-                :message (format "category '%s' not found in catalog profile; pool not assessed"
+                :message (format "category '%s' present but pool size not reported; capacity not assessed"
                                  category)}
+
+               :else
                {:episodes_available pool
                 :headroom_ratio (headroom pool required)
                 :status (cond (zero? pool)               "shortfall"
@@ -273,7 +404,7 @@
                                (< pool random-pool-floor)
                                (format "small pool: %d items in category '%s'" pool category)
                                :else "")})
-             duration-finding (duration-fit-finding strip catalog category)]
+             duration-finding (duration-fit-finding strip catalog category all-strips)]
          (if duration-finding
            (combine-findings pool-finding duration-finding)
            pool-finding))
@@ -405,7 +536,8 @@
    be LocalDate or ISO strings."
   [grid catalog-profile horizon-start horizon-end]
   (let [dates    (horizon-dates horizon-start horizon-end)
-        findings (mapv #(finding % catalog-profile dates) (:strips grid))
+        strips   (:strips grid)
+        findings (mapv #(finding % catalog-profile dates strips) strips)
         olaps    (find-overlaps (:strips grid))
         uncov    (uncovered-intervals grid)
         any?     (fn [status] (some #(= status (:status %)) findings))

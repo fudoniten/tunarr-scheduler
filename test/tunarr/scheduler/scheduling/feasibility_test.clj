@@ -74,9 +74,44 @@
       (is (= 50 (:episodes_available (finding-for report "r-ok")))))
     (testing "a pool below the floor ⇒ tight"
       (is (= "tight" (:status (finding-for report "r-thin")))))
-    (testing "an unknown category is reported, not failed"
-      (is (= "ok" (:status (finding-for report "r-unk"))))
-      (is (str/includes? (:message (finding-for report "r-unk")) "not found")))))
+    (testing "a category that exists in no tag view of the profile ⇒ shortfall (hallucinated tag)"
+      (is (= "shortfall" (:status (finding-for report "r-unk"))))
+      (is (str/includes? (:message (finding-for report "r-unk")) "does not exist")))))
+
+;; ---------------------------------------------------------------------------
+;; Tag existence — a random:<category> must name a real tag in the profile
+;; (the media report the channel is scheduled against). See feasibility/
+;; category-known?. Guards against the LLM scheduling a hallucinated category
+;; like "sci-fi-and-fantasy" that has no media behind it.
+;; ---------------------------------------------------------------------------
+
+(deftest hallucinated-category-is-a-shortfall
+  (testing "a random:<category> whose category exists in no tag view of the
+            profile is flagged as a shortfall — the reported bug (scheduling
+            'sci-fi-and-fantasy' when no such tag exists), which blocks the grid"
+    (let [report (f/check (grid [(strip "ghost" "weekdays" "20:00" "21:00"
+                                        "random:sci-fi-and-fantasy" :strategy "random")])
+                          catalog week-start week-end)
+          found  (finding-for report "ghost")]
+      (is (= "shortfall" (:status found)))
+      (is (str/includes? (:message found) "does not exist"))
+      (is (= "blocked" (:overall_status report))
+          "a hallucinated tag blocks the grid just like any capacity shortfall"))))
+
+(deftest real-category-behind-a-prefixed-tag-aggregate-is-not-hallucinated
+  (testing "a bare category ('comedy') that exists only as a dimension-prefixed
+            tag_aggregate ('genre:comedy') is a REAL tag — counted, not flagged.
+            Guards the existence check against false-positiving on the bare-vs-
+            prefixed mismatch (the same reason the pool count now matches too)"
+    (let [cat    (assoc catalog :tag_aggregates
+                        [{:tag "genre:comedy" :show_count 4 :episode_count 40}])
+          report (f/check (grid [(strip "com" "weekdays" "10:00" "11:00"
+                                        "random:comedy" :strategy "random")])
+                          cat week-start week-end)
+          found  (finding-for report "com")]
+      (is (= "ok" (:status found)))
+      (is (= 40 (:episodes_available found))
+          "the prefixed tag_aggregate's episode_count is read for the pool check"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Duration fit (random:<category> strips, tag_runtime_histograms)
@@ -155,6 +190,96 @@
                           catalog-with-histograms week-start week-end)]
       ;; 23:15 -> 00:45 is 90 minutes, which the movie histogram has plenty of.
       (is (= "ok" (:status (finding-for report "late-movie")))))))
+
+(deftest category-known-only-via-runtime-histogram-is-not-hallucinated
+  (testing "a category present only in tag_runtime_histograms (no genre/aggregate
+            episode_count) is a real tag — capacity is 'not assessed', not a
+            shortfall (catalog-with-histograms has 'genre:movie' but no 'movie'
+            genre/aggregate)"
+    (let [report (f/check (grid [(strip "mv" "weekdays" "20:00" "21:30"
+                                        "random:movie" :strategy "random")])
+                          catalog-with-histograms week-start week-end)
+          found  (finding-for report "mv")]
+      (is (= "ok" (:status found)))
+      (is (str/includes? (:message found) "not assessed")))))
+
+;; ---------------------------------------------------------------------------
+;; Duration-fit as a REPETITION RATE, not a raw count. A short slot's fitting
+;; pool must be judged against how often the grid airs a slot of that length
+;; (summed across same-category strips), or a handful of items gets ground round
+;; every day — the reported truncated-Simpsons-15×/week bug.
+;; ---------------------------------------------------------------------------
+
+;; comedy's whole-category pool is healthy (episode_count 300, well over the
+;; pool-floor), so the pool-floor check stays 'ok' and these tests isolate the
+;; duration-repetition signal. But only 5 comedies are within a half-hour.
+(def catalog-thin-shorts
+  (assoc catalog
+         :genres [{:genre "comedy" :show_count 3 :episode_count 300}]
+         :tag_runtime_histograms
+         [{:tag "genre:comedy"
+           :buckets [{:label "15-30min" :min_minutes 15 :max_minutes 30 :item_count 5}
+                     {:label "90-105min" :min_minutes 90 :max_minutes 105 :item_count 40}]}]))
+
+;; distinct, non-overlapping half-hour weekday windows, so these exercise the
+;; duration-repetition signal without also tripping the time-overlap detector.
+(def ^:private half-hour-windows [["12:00" "12:30"] ["12:30" "13:00"] ["13:00" "13:30"]])
+
+(defn- short-comedy [id days [start end]]
+  (strip id days start end "random:comedy" :strategy "random"))
+
+(defn- n-short-comedy-strips [n days]
+  (mapv (fn [i] (short-comedy (str "com-" i) days (nth half-hour-windows i)))
+        (range n)))
+
+(deftest single-occasional-short-slot-is-fine
+  (testing "one half-hour comedy slot once a week against the 5-item pool is ok —
+            we do want to schedule short content occasionally"
+    (let [report (f/check (grid [(short-comedy "com-sun" ["sun"] (first half-hour-windows))])
+                          catalog-thin-shorts week-start week-end)]
+      (is (= "ok" (:status (finding-for report "com-sun")))))))
+
+(deftest two-short-slots-a-day-is-tight
+  (testing "two half-hour comedy strips every weekday ⇒ ~10 airings/week on 5
+            items ⇒ repeats ~2×/week ⇒ tight (a warning)"
+    (let [report (f/check (grid (n-short-comedy-strips 2 "weekdays"))
+                          catalog-thin-shorts week-start week-end)]
+      (is (= "tight" (:status (finding-for report "com-0"))))
+      (is (= "tight" (:status (finding-for report "com-1")))))))
+
+(deftest several-short-slots-a-day-is-a-shortfall
+  (testing "three half-hour comedy strips every weekday ⇒ ~15 airings/week on 5
+            items ⇒ each repeats ~3×/week ⇒ shortfall that blocks the grid, so
+            the repair loop thins the frequency (the reported bug)"
+    (let [report (f/check (grid (n-short-comedy-strips 3 "weekdays"))
+                          catalog-thin-shorts week-start week-end)
+          found  (finding-for report "com-0")]
+      (is (= "shortfall" (:status found)))
+      (is (str/includes? (:message found) "repeat"))
+      (is (= "blocked" (:overall_status report))))))
+
+(deftest short-slots-with-a-deep-pool-are-not-penalized
+  (testing "the flag is about pool-vs-frequency, not 'short is bad': three
+            half-hour comedy strips a day against a 100-item half-hour pool are
+            fine — each item airs well under once a week"
+    (let [deep   (assoc-in catalog-thin-shorts
+                           [:tag_runtime_histograms 0 :buckets 0 :item_count] 100)
+          report (f/check (grid (n-short-comedy-strips 3 "weekdays"))
+                          deep week-start week-end)]
+      (is (= "ok" (:status (finding-for report "com-0")))))))
+
+(deftest long-and-short-slots-of-one-category-are-judged-separately
+  (testing "a 90-minute comedy slot draws from the deep 40-item movie-length
+            bucket, so it stays ok even while the half-hour slots are starved —
+            demand only sums strips whose fit-windows overlap"
+    (let [report (f/check (grid (conj (n-short-comedy-strips 3 "weekdays")
+                                      (strip "com-long" "weekdays" "20:00" "21:30"
+                                             "random:comedy" :strategy "random")))
+                          catalog-thin-shorts week-start week-end)]
+      (is (= "shortfall" (:status (finding-for report "com-0")))
+          "the half-hour slots are still starved")
+      (is (= "ok" (:status (finding-for report "com-long")))
+          "the 90-minute slot draws from a different, deep bucket"))))
 
 (deftest movie-capacity
   (let [report (f/check (grid [(strip "m-once"  ["mon"]    "20:00" "22:00" "movie:classic")
