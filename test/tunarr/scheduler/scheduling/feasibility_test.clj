@@ -203,6 +203,84 @@
       (is (= "ok" (:status found)))
       (is (str/includes? (:message found) "not assessed")))))
 
+;; ---------------------------------------------------------------------------
+;; Duration-fit as a REPETITION RATE, not a raw count. A short slot's fitting
+;; pool must be judged against how often the grid airs a slot of that length
+;; (summed across same-category strips), or a handful of items gets ground round
+;; every day — the reported truncated-Simpsons-15×/week bug.
+;; ---------------------------------------------------------------------------
+
+;; comedy's whole-category pool is healthy (episode_count 300, well over the
+;; pool-floor), so the pool-floor check stays 'ok' and these tests isolate the
+;; duration-repetition signal. But only 5 comedies are within a half-hour.
+(def catalog-thin-shorts
+  (assoc catalog
+         :genres [{:genre "comedy" :show_count 3 :episode_count 300}]
+         :tag_runtime_histograms
+         [{:tag "genre:comedy"
+           :buckets [{:label "15-30min" :min_minutes 15 :max_minutes 30 :item_count 5}
+                     {:label "90-105min" :min_minutes 90 :max_minutes 105 :item_count 40}]}]))
+
+;; distinct, non-overlapping half-hour weekday windows, so these exercise the
+;; duration-repetition signal without also tripping the time-overlap detector.
+(def ^:private half-hour-windows [["12:00" "12:30"] ["12:30" "13:00"] ["13:00" "13:30"]])
+
+(defn- short-comedy [id days [start end]]
+  (strip id days start end "random:comedy" :strategy "random"))
+
+(defn- n-short-comedy-strips [n days]
+  (mapv (fn [i] (short-comedy (str "com-" i) days (nth half-hour-windows i)))
+        (range n)))
+
+(deftest single-occasional-short-slot-is-fine
+  (testing "one half-hour comedy slot once a week against the 5-item pool is ok —
+            we do want to schedule short content occasionally"
+    (let [report (f/check (grid [(short-comedy "com-sun" ["sun"] (first half-hour-windows))])
+                          catalog-thin-shorts week-start week-end)]
+      (is (= "ok" (:status (finding-for report "com-sun")))))))
+
+(deftest two-short-slots-a-day-is-tight
+  (testing "two half-hour comedy strips every weekday ⇒ ~10 airings/week on 5
+            items ⇒ repeats ~2×/week ⇒ tight (a warning)"
+    (let [report (f/check (grid (n-short-comedy-strips 2 "weekdays"))
+                          catalog-thin-shorts week-start week-end)]
+      (is (= "tight" (:status (finding-for report "com-0"))))
+      (is (= "tight" (:status (finding-for report "com-1")))))))
+
+(deftest several-short-slots-a-day-is-a-shortfall
+  (testing "three half-hour comedy strips every weekday ⇒ ~15 airings/week on 5
+            items ⇒ each repeats ~3×/week ⇒ shortfall that blocks the grid, so
+            the repair loop thins the frequency (the reported bug)"
+    (let [report (f/check (grid (n-short-comedy-strips 3 "weekdays"))
+                          catalog-thin-shorts week-start week-end)
+          found  (finding-for report "com-0")]
+      (is (= "shortfall" (:status found)))
+      (is (str/includes? (:message found) "repeat"))
+      (is (= "blocked" (:overall_status report))))))
+
+(deftest short-slots-with-a-deep-pool-are-not-penalized
+  (testing "the flag is about pool-vs-frequency, not 'short is bad': three
+            half-hour comedy strips a day against a 100-item half-hour pool are
+            fine — each item airs well under once a week"
+    (let [deep   (assoc-in catalog-thin-shorts
+                           [:tag_runtime_histograms 0 :buckets 0 :item_count] 100)
+          report (f/check (grid (n-short-comedy-strips 3 "weekdays"))
+                          deep week-start week-end)]
+      (is (= "ok" (:status (finding-for report "com-0")))))))
+
+(deftest long-and-short-slots-of-one-category-are-judged-separately
+  (testing "a 90-minute comedy slot draws from the deep 40-item movie-length
+            bucket, so it stays ok even while the half-hour slots are starved —
+            demand only sums strips whose fit-windows overlap"
+    (let [report (f/check (grid (conj (n-short-comedy-strips 3 "weekdays")
+                                      (strip "com-long" "weekdays" "20:00" "21:30"
+                                             "random:comedy" :strategy "random")))
+                          catalog-thin-shorts week-start week-end)]
+      (is (= "shortfall" (:status (finding-for report "com-0")))
+          "the half-hour slots are still starved")
+      (is (= "ok" (:status (finding-for report "com-long")))
+          "the 90-minute slot draws from a different, deep bucket"))))
+
 (deftest movie-capacity
   (let [report (f/check (grid [(strip "m-once"  ["mon"]    "20:00" "22:00" "movie:classic")
                                (strip "m-multi" "weekdays" "20:00" "22:00" "movie:overplayed")])
