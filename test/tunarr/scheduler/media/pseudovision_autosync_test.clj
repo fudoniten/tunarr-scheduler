@@ -175,7 +175,7 @@
     (let [inner (assoc (executor-bearing-catalog nil) :executor sentinel-executor)
           worker (test-worker)
           cat    (autosync/wrap-catalog inner worker)]
-      (is (instance? autosync/SyncingCatalog cat))
+      (is (instance? tunarr.scheduler.media.pseudovision_autosync.SyncingCatalog cat))
       (is (identical? sentinel-executor (:executor cat))
           "(:executor wrapped) must return the inner's :executor so scheduling tasks can issue SQL")
       (is (identical? inner (:inner cat))
