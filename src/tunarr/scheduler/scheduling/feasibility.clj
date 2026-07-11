@@ -14,8 +14,12 @@
          available_episode_count; want available ≥ slots_required.
          shortfall if available < slots_required; tight if
          available < slots_required × MARGIN; else ok.
-       - random:<category> (pooled): repeats are fine, so check the pool is
-         non-trivial — episode_count for that category ≥ a small floor. ALSO
+       - random:<category> (pooled): first confirm the category is a real tag
+         in the profile at all (tag_aggregates / genres / tag_runtime_histograms,
+         bare or 'genre:'-prefixed) — a category that exists in none of them is
+         hallucinated, has no media behind it, and is a shortfall. When it does
+         exist: repeats are fine, so check the pool is non-trivial —
+         episode_count for that category ≥ a small floor. ALSO
          checked for duration fit: does the category's per-tag runtime
          histogram (CatalogProfile.tag_runtime_histograms) have content within
          a tolerance of the strip's own wall-clock length? This is the
@@ -99,16 +103,36 @@
   (some #(when (= media-id (:media_id %)) (:available_episode_count %))
         (:shows catalog)))
 
-(defn- category-episode-count [catalog category]
+(defn- tag-matches?
+  "Whether a stored tag value (a tag_aggregate's :tag, a genre's :genre, a
+   histogram's :tag) names `category`, matched case-insensitively in either its
+   bare form ('sitcom') or the dimension-qualified 'genre:'-prefixed form
+   ('genre:sitcom').
+
+   `random:<category>` strips carry a bare category, but the dimension model
+   stores tags prefixed ('genre:sitcom', 'channel:hua') — so a bare-only equality
+   check silently misses every tag_aggregate. This mirrors the same duality
+   pseudovision's `resolve-by-category` accepts at air time (and that
+   `tag-runtime-histogram` below already applied for the duration-fit check)."
+  [tag-value category]
+  (when (and tag-value category)
+    (let [t      (str/lower-case (str tag-value))
+          needle (str/lower-case category)]
+      (or (= t needle) (= t (str "genre:" needle))))))
+
+(defn- category-episode-count
+  "Pooled episode_count for a bare `random:<category>` argument, read from the
+   catalog profile's :tag_aggregates (primary, dimension model) or :genres
+   (deprecated fallback). nil when the category names no tag in either — see
+   `category-known?` for what that means."
+  [catalog category]
   (when category
     (or
       ;; Tag-based lookup (primary)
-      (some #(when (= (str/lower-case (:tag %)) (str/lower-case category))
-               (:episode_count %))
+      (some #(when (tag-matches? (:tag %) category) (:episode_count %))
             (:tag_aggregates catalog))
       ;; Genre-based fallback (backward compat)
-      (some #(when (= (str/lower-case (:genre %)) (str/lower-case category))
-               (:episode_count %))
+      (some #(when (tag-matches? (:genre %) category) (:episode_count %))
             (:genres catalog)))))
 
 (defn- headroom [available required]
@@ -142,17 +166,29 @@
    `random:<category>` carries a bare category name (e.g. 'movie'), but
    Pseudovision's tag storage — and therefore every :tag value this field
    contains — is prefix-qualified ('genre:movie'). Matching only the bare
-   form would silently never find anything for the common case. Mirrors the
-   same bare-or-`genre:`-prefixed duality
-   `pseudovision.http.api.daily-slots/resolve-by-category` already matches
-   against at air time."
+   form would silently never find anything for the common case. `tag-matches?`
+   applies the same bare-or-`genre:`-prefixed duality
+   `pseudovision.http.api.daily-slots/resolve-by-category` matches at air time."
   [catalog category]
   (when category
-    (let [needle (str/lower-case category)
-          prefixed (str "genre:" needle)]
-      (some #(let [tag (str/lower-case (:tag %))]
-               (when (or (= tag needle) (= tag prefixed)) %))
-            (:tag_runtime_histograms catalog)))))
+    (some #(when (tag-matches? (:tag %) category) %)
+          (:tag_runtime_histograms catalog))))
+
+(defn- category-known?
+  "Whether `category` (the bare argument of a `random:<category>` strip) names a
+   real tag anywhere in the catalog profile — its :tag_aggregates, :genres, or
+   :tag_runtime_histograms — matched bare or 'genre:'-prefixed (`tag-matches?`).
+
+   The CatalogProfile is the entire media report the channel is scheduled
+   against, so a category absent from all three of its tag views doesn't exist
+   in the media available to this channel. A `random:<category>` strip naming
+   such a category is scheduling a tag that was hallucinated: at playout it
+   resolves to an empty Pseudovision collection (dead air). `finding` flags it
+   as a shortfall rather than silently letting it through. (A count of 0 is a
+   *known* tag with an empty pool — a different, already-handled case.)"
+  [catalog category]
+  (boolean (or (category-episode-count catalog category)
+               (tag-runtime-histogram catalog category))))
 
 (defn- bucket-overlaps-window? [bucket lo hi]
   (let [bmin (:min_minutes bucket)
@@ -258,12 +294,31 @@
        (let [category (media-arg media-id)
              pool     (category-episode-count catalog category)
              pool-finding
-             (if (nil? pool)
+             (cond
+               ;; The category names no tag anywhere in the catalog profile ⇒ a
+               ;; hallucinated tag with no media behind it (it resolves to an
+               ;; empty collection at playout). Block on it so the repair loop
+               ;; swaps it for a category that actually exists in the report.
+               (not (category-known? catalog category))
+               {:episodes_available 0
+                :headroom_ratio (headroom 0 required)
+                :status "shortfall"
+                :message (format (str "category '%s' does not exist in the catalog profile — "
+                                      "no such tag in the media available to this channel "
+                                      "(hallucinated?)")
+                                 category)}
+
+               ;; A real tag, but the profile reports no pooled episode_count for
+               ;; it (an older or partial profile) ⇒ can't assess capacity; don't
+               ;; invent one, and don't mistake it for a hallucination either.
+               (nil? pool)
                {:episodes_available 0
                 :headroom_ratio (headroom 0 required)
                 :status "ok"
-                :message (format "category '%s' not found in catalog profile; pool not assessed"
+                :message (format "category '%s' present but pool size not reported; capacity not assessed"
                                  category)}
+
+               :else
                {:episodes_available pool
                 :headroom_ratio (headroom pool required)
                 :status (cond (zero? pool)               "shortfall"

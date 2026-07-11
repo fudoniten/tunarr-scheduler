@@ -74,9 +74,44 @@
       (is (= 50 (:episodes_available (finding-for report "r-ok")))))
     (testing "a pool below the floor ⇒ tight"
       (is (= "tight" (:status (finding-for report "r-thin")))))
-    (testing "an unknown category is reported, not failed"
-      (is (= "ok" (:status (finding-for report "r-unk"))))
-      (is (str/includes? (:message (finding-for report "r-unk")) "not found")))))
+    (testing "a category that exists in no tag view of the profile ⇒ shortfall (hallucinated tag)"
+      (is (= "shortfall" (:status (finding-for report "r-unk"))))
+      (is (str/includes? (:message (finding-for report "r-unk")) "does not exist")))))
+
+;; ---------------------------------------------------------------------------
+;; Tag existence — a random:<category> must name a real tag in the profile
+;; (the media report the channel is scheduled against). See feasibility/
+;; category-known?. Guards against the LLM scheduling a hallucinated category
+;; like "sci-fi-and-fantasy" that has no media behind it.
+;; ---------------------------------------------------------------------------
+
+(deftest hallucinated-category-is-a-shortfall
+  (testing "a random:<category> whose category exists in no tag view of the
+            profile is flagged as a shortfall — the reported bug (scheduling
+            'sci-fi-and-fantasy' when no such tag exists), which blocks the grid"
+    (let [report (f/check (grid [(strip "ghost" "weekdays" "20:00" "21:00"
+                                        "random:sci-fi-and-fantasy" :strategy "random")])
+                          catalog week-start week-end)
+          found  (finding-for report "ghost")]
+      (is (= "shortfall" (:status found)))
+      (is (str/includes? (:message found) "does not exist"))
+      (is (= "blocked" (:overall_status report))
+          "a hallucinated tag blocks the grid just like any capacity shortfall"))))
+
+(deftest real-category-behind-a-prefixed-tag-aggregate-is-not-hallucinated
+  (testing "a bare category ('comedy') that exists only as a dimension-prefixed
+            tag_aggregate ('genre:comedy') is a REAL tag — counted, not flagged.
+            Guards the existence check against false-positiving on the bare-vs-
+            prefixed mismatch (the same reason the pool count now matches too)"
+    (let [cat    (assoc catalog :tag_aggregates
+                        [{:tag "genre:comedy" :show_count 4 :episode_count 40}])
+          report (f/check (grid [(strip "com" "weekdays" "10:00" "11:00"
+                                        "random:comedy" :strategy "random")])
+                          cat week-start week-end)
+          found  (finding-for report "com")]
+      (is (= "ok" (:status found)))
+      (is (= 40 (:episodes_available found))
+          "the prefixed tag_aggregate's episode_count is read for the pool check"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Duration fit (random:<category> strips, tag_runtime_histograms)
@@ -155,6 +190,18 @@
                           catalog-with-histograms week-start week-end)]
       ;; 23:15 -> 00:45 is 90 minutes, which the movie histogram has plenty of.
       (is (= "ok" (:status (finding-for report "late-movie")))))))
+
+(deftest category-known-only-via-runtime-histogram-is-not-hallucinated
+  (testing "a category present only in tag_runtime_histograms (no genre/aggregate
+            episode_count) is a real tag — capacity is 'not assessed', not a
+            shortfall (catalog-with-histograms has 'genre:movie' but no 'movie'
+            genre/aggregate)"
+    (let [report (f/check (grid [(strip "mv" "weekdays" "20:00" "21:30"
+                                        "random:movie" :strategy "random")])
+                          catalog-with-histograms week-start week-end)
+          found  (finding-for report "mv")]
+      (is (= "ok" (:status found)))
+      (is (str/includes? (:message found) "not assessed")))))
 
 (deftest movie-capacity
   (let [report (f/check (grid [(strip "m-once"  ["mon"]    "20:00" "22:00" "movie:classic")
