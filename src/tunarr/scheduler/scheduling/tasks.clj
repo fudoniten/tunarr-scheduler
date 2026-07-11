@@ -42,11 +42,23 @@
    canonical storage UUID. The `uuid` is the stable storage key for the
    layered-grid system; `name` is the display name the LLM reasons
    about. The two are distinct because the LLM cares about
-   human-readable identity and storage needs an unchanging identifier."
-  [cfg]
+   human-readable identity and storage needs an unchanging identifier.
+
+   Mirrors the read-side `channel-storage-uuid` resolver: prefers
+   `::media/channel-uuid` from the config, and falls back to a
+   `channel` table lookup by `full_name` (case-insensitive) or
+   `name` (the config-key slug) when the configmap doesn't carry the
+   key. The DB row is the source of truth in that case. `executor`
+   is the SQL executor used for the fallback; nil disables the
+   fallback (the caller will see `:uuid nil` and is expected to
+   surface the error, same as before this change)."
+  [executor cfg]
   {:name        (::media/channel-fullname cfg)
    :description (::media/channel-description cfg)
-   :uuid        (::media/channel-uuid cfg)})
+   :uuid        (or (::media/channel-uuid cfg)
+                    (let [name-or-slug (::media/channel-fullname cfg)]
+                      (when (and executor name-or-slug)
+                        (storage/find-channel-id executor name-or-slug))))})
 
 (defn- channel-storage-uuid
   "The canonical TS `channel.id` UUID for a channel's config entry, used
@@ -152,7 +164,7 @@
     (into {}
           (for [[channel-key cfg] channels]
             [channel-key
-             (try (orch/run-monthly! comps (channel-spec cfg) month
+             (try (orch/run-monthly! comps (channel-spec (:executor comps) cfg) month
                                      :catalog-tag (channel-catalog-tag channel-key))
                   (catch Exception e
                     (log/error e "task: monthly overrides failed" {:channel channel-key})
@@ -180,7 +192,7 @@
                  (not (::media/channel-id cfg)) :no-channel-id
                  (not pv-id)                    :not-found
                  :else
-                 (try (orch/run-quarterly! comps (channel-spec cfg) quarter year
+                 (try (orch/run-quarterly! comps (channel-spec (:executor comps) cfg) quarter year
                                            :catalog-tag (channel-catalog-tag channel-key)
                                            :pv-channel-id pv-id)
                       (catch Exception e
