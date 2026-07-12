@@ -344,3 +344,54 @@
         ;; without a repair round.
         (is (= "ok" (:feasibility-status out)))
         (is (= 0 (:repairs out)))))))
+
+;; ---------------------------------------------------------------------------
+;; sanitize-dead-random-strips — deterministic freeze-time guard for the
+;; hallucinated-tag class (handoff Bug #2). `profile` above knows only "comedy"
+;; (via its :genres fallback), so random:comedy is a live pool and any other
+;; category is dead.
+;; ---------------------------------------------------------------------------
+
+(deftest sanitize-rewrites-dead-random-strip-to-default
+  (let [grid {:channel "Classic Comedy"
+              :strips [{:strip_id "s1" :days "weekdays" :start "20:00" :end "20:30"
+                        :content {:media_id "random:sci-fi-and-fantasy" :strategy "random"}}]
+              :default_content {:media_id "random:comedy" :strategy "random"}}
+        {out :grid rewritten :rewritten} (orch/sanitize-dead-random-strips grid profile)]
+    (is (= ["s1"] rewritten))
+    (is (= {:media_id "random:comedy" :strategy "random"}
+           (-> out :strips first :content))
+        "the dead pool is swapped for the channel's own default pool")))
+
+(deftest sanitize-leaves-known-random-strip-untouched
+  (let [grid {:channel "Classic Comedy"
+              :strips [{:strip_id "s1" :days "weekdays" :start "20:00" :end "20:30"
+                        :content {:media_id "random:comedy" :strategy "random"}}]
+              :default_content {:media_id "random:comedy" :strategy "random"}}
+        {out :grid rewritten :rewritten} (orch/sanitize-dead-random-strips grid profile)]
+    (is (empty? rewritten))
+    (is (= grid out) "a live category is a no-op")))
+
+(deftest sanitize-leaves-series-strip-untouched
+  (let [grid {:channel "Classic Comedy"
+              :strips [{:strip_id "s1" :days "weekdays" :start "17:00" :end "18:00"
+                        :content {:media_id "series:42" :strategy "sequential"}}]
+              :default_content {:media_id "random:comedy" :strategy "random"}}
+        {rewritten :rewritten} (orch/sanitize-dead-random-strips grid profile)]
+    (is (empty? rewritten) "non-random content is never a dead pool")))
+
+(deftest sanitize-keeps-dead-strip-when-default-is-unusable
+  (testing "default itself names a dead pool ⇒ no safe swap, leave the strip"
+    (let [grid {:channel "Classic Comedy"
+                :strips [{:strip_id "s1" :days "weekdays" :start "20:00" :end "20:30"
+                          :content {:media_id "random:crime-thriller" :strategy "random"}}]
+                :default_content {:media_id "random:war-and-politics" :strategy "random"}}
+          {out :grid rewritten :rewritten} (orch/sanitize-dead-random-strips grid profile)]
+      (is (empty? rewritten))
+      (is (= grid out))))
+  (testing "no default_content at all ⇒ leave the strip"
+    (let [grid {:channel "Classic Comedy"
+                :strips [{:strip_id "s1" :days "weekdays" :start "20:00" :end "20:30"
+                          :content {:media_id "random:crime-thriller" :strategy "random"}}]}
+          {rewritten :rewritten} (orch/sanitize-dead-random-strips grid profile)]
+      (is (empty? rewritten)))))
