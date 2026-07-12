@@ -97,6 +97,56 @@
            :skeleton skeleton
            :warnings warnings})))))
 
+(defn- content-category
+  "The bare category of a `random:<category>` Content (e.g. \"sitcom\"), or nil
+   when the content isn't a random pool."
+  [content]
+  (let [mid (:media_id content)]
+    (when (and (string? mid) (str/starts-with? mid "random:"))
+      (subs mid (count "random:")))))
+
+(defn sanitize-dead-random-strips
+  "Deterministic freeze-time guard for the hallucinated-tag class (handoff Bug #2):
+   after the LLM's repair budget is spent, a `random:<category>` strip whose
+   category names no tag in `profile` still resolves to an empty Pseudovision
+   collection — dead air at playout. Rewrite each such strip's content to the
+   grid's own `:default_content` (the channel's fallback pool) so the time keeps
+   real programming instead of going dark. Uses feasibility's own
+   `known-random-category?` predicate, so it only ever touches strips the checker
+   would also flag; every other strip is returned untouched, and coverage is
+   never dropped. When the grid has no usable default (or the default is itself a
+   dead pool) the strip is left as-is — the feasibility status already records
+   the shortfall and the weekly WARN still catches it. Fail-safe: any error
+   returns the grid unchanged. Returns `{:grid :rewritten}` (`:rewritten` = the
+   ids of the strips that were swapped)."
+  [grid profile]
+  (try
+    (let [default-content (:default_content grid)
+          default-cat     (content-category default-content)
+          default-usable? (boolean
+                           (and (map? default-content)
+                                (:media_id default-content)
+                                (or (nil? default-cat)
+                                    (feasibility/known-random-category? profile default-cat))))
+          rewritten       (atom [])
+          fix-strip       (fn [{:keys [content] :as strip}]
+                            (let [cat (content-category content)]
+                              (if (and cat
+                                       (not (feasibility/known-random-category? profile cat))
+                                       default-usable?)
+                                (do (swap! rewritten conj (:strip_id strip))
+                                    (assoc strip :content default-content))
+                                strip)))
+          grid'           (cond-> grid
+                            (seq (:strips grid)) (update :strips (fn [ss] (mapv fix-strip ss))))]
+      (when (seq @rewritten)
+        (log/warn "freeze guard rewrote dead random:<category> strips to default_content"
+                  {:channel (:channel grid) :rewritten @rewritten}))
+      {:grid grid' :rewritten @rewritten})
+    (catch Exception e
+      (log/warn e "sanitize-dead-random-strips failed; freezing grid unchanged")
+      {:grid grid :rewritten []})))
+
 (defn ensure-collection!
   "Finds an existing Pseudovision collection named `(:name spec)`, or creates
    it from `spec` (a native-schedule/content-sources entry: `{:kind :show
@@ -190,10 +240,15 @@
     (loop [grid (:grid proposed), repairs 0]
       (let [report (feasibility/check grid profile (str hstart) (str hend))]
         (if (or (= "ok" (:overall_status report)) (>= repairs max-repairs))
-          ;; Fill in show titles (from the CatalogProfile we already have) so the
-          ;; frozen grid is self-describing in operator views; display-only, so it
-          ;; runs after feasibility and never affects the check or playout.
-          (let [labeled (integ/label-grid-content grid profile)
+          ;; Post-feasibility, pre-freeze finishing passes on the final grid:
+          ;;  1. sanitize — neutralise any dead random:<category> the repair loop
+          ;;     couldn't fix, so the frozen grid (and the native sync + weekly
+          ;;     expansion built from it) never programs an empty pool.
+          ;;  2. label — fill show titles from the CatalogProfile we already have
+          ;;     so the frozen grid is self-describing in operator views;
+          ;;     display-only, never affecting the check or playout.
+          (let [{sanitized :grid} (sanitize-dead-random-strips grid profile)
+                labeled (integ/label-grid-content sanitized profile)
                 stored  (storage/freeze-grid! executor channel-uuid quarter year labeled
                                               :grid-id grid-id :feasibility report)
                 sync-result (when pv-channel-id

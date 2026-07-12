@@ -205,6 +205,16 @@
   (boolean (or (category-episode-count catalog category)
                (tag-runtime-histogram catalog category))))
 
+(defn known-random-category?
+  "Public wrapper over `category-known?`: whether the bare `category` of a
+   `random:<category>` strip names a real tag in `catalog` (a CatalogProfile).
+   Exposed so the freeze step can deterministically neutralise a dead
+   `random:<category>` (one feasibility would flag as hallucinated) even after
+   the LLM's repair budget is exhausted with it still present — the same
+   predicate, so the guard and the checker never disagree."
+  [catalog category]
+  (category-known? catalog category))
+
 (defn- bucket-overlaps-window? [bucket lo hi]
   (let [bmin (:min_minutes bucket)
         bmax (or (:max_minutes bucket) Long/MAX_VALUE)]

@@ -15,6 +15,23 @@
 (defn- api-url [config path]
   (str (:base-url config) path))
 
+(defn- prepare-opts
+  "clj-http has no `:json-params` request option — only `:form-params` and a raw
+   `:body`. Wrappers throughout this namespace pass their JSON bodies as
+   `:json-params`, expecting them to be encoded and put on the wire; because
+   clj-http silently ignores the unknown key, those requests went out with *no
+   body at all*. That is why the whole native-schedule sync path (create-collection!,
+   create-schedule!, add-slot!, attach-schedule!, …) failed with PV 400
+   \"Request coercion failed\" on `body-params`: PV received an empty body and the
+   required fields were missing. Translate `:json-params` into an explicit
+   JSON-encoded `:body` (matching the working push-daily-slots!/add-tags! calls)."
+  [opts]
+  (if-let [e (find opts :json-params)]
+    (-> (dissoc opts :json-params)
+        (assoc :content-type :json
+               :body (json/generate-string (val e))))
+    opts))
+
 (defn- request!
   "Make HTTP request to Pseudovision API with error handling."
   [method url opts]
@@ -24,7 +41,7 @@
                                          :accept :json
                                          :as :json
                                          :throw-exceptions false}
-                                        opts))]
+                                        (prepare-opts opts)))]
       (if (<= 200 (:status response) 299)
         (:body response)
         (do
