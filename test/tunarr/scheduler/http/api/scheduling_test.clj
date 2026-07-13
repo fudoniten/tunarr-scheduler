@@ -25,8 +25,11 @@
 
 (def channels
   {:enigma {::media/channel-id "uuid-enigma"
-            ::media/channel-fullname "Enigma"
+            ::media/channel-fullname "Enigma TV"
             ::media/channel-description "Mystery programming"}
+   :spectrum {::media/channel-id "uuid-spectrum"
+              ::media/channel-fullname "Sitcom Spectrum"
+              ::media/channel-description "Sitcoms"}
    :prime  {::media/channel-id "uuid-prime"
             ::media/channel-fullname "Prime"
             ::media/channel-description "Primetime programming"}})
@@ -158,3 +161,54 @@
           (is (= #{:enigma} (set (keys @seen)))))
         (let [bad ((scheduling/weekly-handler (ctx)) (req {} {"nope" "1"}))]
           (is (= 400 (:status bad))))))))
+
+;; ── ?channel matches display name (case-insensitive, multi-word) ───────────
+;;
+;; Marquee's deployed bundle URL-encodes the channel's display name
+;; (`?channel=Enigma%20TV`), not the config key. The previous tiered
+;; matcher only accepted config keys and uuids, so multi-word display
+;; names returned 400 "unknown channel(s)". Adding a fullname tier
+;; (case-insensitive) unblocks the UI's Regenerate buttons.
+
+(deftest weekly-channel-matches-display-name
+  (testing "?channel=Enigma TV (multi-word display name) selects :enigma"
+    (let [seen (atom nil)]
+      (with-redefs [tasks/run-weekly! (fn [c] (reset! seen (:channels c)) {})]
+        (let [resp ((scheduling/weekly-handler (ctx)) (req {:channel "Enigma TV"}))]
+          (is (= 200 (:status resp)))
+          (is (= #{:enigma} (set (keys @seen)))))))))
+
+(deftest monthly-channel-matches-display-name
+  (testing "monthly: ?channel=Sitcom%20Spectrum selects :spectrum (async job)"
+    (let [seen (atom nil)]
+      (with-redefs [tasks/run-monthly! (fn [c] (reset! seen (:channels c)) nil)]
+        (let [resp ((scheduling/monthly-handler (ctx)) (req {:channel "Sitcom Spectrum"}))]
+          (is (= 202 (:status resp)))
+          (await-job (get-in resp [:body :job :id]))
+          (is (= #{:spectrum} (set (keys @seen)))))))))
+
+(deftest quarterly-channel-matches-display-name-case-insensitive
+  (testing "?channel=ENIGMA%20TV (uppercase display name) selects :enigma"
+    (let [seen (atom nil)]
+      (with-redefs [tasks/run-quarterly! (fn [c & _] (reset! seen (:channels c)) {})]
+        (let [resp ((scheduling/quarterly-handler (ctx)) (req {:channel "ENIGMA TV"}))]
+          (is (= 202 (:status resp)))
+          (await-job (get-in resp [:body :job :id]))
+          (is (= #{:enigma} (set (keys @seen)))))))))
+
+(deftest weekly-display-name-still-400s-when-no-config-channel-matches
+  (testing "an unknown display name still 400s — the new tier doesn't lower the bar"
+    (let [called (atom false)]
+      (with-redefs [tasks/run-weekly! (fn [_] (reset! called true) {})]
+        (let [resp ((scheduling/weekly-handler (ctx)) (req {:channel "Does Not Exist"}))]
+          (is (= 400 (:status resp)))
+          (is (re-find #"unknown channel" (get-in resp [:body :error])))
+          (is (false? @called)))))))
+
+(deftest weekly-display-name-takes-priority-over-config-key-collision
+  (testing "config key match is still preferred (no regression in the existing tier)"
+    (let [seen (atom nil)]
+      (with-redefs [tasks/run-weekly! (fn [c] (reset! seen (:channels c)) {})]
+        (let [resp ((scheduling/weekly-handler (ctx)) (req {:channel "enigma"}))]
+          (is (= 200 (:status resp)))
+          (is (= #{:enigma} (set (keys @seen)))))))))
