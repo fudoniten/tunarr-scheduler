@@ -89,7 +89,7 @@
 
 (def ^:private channel-params #{"channel" "channel_id"})
 (def ^:private daily-params (conj channel-params "horizon"))
-(def ^:private quarterly-params (conj channel-params "date"))
+(def ^:private date-params (conj channel-params "date"))
 
 (defn- with-selected-channels
   "Validate the request's query params and channel selectors, then call
@@ -139,16 +139,23 @@
 (defn monthly-handler
   "POST /api/scheduling/monthly — propose + store sparse monthly overrides for
    every channel against their frozen grids. Returns 202 with a job ID.
-   Optional ?channel=key / ?channel_id=uuid to limit."
+
+   Optional ?date=YYYY-MM-DD selects which month to generate (default today).
+   Pass a date in next month (run a week or so before month-end) to pre-generate
+   the coming month's overrides — always safe, they're only stored until the
+   weekly expander applies them. Optional ?channel=key / ?channel_id=uuid to
+   limit."
   [ctx]
   (fn [req]
-    (with-selected-channels ctx channel-params req
+    (with-selected-channels ctx date-params req
       (fn [ctx']
-        (let [job (jobs/submit-job!
-                   (:job-runner ctx)
-                   {:type :media/scheduling-monthly}
-                   (fn [_report-progress]
-                     (tasks/run-monthly! ctx')))]
+        (let [date (get-in req [:parameters :query :date])
+              job  (jobs/submit-job!
+                    (:job-runner ctx)
+                    {:type     :media/scheduling-monthly
+                     :metadata (when date {:date date})}
+                    (fn [_report-progress]
+                      (tasks/run-monthly! ctx' :date date)))]
           {:status 202 :body {:task "monthly" :job job}})))))
 
 (defn quarterly-handler
@@ -162,7 +169,7 @@
    to limit."
   [ctx]
   (fn [req]
-    (with-selected-channels ctx quarterly-params req
+    (with-selected-channels ctx date-params req
       (fn [ctx']
         (let [date (get-in req [:parameters :query :date])
               job  (jobs/submit-job!

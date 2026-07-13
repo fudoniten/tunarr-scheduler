@@ -239,6 +239,63 @@
         (log/error e "Error submitting Pseudovision sync job")
         {:status 500 :body {:error (util/error-message e)}}))))
 
+(defn curate-all-handler
+  "POST /api/media/curate-all — the nightly curation pass across every
+   configured Jellyfin library, in one async job.
+
+   For each configured library it (1) syncs the library's media from
+   Pseudovision into the local catalog, then (2) recategorizes any media that
+   hasn't been processed yet (LLM via Tunabrain). Tag/category changes flow back
+   to Pseudovision automatically via the auto-sync worker, so there is no
+   explicit push step here.
+
+   Only the libraries configured under `:pseudovision :libraries` (e.g. movies,
+   shows) are curated. Grout's long-form content lives in its own PV library and
+   is DELIBERATELY excluded: Grout enriches its own content and Pseudovision
+   imports those tags directly, so re-tagging it here would fight Grout.
+
+   `?force=true` reprocesses already-tagged media (default incremental — only
+   media new since the last run). Returns 202 + a :media/curate-all job; poll
+   GET /api/jobs/:id for the per-library summary."
+  [{:keys [job-runner catalog pseudovision tunabrain throttler curation-config]}]
+  (fn [req]
+    (let [force     (= "true" (get-in req [:parameters :query :force]))
+          pv-config (pv-client/get-config pseudovision)
+          libraries (->> (get pv-config :libraries) keys (map name) vec)]
+      (if (empty? libraries)
+        {:status 400 :body {:error "No libraries configured under :pseudovision :libraries"}}
+        (let [job (jobs/submit!
+                   job-runner
+                   {:type     :media/curate-all
+                    :metadata {:libraries libraries :force force}}
+                   (fn [report-progress]
+                     ;; Refresh the catalog's library map from PV so per-library
+                     ;; ops resolve to the right ids.
+                     (let [pv-libs (pv-client/list-all-libraries pv-config)
+                           lib-map (into {} (map (fn [lib] [(keyword (:name lib)) (:id lib)])) pv-libs)]
+                       (catalog/update-libraries! catalog lib-map))
+                     (let [backend (curate/->TunabrainCuratorBackend
+                                    tunabrain catalog throttler curation-config)
+                           results (mapv
+                                    (fn [library]
+                                      (try
+                                        (let [sync (pv-media-sync/sync-library-from-pseudovision!
+                                                    catalog pv-config library {})]
+                                          (curate/recategorize-library!
+                                           backend library
+                                           {:force force :report-progress report-progress})
+                                          {:library library :status "ok" :sync sync})
+                                        (catch Exception e
+                                          (log/error e "curate-all: library failed" {:library library})
+                                          {:library library :status "error"
+                                           :error (util/error-message e)})))
+                                    libraries)]
+                       {:libraries (count libraries)
+                        :ok        (count (filter #(= "ok" (:status %)) results))
+                        :failed    (count (filter #(= "error" (:status %)) results))
+                        :results   results})))]
+          {:status 202 :body {:job job}})))))
+
 (defn migrate-to-pseudovision-handler
   "One-time migration from local catalog to Pseudovision."
   [{:keys [catalog pseudovision]}]

@@ -2,7 +2,11 @@
   (:require [clojure.test :refer [deftest is testing]]
             [tunarr.scheduler.http.api.media :as media]
             [tunarr.scheduler.media :as media-ns]
-            [tunarr.scheduler.media.catalog :as catalog]))
+            [tunarr.scheduler.media.catalog :as catalog]
+            [tunarr.scheduler.media.pseudovision-media-sync :as pv-media-sync]
+            [tunarr.scheduler.backends.pseudovision.client :as pv-client]
+            [tunarr.scheduler.curation.core :as curate]
+            [tunarr.scheduler.jobs.runner :as runner]))
 
 ;; ---------------------------------------------------------------------------
 ;; Minimal catalog double for the per-item context handlers. get-media-by-id
@@ -101,3 +105,52 @@
           resp ((media/get-media-item-context-handler ctx)
                 {:parameters {:path {:media-id "nope"}}})]
       (is (= 404 (:status resp))))))
+
+;; ---------------------------------------------------------------------------
+;; curate-all — the nightly curation pass. Verifies it operates on exactly the
+;; configured Jellyfin libraries and never the grout-content library (Grout owns
+;; its own tags, so re-tagging it here would fight Grout).
+;; ---------------------------------------------------------------------------
+
+(defn- await-terminal [r job-id]
+  (loop [n 0]
+    (let [info (runner/job-info r job-id)]
+      (if (or (contains? #{:succeeded :failed} (:status info)) (>= n 200))
+        info
+        (do (Thread/sleep 15) (recur (inc n)))))))
+
+(deftest curate-all-only-touches-configured-libraries
+  (testing "curate-all syncs + recategorizes only the configured libraries and
+            excludes grout-content"
+    (let [synced      (atom [])
+          categorized (atom [])]
+      (with-redefs [pv-client/get-config         (fn [_] {:base-url "http://pv"
+                                                          :libraries {:movies 1 :shows 2}})
+                    pv-client/list-all-libraries (fn [_] [{:id 1 :name "movies"}
+                                                          {:id 2 :name "shows"}
+                                                          {:id 9 :name "grout-content"}])
+                    catalog/update-libraries!    (fn [_ _] nil)
+                    pv-media-sync/sync-library-from-pseudovision!
+                    (fn [_ _ library _] (swap! synced conj library) {:synced 0})
+                    curate/->TunabrainCuratorBackend (fn [_ _ _ _] ::backend)
+                    curate/recategorize-library!
+                    (fn [_ library _] (swap! categorized conj library) {})]
+        (let [r      (runner/create {})
+              ctx    {:job-runner r :catalog nil :pseudovision nil
+                      :tunabrain nil :throttler nil :curation-config nil}
+              resp   ((media/curate-all-handler ctx) {:parameters {:query {}}})
+              job-id (get-in resp [:body :job :id])
+              info   (await-terminal r job-id)]
+          (is (= 202 (:status resp)))
+          (is (= :succeeded (:status info)))
+          (is (= #{"movies" "shows"} (set @synced))       "grout-content is not synced")
+          (is (= #{"movies" "shows"} (set @categorized))  "grout-content is not recategorized")
+          (runner/shutdown! r))))))
+
+(deftest curate-all-requires-configured-libraries
+  (testing "curate-all returns 400 when no libraries are configured"
+    (with-redefs [pv-client/get-config (fn [_] {:base-url "http://pv"})]
+      (let [resp ((media/curate-all-handler {:job-runner nil :catalog nil :pseudovision nil
+                                             :tunabrain nil :throttler nil :curation-config nil})
+                  {:parameters {:query {}}})]
+        (is (= 400 (:status resp)))))))
