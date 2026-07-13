@@ -178,12 +178,28 @@
    `random:<category>` strips to this channel's own mapped media — same
    value as `catalog-tag` passed to `run-quarterly!`.
 
+   The post-sync rebuild EXTENDS the timeline by default (`:rebuild-from
+   \"horizon\"`) rather than resetting it from now. This is what makes the
+   quarter transition graceful: when the current quarter's grid is synced (at the
+   boundary, or on a mid-quarter re-freeze) it does NOT rewrite the already-
+   published near-term schedule. The old grid's programming plays out to the
+   timeline's edge and the NEW grid takes over from there — no hard cutover, so
+   the guide viewers already saw stays correct. (Pseudovision's extend build
+   resumes from the playout's saved cursor and only appends past it; the new
+   schedule's slots generate forward from the seam, while events before it are
+   untouched.)
+
+   Pass `:rebuild-from \"now\"` to force a hard reset instead — wipe the future
+   and regenerate immediately from the new grid, restarting rotation. Use that
+   only when an abrupt swap is actually wanted.
+
    Best-effort: a failure here does not un-freeze the grid (the grid is
    already durable in Tunarr Scheduler's own storage); callers should log
    and surface it without failing the whole quarterly run.
 
    Returns `{:schedule-id :slot-count :warnings}`."
-  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name]}]
+  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name rebuild-from]
+                                               :or   {rebuild-from "horizon"}}]
   (let [sources (native/content-sources grid channel-tag)
         source-id-by-name (into {}
                                  (map (fn [spec] [(:name spec) (ensure-collection! pv-config spec)]))
@@ -197,7 +213,7 @@
     (doseq [[idx slot] (map-indexed vector slots)]
       (pv/add-slot! pv-config sched-id (assoc slot :slot-index idx)))
     (pv/attach-schedule! pv-config pv-channel-id sched-id)
-    (pv/rebuild-playout! pv-config pv-channel-id {:from "now" :horizon 14})
+    (pv/rebuild-playout! pv-config pv-channel-id {:from rebuild-from :horizon 14})
     (when (and prior-schedule-id (not= prior-schedule-id sched-id))
       (try (pv/delete-schedule! pv-config prior-schedule-id)
            (catch Exception e

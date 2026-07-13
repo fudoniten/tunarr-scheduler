@@ -89,6 +89,7 @@
 
 (def ^:private channel-params #{"channel" "channel_id"})
 (def ^:private daily-params (conj channel-params "horizon"))
+(def ^:private quarterly-params (conj channel-params "date"))
 
 (defn- with-selected-channels
   "Validate the request's query params and channel selectors, then call
@@ -153,14 +154,21 @@
 (defn quarterly-handler
   "POST /api/scheduling/quarterly — propose → check → repair → freeze the
    quarterly grid for every channel. Returns 202 with a job ID.
-   Optional ?channel=key / ?channel_id=uuid to limit."
+
+   Optional ?date=YYYY-MM-DD selects which quarter to (re)generate: the grid's
+   quarter/year come from that date (default today). Pass a date inside the
+   upcoming quarter (run a week or so before the boundary) to pre-generate the
+   next quarter's grid ahead of time. Optional ?channel=key / ?channel_id=uuid
+   to limit."
   [ctx]
   (fn [req]
-    (with-selected-channels ctx channel-params req
+    (with-selected-channels ctx quarterly-params req
       (fn [ctx']
-        (let [job (jobs/submit-job!
-                   (:job-runner ctx)
-                   {:type :media/scheduling-quarterly}
-                   (fn [_report-progress]
-                     (tasks/run-quarterly! ctx')))]
+        (let [date (get-in req [:parameters :query :date])
+              job  (jobs/submit-job!
+                    (:job-runner ctx)
+                    {:type     :media/scheduling-quarterly
+                     :metadata (when date {:date date})}
+                    (fn [_report-progress]
+                      (tasks/run-quarterly! ctx' :date date)))]
           {:status 202 :body {:task "quarterly" :job job}})))))

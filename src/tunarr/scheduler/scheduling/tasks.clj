@@ -171,19 +171,50 @@
                     {:error (util/error-message e)}))]))))
 
 (defn run-quarterly!
-  "Propose → check → repair → freeze the quarterly grid for every channel for the
-   current quarter, then sync it onto Pseudovision's native schedule/slot
-   model (orch/sync-native-schedule!, via run-quarterly!'s :pv-channel-id).
+  "Propose → check → repair → freeze the quarterly grid for every channel, and —
+   for the CURRENT quarter only — sync it onto Pseudovision's native
+   schedule/slot model (orch/sync-native-schedule!, via :pv-channel-id).
+
+   `:date` (optional, a 'YYYY-MM-DD' string or LocalDate) selects WHICH quarter
+   to (re)generate: the grid's quarter and year are taken from that date.
+   Defaults to today. Pass a date inside the UPCOMING quarter (the point of
+   running a week or so before the boundary) to pre-generate the next quarter's
+   grid ahead of time.
+
+   Freeze vs. sync — an important distinction:
+
+   • Generating the CURRENT quarter (target quarter == today's) freezes the grid
+     AND syncs it to the live playout. The sync EXTENDS the timeline rather than
+     resetting it (see orch/sync-native-schedule!), so on the boundary the new
+     grid takes over at the end of already-published programming instead of
+     cutting over — no obsoleted guide.
+
+   • Generating any OTHER quarter (a future quarter, e.g. pre-generating next
+     quarter early, or backfilling a past one) FREEZES the grid only and leaves
+     the live playout untouched. This is deliberate: the native schedule has no
+     notion of an effective date — attaching a future quarter's grid now would
+     make it air immediately at the timeline's append edge, before that quarter
+     actually begins. The frozen grid is reviewable and ready; it is applied by
+     the regular current-quarter run once the boundary arrives.
+
    Returns channel-key → frozen grid record (with :feasibility-status and,
    when synced, :native-sync) / :no-channel-id / :not-found / {:error …}."
-  [{:keys [pseudovision channels] :as ctx}]
-  (log/info "task: quarterly grid generation")
-  (let [comps   (components ctx)
-        conf    (pv-config pseudovision)
-        index   (uuid->pv-id conf)
-        today   (plans/today)
-        quarter (plans/quarter-of today)
-        year    (plans/year-of today)]
+  [{:keys [pseudovision channels] :as ctx} & {:keys [date]}]
+  (let [comps    (components ctx)
+        conf     (pv-config pseudovision)
+        index    (uuid->pv-id conf)
+        today    (plans/today)
+        target   (or date today)
+        quarter  (plans/quarter-of target)
+        year     (plans/year-of target)
+        ;; Only the current quarter is applied to the live playout; other
+        ;; quarters are frozen-only (see docstring). Sync is triggered by passing
+        ;; :pv-channel-id to orch/run-quarterly!, so gate that on current?.
+        current? (and (= quarter (plans/quarter-of today))
+                      (= year    (plans/year-of today)))]
+    (log/info "task: quarterly grid generation"
+              {:date (str target) :quarter quarter :year year
+               :current-quarter? current? :sync? current?})
     (into {}
           (for [[channel-key cfg] channels]
             (let [pv-id (get index (str (::media/channel-id cfg)))]
@@ -194,7 +225,7 @@
                  :else
                  (try (orch/run-quarterly! comps (channel-spec (:executor comps) cfg) quarter year
                                            :catalog-tag (channel-catalog-tag channel-key)
-                                           :pv-channel-id pv-id)
+                                           :pv-channel-id (when current? pv-id))
                       (catch Exception e
                         (log/error e "task: quarterly grid failed" {:channel channel-key})
                         {:error (util/error-message e)})))])))))

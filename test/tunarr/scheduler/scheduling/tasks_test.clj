@@ -22,7 +22,10 @@
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.sql.executor :as executor]
             [tunarr.scheduler.scheduling.storage :as storage]
-            [tunarr.scheduler.scheduling.tasks :as tasks]))
+            [tunarr.scheduler.scheduling.orchestration :as orch]
+            [tunarr.scheduler.backends.pseudovision.client :as pv]
+            [tunarr.scheduler.scheduling.tasks :as tasks])
+  (:import [java.time LocalDate]))
 
 (def ^:dynamic *ex* nil)
 
@@ -164,3 +167,45 @@
     (is (= spectrum-uuid (:channel row))
         "grids.channel column must hold the TS channel.id UUID")
     (is (some? (:id row)))))
+
+;; ---------------------------------------------------------------------------
+;; run-quarterly! :date — target quarter selection + freeze-only guard
+;; ---------------------------------------------------------------------------
+
+(deftest quarterly-date-selects-quarter-and-gates-native-sync
+  (testing "run-quarterly! derives the target quarter from ?date and only applies
+            it to the live playout (passes :pv-channel-id → native sync) when that
+            quarter is the CURRENT one; a future quarter is frozen only"
+    (let [captured (atom [])]
+      (with-redefs [pv/list-channels    (fn [_] [{:uuid "chan-uuid" :id 42}])
+                    ;; Stub the per-channel orchestration so we observe exactly
+                    ;; the quarter/year and whether a pv-channel-id (→ sync) was
+                    ;; passed, without any real Tunabrain/PV traffic.
+                    orch/run-quarterly! (fn [_comps _spec quarter year & {:keys [pv-channel-id]}]
+                                          (swap! captured conj {:quarter quarter :year year
+                                                                :pv-channel-id pv-channel-id})
+                                          {:ok true})]
+        (let [cfg  {::media/channel-uuid        "grid-uuid"
+                    ::media/channel-fullname    "Sitcom Spectrum"
+                    ::media/channel-description  ""
+                    ::media/channel-id          "chan-uuid"}
+              ctx  {:pseudovision {:base-url "http://pv"}
+                    :channels     {:spectrum cfg}
+                    :catalog      {:executor *ex*}}
+              today       (LocalDate/now)
+              ;; +3 months always lands in the immediately following quarter.
+              next-q-date (.plusMonths today 3)]
+          (testing "current quarter → native sync applied"
+            (reset! captured [])
+            (tasks/run-quarterly! ctx :date (str today))
+            (is (= 42 (:pv-channel-id (first @captured)))
+                "current-quarter run attaches + rebuilds the live playout"))
+          (testing "future quarter → frozen only, live playout untouched"
+            (reset! captured [])
+            (tasks/run-quarterly! ctx :date (str next-q-date))
+            (is (nil? (:pv-channel-id (first @captured)))
+                "future-quarter run skips the native sync"))
+          (testing "no ?date defaults to today's quarter and applies"
+            (reset! captured [])
+            (tasks/run-quarterly! ctx)
+            (is (= 42 (:pv-channel-id (first @captured))))))))))

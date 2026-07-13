@@ -55,7 +55,7 @@
 (deftest quarterly-channel-name-matches-keyword-key
   (testing "?channel=enigma narrows to the keyword-keyed :enigma channel"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-quarterly! (fn [c] (reset! seen (:channels c)) {})]
+      (with-redefs [tasks/run-quarterly! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {:channel "enigma"}))]
           (is (= 202 (:status resp)))
           (await-job (get-in resp [:body :job :id]))
@@ -67,7 +67,7 @@
 (deftest quarterly-channel-id-selects-channel
   (testing "?channel_id=uuid-prime selects the channel whose ::media/channel-id matches"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-quarterly! (fn [c] (reset! seen (:channels c)) {})]
+      (with-redefs [tasks/run-quarterly! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {:channel_id "uuid-prime"}))]
           (is (= 202 (:status resp)))
           (await-job (get-in resp [:body :job :id]))
@@ -76,7 +76,7 @@
 (deftest quarterly-channel-and-id-union
   (testing "?channel and ?channel_id together select the union of both"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-quarterly! (fn [c] (reset! seen (:channels c)) {})]
+      (with-redefs [tasks/run-quarterly! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [resp ((scheduling/quarterly-handler (ctx))
                     (req {:channel "enigma" :channel_id "uuid-prime"}))]
           (is (= 202 (:status resp)))
@@ -88,18 +88,30 @@
 (deftest quarterly-no-selector-runs-all-channels
   (testing "omitting selectors runs against every configured channel"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-quarterly! (fn [c] (reset! seen (:channels c)) {})]
+      (with-redefs [tasks/run-quarterly! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {}))]
           (is (= 202 (:status resp)))
           (await-job (get-in resp [:body :job :id]))
           (is (= #{:enigma :prime} (set (keys @seen)))))))))
+
+;; ── ?date (target quarter selection) ─────────────────────────────────────────
+
+(deftest quarterly-date-param-forwarded-to-task
+  (testing "?date is forwarded to run-quarterly! so it can pick the target quarter"
+    (let [seen-date (atom :unset)]
+      (with-redefs [tasks/run-quarterly! (fn [_ & {:keys [date]}] (reset! seen-date date) {})]
+        (let [resp ((scheduling/quarterly-handler (ctx))
+                    (req {:date "2026-10-01"} {"date" "2026-10-01"}))]
+          (is (= 202 (:status resp)))
+          (await-job (get-in resp [:body :job :id]))
+          (is (= "2026-10-01" @seen-date)))))))
 
 ;; ── Fail fast: unresolvable selectors ────────────────────────────────────────
 
 (deftest quarterly-unknown-channel-name-fails-fast
   (testing "an unknown ?channel returns 400 instead of silently launching a no-op job"
     (let [called (atom false)]
-      (with-redefs [tasks/run-quarterly! (fn [_] (reset! called true) {})]
+      (with-redefs [tasks/run-quarterly! (fn [_ & _] (reset! called true) {})]
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {:channel "nonexistent"}))]
           (is (= 400 (:status resp)))
           (is (re-find #"unknown channel" (get-in resp [:body :error])))
@@ -108,7 +120,7 @@
 (deftest quarterly-unknown-channel-id-fails-fast
   (testing "an unknown ?channel_id returns 400"
     (let [called (atom false)]
-      (with-redefs [tasks/run-quarterly! (fn [_] (reset! called true) {})]
+      (with-redefs [tasks/run-quarterly! (fn [_ & _] (reset! called true) {})]
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {:channel_id "uuid-bogus"}))]
           (is (= 400 (:status resp)))
           (is (re-find #"channel_id=uuid-bogus" (get-in resp [:body :error])))
@@ -119,7 +131,7 @@
 (deftest quarterly-unrecognized-param-fails-fast
   (testing "a typo'd/unknown query param returns 400 (coercion would otherwise strip it silently)"
     (let [called (atom false)]
-      (with-redefs [tasks/run-quarterly! (fn [_] (reset! called true) {})]
+      (with-redefs [tasks/run-quarterly! (fn [_ & _] (reset! called true) {})]
         ;; coercion strips "chanel" from :parameters, but it survives in :query-params
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {} {"chanel" "enigma"}))]
           (is (= 400 (:status resp)))
