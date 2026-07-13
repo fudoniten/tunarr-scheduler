@@ -478,6 +478,16 @@
    [:channel    {:optional true} ChannelSelector]
    [:channel_id {:optional true} ChannelSelector]])
 
+(def QuarterlyTaskQuery
+  "ChannelFilter plus an optional ?date selecting which quarter to (re)generate.
+   The grid's quarter/year come from that date; default today. Pass a date inside
+   the upcoming quarter (run a week or so before the boundary) to pre-generate the
+   next quarter's grid ahead of time."
+  [:map
+   [:date       {:optional true} [:string {:description "Target date 'YYYY-MM-DD'; the grid's quarter/year come from this date. Default today."}]]
+   [:channel    {:optional true} ChannelSelector]
+   [:channel_id {:optional true} ChannelSelector]])
+
 ;; ---------------------------------------------------------------------------
 ;; Query parameters
 ;; ---------------------------------------------------------------------------

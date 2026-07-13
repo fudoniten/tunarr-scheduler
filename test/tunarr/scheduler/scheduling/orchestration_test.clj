@@ -261,6 +261,21 @@
    :strips [{:strip_id "prime" :days "weekdays" :start "17:00" :end "17:30"
              :content {:media_id "series:42" :strategy "sequential"}}]})
 
+(defn- capture-sync
+  "Run sync-native-schedule! against stubbed PV collaborators, returning the
+   rebuild options the sync passed to pv/rebuild-playout! (plus the raw result)."
+  [& sync-opts]
+  (let [rebuild-opts (atom nil)]
+    (with-redefs [pv/get-collections    (fn [_] [{:id 5 :name "auto:series:42"}])
+                  pv/get-playout        (fn [_ _] {:schedule-id 3})
+                  pv/create-schedule!   (fn [_ data] {:id 9 :name (:name data)})
+                  pv/add-slot!          (fn [_ _ _] {})
+                  pv/attach-schedule!   (fn [_ _ _] {})
+                  pv/rebuild-playout!   (fn [_ _ opts] (reset! rebuild-opts opts) {})
+                  pv/delete-schedule!   (fn [_ _] {})]
+      {:result       (apply orch/sync-native-schedule! ::pv 42 sync-grid "channel:classic-comedy" sync-opts)
+       :rebuild-opts @rebuild-opts})))
+
 (deftest sync-native-schedule-full-round-trip
   (let [added-slots (atom [])
         attached    (atom nil)
@@ -280,6 +295,17 @@
         (is (= [42 9] @attached))
         (is @rebuilt)
         (is (= 3 @deleted) "the previously-attached schedule is cleaned up")))))
+
+(deftest sync-native-schedule-extends-by-default
+  (testing "the post-sync rebuild EXTENDS (from=horizon), so re-freezing a grid
+            doesn't wipe the already-published near-term timeline — a graceful
+            quarter transition instead of a hard cutover"
+    (is (= "horizon" (:from (:rebuild-opts (capture-sync)))))))
+
+(deftest sync-native-schedule-can-force-reset
+  (testing ":rebuild-from \"now\" forces a hard reset for callers that actually
+            want an abrupt swap"
+    (is (= "now" (:from (:rebuild-opts (capture-sync :rebuild-from "now")))))))
 
 ;; ---------------------------------------------------------------------------
 ;; propose-grid-via-daypart-candidates! — split round trip
