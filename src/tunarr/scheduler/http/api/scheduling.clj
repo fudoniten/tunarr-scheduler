@@ -51,9 +51,16 @@
 (defn- channel-id-str [cfg]
   (some-> (::media/channel-id cfg) str))
 
+(defn- channel-fullname-matches? [names cfg]
+  (and names
+       (let [target (some-> (::media/channel-fullname cfg) str str/lower-case)]
+         (and target
+              (contains? (set (map str/lower-case names)) target)))))
+
 (defn- channel-matches? [{:keys [names ids]} channel-key cfg]
   (or (and names (contains? names (name channel-key)))
-      (and ids   (contains? ids (channel-id-str cfg)))))
+      (and ids   (contains? ids (channel-id-str cfg)))
+      (channel-fullname-matches? names cfg)))
 
 (defn- filter-channels
   "Return ctx with :channels narrowed to those matching the selectors, or
@@ -68,12 +75,20 @@
 (defn- unknown-selectors
   "Selector values that match no configured channel, rendered as human-readable
    strings (\"channel=foo\" / \"channel_id=…\"). nil when every selector
-   resolves to a channel."
+   resolves to a channel. `?channel=` matches against the config key
+   (e.g. \"enigma\"), the channel uuid, OR the display name
+   (::media/channel-fullname, case-insensitive) — same set of tiers that
+   channel-matches? uses for the actual filter."
   [ctx {:keys [names ids]}]
-  (let [chs         (:channels ctx)
-        known-names (set (map name (keys chs)))
-        known-ids   (into #{} (keep (comp channel-id-str val)) chs)]
-    (seq (concat (map #(str "channel=" %)    (sort (remove known-names (or names #{}))))
+  (let [chs               (:channels ctx)
+        known-names       (set (map name (keys chs)))
+        known-ids         (into #{} (keep (comp channel-id-str val)) chs)
+        known-fullnames   (set (map (comp str str/lower-case
+                                          (fn [cfg] (::media/channel-fullname cfg)))
+                                   (vals chs)))
+        name-matches?     (fn [n] (or (contains? known-names n)
+                                     (contains? known-fullnames (str/lower-case n))))]
+    (seq (concat (map #(str "channel=" %)    (sort (remove name-matches? (or names #{}))))
                  (map #(str "channel_id=" %) (sort (remove known-ids   (or ids   #{}))))))))
 
 (defn- unknown-params
