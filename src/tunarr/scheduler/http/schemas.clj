@@ -75,6 +75,7 @@
    :media/taglines
    :media/recategorize
    :media/retag-episodes
+   :media/curate-all
    :media/pseudovision-sync
    :media/tag-audit
    :media/tag-triage
@@ -478,15 +479,18 @@
    [:channel    {:optional true} ChannelSelector]
    [:channel_id {:optional true} ChannelSelector]])
 
-(def QuarterlyTaskQuery
-  "ChannelFilter plus an optional ?date selecting which quarter to (re)generate.
-   The grid's quarter/year come from that date; default today. Pass a date inside
-   the upcoming quarter (run a week or so before the boundary) to pre-generate the
-   next quarter's grid ahead of time."
+(def DateTaskQuery
+  "ChannelFilter plus an optional ?date selecting the target period. For
+   `quarterly` the grid's quarter/year come from that date; for `monthly` the
+   month comes from it. Default today. Pass a date inside the upcoming
+   period (run a week or so before the boundary) to pre-generate ahead of time."
   [:map
-   [:date       {:optional true} [:string {:description "Target date 'YYYY-MM-DD'; the grid's quarter/year come from this date. Default today."}]]
+   [:date       {:optional true} [:string {:description "Target date 'YYYY-MM-DD'; the target quarter/month is derived from it. Default today."}]]
    [:channel    {:optional true} ChannelSelector]
    [:channel_id {:optional true} ChannelSelector]])
+
+;; Backwards-compatible alias — the quarterly route referenced this name.
+(def QuarterlyTaskQuery DateTaskQuery)
 
 ;; ---------------------------------------------------------------------------
 ;; Query parameters

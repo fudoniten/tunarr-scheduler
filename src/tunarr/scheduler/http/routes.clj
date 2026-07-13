@@ -295,6 +295,21 @@
                               500 {:body s/APIError}}
                   :handler   (media/tagline-handler ctx)}}]
 
+   ["/api/media/curate-all"
+    {:tags       ["media"]
+     :parameters {:query s/ForceQuery}
+     :post       {:summary     "Nightly curation across all configured libraries (async job)"
+                  :description "For every configured Jellyfin library: sync its
+                                media from Pseudovision, then recategorize any
+                                not-yet-processed items (LLM). Tags flow back to
+                                PV via auto-sync. Grout's long-form library is
+                                excluded (Grout owns its tags). ?force=true
+                                reprocesses already-tagged media."
+                  :responses {202 {:body s/JobSubmitResponse}
+                              400 {:body s/APIError}
+                              500 {:body s/APIError}}
+                  :handler   (media/curate-all-handler ctx)}}]
+
    ["/api/media/:library/recategorize"
     {:tags       ["media"]
      :parameters {:path  [:map [:library s/LibraryName]]
@@ -561,7 +576,7 @@
     ["/api/scheduling/monthly"
      {:tags ["scheduling"]
       :post {:summary    "Propose + store sparse monthly overrides for every channel (async)"
-             :parameters {:query s/ChannelFilter}
+             :parameters {:query s/DateTaskQuery}
              :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/monthly-handler ctx)}}]

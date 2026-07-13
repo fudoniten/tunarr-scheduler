@@ -109,6 +109,16 @@
           (await-job (get-in resp [:body :job :id]))
           (is (= "2026-10-01" @seen-date)))))))
 
+(deftest monthly-date-param-forwarded-to-task
+  (testing "?date is forwarded to run-monthly! so it can pick the target month"
+    (let [seen-date (atom :unset)]
+      (with-redefs [tasks/run-monthly! (fn [_ & {:keys [date]}] (reset! seen-date date) {})]
+        (let [resp ((scheduling/monthly-handler (ctx))
+                    (req {:date "2026-08-01"} {"date" "2026-08-01"}))]
+          (is (= 202 (:status resp)))
+          (await-job (get-in resp [:body :job :id]))
+          (is (= "2026-08-01" @seen-date)))))))
+
 ;; ── Fail fast: unresolvable selectors ────────────────────────────────────────
 
 (deftest quarterly-unknown-channel-name-fails-fast

@@ -155,12 +155,22 @@
 
 (defn run-monthly!
   "Propose + store sparse monthly overrides for every channel, against the
-   channel's frozen grid for the current month. Returns channel-key → stored
-   overrides record / {:error …} (a missing grid surfaces as an error)."
-  [{:keys [channels] :as ctx}]
-  (log/info "task: monthly overrides")
+   channel's frozen grid for a month.
+
+   `:date` (optional, a 'YYYY-MM-DD' string or LocalDate) selects WHICH month —
+   the overrides are stored for the month of that date; defaults to today. Pass
+   a date in NEXT month (e.g. run a week before month-end) to pre-generate the
+   coming month's overrides. Unlike quarterly, this is always safe to run ahead:
+   overrides are only stored, never attached to a live playout — the weekly
+   expander applies them per-date once that month arrives, so there is no early
+   cutover and no current-month guard is needed.
+
+   Returns channel-key → stored overrides record / {:error …} (a missing grid
+   surfaces as an error)."
+  [{:keys [channels] :as ctx} & {:keys [date]}]
   (let [comps (components ctx)
-        month (plans/month-of (plans/today))]
+        month (plans/month-of (or date (plans/today)))]
+    (log/info "task: monthly overrides" {:month month})
     (into {}
           (for [[channel-key cfg] channels]
             [channel-key
