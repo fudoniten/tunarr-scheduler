@@ -125,7 +125,6 @@
         tag-config (get config :tag-config {})
         categories-config (get config :categories {})
         channel-config (resolve-channel-config config)
-        backends-config (get config :backends {})
         pseudovision-config (get config :pseudovision {})
         bumpers-config (resolve-bumpers-config config)
         grout-config (resolve-grout-config config)]
@@ -134,7 +133,6 @@
      :tunarr/tunabrain-throttler (get-in config [:tunabrain :throttler])
      :tunarr/tunabrain (:tunabrain config)
      :tunarr/pseudovision pseudovision-config
-     :tunarr/backends backends-config
      :tunarr/llm (get config :llm {:provider :mock})
      ;; TODO: Add tts, media-source, tunarr-source, scheduler configs when implemented
      :tunarr/bumpers (assoc bumpers-config
@@ -169,7 +167,6 @@
                           :llm (ig/ref :tunarr/llm)
                           :collection (ig/ref :tunarr/collection)
                           :catalog (ig/ref :tunarr/catalog)
-                          :backends (ig/ref :tunarr/backends)
                           :pseudovision (ig/ref :tunarr/pseudovision)
                           :channels channel-config
                           :logger (ig/ref :tunarr/logger)

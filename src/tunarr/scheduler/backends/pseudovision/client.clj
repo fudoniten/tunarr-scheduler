@@ -5,7 +5,6 @@
    tag management, and streaming capabilities."
   (:require [clj-http.client :as http]
             [cheshire.core :as json]
-            [tunarr.scheduler.backends.protocol :as proto]
             [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
@@ -701,70 +700,23 @@
        :reachable false})))
 
 ;; ---------------------------------------------------------------------------
-;; Backend Protocol Implementation
+;; Backend client
 ;; ---------------------------------------------------------------------------
 
-(defrecord PseudovisionBackend [config]
-  proto/ChannelBackend
-
-  (create-channel [_ channel-spec]
-    (log/info "Creating Pseudovision channel" {:name (:name channel-spec)})
-    (create-channel! config channel-spec))
-
-  (update-channel [_ channel-id updates]
-    (update-channel! config channel-id updates))
-
-  (delete-channel [_ channel-id]
-    (try
-      (request! :delete
-                (api-url config (str "/api/channels/" channel-id))
-                {})
-      {:success true}
-      (catch Exception e
-        {:success false :message (.getMessage e)})))
-
-  (get-channels [_]
-    (list-channels config))
-
-  (upload-schedule [this channel-id schedule]
-    ;; Convert schedule spec to Pseudovision schedule+slots
-    (log/info "Uploading schedule to Pseudovision"
-              {:channel-id channel-id
-               :slots (count (:slots schedule))})
-
-    ;; Create schedule
-    (let [sched (create-schedule! config {:name (:name schedule)})
-          schedule-id (:id sched)]
-
-      ;; Create slots
-      (doseq [[idx slot] (map-indexed vector (:slots schedule))]
-        (add-slot! config schedule-id
-                   (assoc slot :slot-index idx)))
-
-      ;; Attach schedule to the channel's playout (NOT update-channel! —
-      ;; schedule_id lives on playouts, not channels; see attach-schedule!)
-      ;; and rebuild.
-      (attach-schedule! config channel-id schedule-id)
-      (rebuild-playout! config channel-id {:from "now" :horizon 14})
-
-      {:success true :schedule-id schedule-id}))
-
-  (get-schedule [_ channel-id]
-    (let [channel (get-channel config channel-id)
-          schedule-id (:schedule-id channel)]
-      (when schedule-id
-        (get-schedule config schedule-id))))
-
-  (validate-config [_ config]
-    (let [base-url (:base-url config)]
-      (if (and base-url (string? base-url) (not (= "" base-url)))
-        (let [health (health-check config)]
-          (if (:reachable health)
-            {:valid? true :version (:version health)}
-            {:valid? false
-             :errors ["Pseudovision is not reachable" (:error health)]}))
-        {:valid? false
-         :errors ["base-url is required and must be a non-empty string"]}))))
+(defn validate-config
+  "Checks that `config` has a usable :base-url and that Pseudovision is
+   reachable at it. Returns {:valid? true :version v} or
+   {:valid? false :errors [...]}."
+  [config]
+  (let [base-url (:base-url config)]
+    (if (and base-url (string? base-url) (not (= "" base-url)))
+      (let [health (health-check config)]
+        (if (:reachable health)
+          {:valid? true :version (:version health)}
+          {:valid? false
+           :errors ["Pseudovision is not reachable" (:error health)]}))
+      {:valid? false
+       :errors ["base-url is required and must be a non-empty string"]})))
 
 (defn create
   "Create a Pseudovision backend client.
@@ -773,10 +725,10 @@
      :base-url - Pseudovision API base URL (e.g. 'https://pseudovision.kube.sea.fudo.link')
 
    Returns:
-     PseudovisionBackend record implementing ChannelBackend protocol"
+     A client map wrapping `config`; unwrap with `get-config`."
   [config]
   (log/info "Creating Pseudovision backend client" {:base-url (:base-url config)})
-  (->PseudovisionBackend config))
+  {:config config})
 
 (defn get-config
   [client]
