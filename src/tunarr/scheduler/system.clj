@@ -17,7 +17,6 @@
             [tunarr.scheduler.tunabrain :as tunabrain]
             [tunarr.scheduler.llm :as llm]
             [tunarr.scheduler.bumpers :as bumpers]
-            [tunarr.scheduler.backends.protocol :as backend-protocol]
             [tunarr.scheduler.backends.pseudovision.client :as pseudovision]))
 
 (defmethod ig/init-key :tunarr/logger [_ {:keys [level]}]
@@ -192,7 +191,7 @@
     (do
       (log/info "Initializing Pseudovision backend" {:base-url (:base-url config)})
       (let [client (pseudovision/create config)
-            validation (backend-protocol/validate-config client config)]
+            validation (pseudovision/validate-config config)]
         (if (:valid? validation)
           (do
             (log/info "Pseudovision backend validated successfully"
@@ -208,33 +207,6 @@
 
 (defmethod ig/halt-key! :tunarr/pseudovision [_ client]
   (log/info "Shutting down Pseudovision backend")
-  nil)
-
-(defmethod ig/init-key :tunarr/backends [_ config]
-  (log/info "initializing backends" {:backends (keys config)})
-  (let [clients (reduce
-                 (fn [acc [backend-key backend-config]]
-                   (if (:enabled backend-config)
-                     (let [client (case backend-key
-                                    ;; Note: ersatztv backend removed - was never fully implemented
-                                    ;; :tunarr backend also not implemented yet
-                                    (do
-                                      (log/warn "Unknown backend type" {:backend backend-key})
-                                      nil))]
-                       (if client
-                         (do
-                           (log/info "Created backend client" {:backend backend-key})
-                           (assoc acc backend-key client))
-                         acc))
-                     acc))
-                 {}
-                 config)]
-    (log/info "backends initialized" {:enabled (keys clients)})
-    {:config config
-     :clients clients}))
-
-(defmethod ig/halt-key! :tunarr/backends [_ backends]
-  (log/info "shutting down backends")
   nil)
 
 ;; Periodic scheduling is delegated to Kubernetes CronJobs that POST to
@@ -260,7 +232,7 @@
   (log/info "shutting down llm client")
   nil)
 
-(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain throttler llm backends curation-config pseudovision channels]}]
+(defmethod ig/init-key :tunarr/http-server [_ {:keys [port scheduler media tts bumpers tunarr catalog logger job-runner collection tunabrain throttler llm curation-config pseudovision channels]}]
   (http/start! {:port port
                 :job-runner job-runner
                 :collection collection
@@ -268,7 +240,6 @@
                 :tunabrain tunabrain
                 :throttler throttler
                 :llm llm
-                :backends backends
                 :pseudovision pseudovision
                 :channels channels
                 :curation-config curation-config
