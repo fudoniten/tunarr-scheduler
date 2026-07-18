@@ -351,10 +351,14 @@
     {:tags       ["media"]
      :parameters {:path [:map [:library s/LibraryName]]}
      :post       {:summary   "Sync media items from Pseudovision to catalog"
-                  :responses {200 {:body s/SyncFromPseudovisionResponse}
+                  ;; Now async via the job runner (previously ran inline and
+                  ;; could hang the caller for minutes on a large gap). The
+                  ;; response is a JobSubmitResponse: poll GET /api/jobs/:job-id
+                  ;; for progress + the per-library sync result.
+                  :responses {202 {:body s/JobSubmitResponse}
                               400 {:body s/APIError}
                               500 {:body s/APIError}}
-                  :handler   (media/sync-from-pseudovision-handler ctx)}}]
+                  :handler   (media/sync-from-pseudovision-handler ctx)}}] 
 
    ["/api/media/:library/migrate-catalog-ids"
     {:tags       ["media"]
