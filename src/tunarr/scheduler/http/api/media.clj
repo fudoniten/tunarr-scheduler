@@ -331,30 +331,36 @@
         {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn sync-from-pseudovision-handler
-  "Sync media items from Pseudovision to catalog."
-  [{:keys [catalog pseudovision]}]
+  "Sync media items from Pseudovision to catalog. Runs async via the job
+  runner so a large sync (e.g. 200+ missing shows) doesn't time out the
+  HTTP request. Prior to this fix the handler ran synchronously, hanging
+  the caller for ~3 minutes against a 222-row gap and offering no progress
+  in the Jobs UI. See PR notes for the full story."
+  [{:keys [job-runner catalog pseudovision]}]
   (fn [req]
     (try
       (let [library (get-in req [:parameters :path :library])]
-        (when-not library
-          (throw (ex-info "library parameter required" {:status 400})))
-
-        (let [pv-config  (pv-client/get-config pseudovision)]
-
-          (log/info "Syncing from Pseudovision" {:library library})
-
-          (let [result (pv-media-sync/sync-library-from-pseudovision!
-                        catalog
-                        pv-config
-                        library
-                        {})]
-            {:status 200 :body (assoc result :message "Pseudovision sync complete")})))
-      (catch clojure.lang.ExceptionInfo e
-        (let [data (ex-data e)]
-          {:status (or (:status data) 500)
-           :body {:error (util/error-message e)}}))
+        (if-not library
+          {:status 400 :body {:error "library parameter required"}}
+          (submit-job! job-runner
+                       :media/sync-from-pseudovision
+                       library
+                       "library not specified for sync-from-pseudovision"
+                       (fn [{:keys [library report-progress]}]
+                         (let [pv-config (pv-client/get-config pseudovision)
+                               result (pv-media-sync/sync-library-from-pseudovision!
+                                       catalog
+                                       pv-config
+                                       library
+                                       {:report-progress report-progress})]
+                           (log/info "sync-from-pseudovision complete"
+                                     {:library library
+                                      :synced (:synced result)
+                                      :skipped (:skipped result)
+                                      :error-count (count (:errors result))})
+                           result)))))
       (catch Exception e
-        (log/error e "Error syncing from Pseudovision")
+        (log/error e "Error during Pseudovision media sync")
         {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn migrate-catalog-ids-handler

@@ -77,6 +77,7 @@
    :media/retag-episodes
    :media/curate-all
    :media/pseudovision-sync
+   :media/sync-from-pseudovision
    :media/tag-audit
    :media/tag-triage
    :media/scheduling-quarterly
@@ -189,12 +190,8 @@
    [:items-migrated   {:optional true} :int]
    [:errors           {:optional true} [:vector :string]]])
 
-(def SyncFromPseudovisionResponse
-  [:map
-   [:message :string]
-   [:synced  {:optional true} :int]
-   [:created {:optional true} :int]
-   [:updated {:optional true} :int]])
+;; SyncFromPseudovisionResponse removed: /api/media/:library/sync-from-pseudovision
+;; now runs async via the job runner and returns JobSubmitResponse (202).
 
 (def MigrateCatalogIdsResponse
   [:map

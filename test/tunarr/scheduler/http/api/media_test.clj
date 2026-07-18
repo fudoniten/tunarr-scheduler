@@ -154,3 +154,57 @@
                                              :tunabrain nil :throttler nil :curation-config nil})
                   {:parameters {:query {}}})]
         (is (= 400 (:status resp)))))))
+
+;; ---------------------------------------------------------------------------
+;; sync-from-pseudovision handler — runs ASYNC via the job runner.
+;; Prior fix: it ran synchronously, hanging the caller for ~3 minutes against
+;; a 222-row gap. Now it returns 202 with a :job immediately, and the actual
+;; work — including :report-progress so the Jobs page can show progress —
+;; happens in the runner.
+;; ---------------------------------------------------------------------------
+
+(deftest sync-from-pseudovision-returns-202-with-job
+  (testing "POST /api/media/:library/sync-from-pseudovision returns 202 + a :job, not 200"
+    (let [r (runner/create {})
+          handler (media/sync-from-pseudovision-handler
+                   {:job-runner r :catalog nil :pseudovision nil})
+          resp (handler {:parameters {:path {:library "shows"}}})]
+      (is (= 202 (:status resp)))
+      (is (contains? (:body resp) :job)
+          "body contains :job (JobSubmitResponse), not the old :synced/:message shape")
+      (is (contains? (get-in resp [:body :job]) :id))
+      (runner/shutdown! r))))
+
+(deftest sync-from-pseudovision-runs-via-runner-not-inline
+  (testing "the handler returns before sync-library-from-pseudovision! would block"
+    ;; If the handler still ran the work inline, the response wouldn't come back
+    ;; until after the redef'd sync fn returned. We hold the sync fn open on a
+    ;; promise; the response must arrive while the promise is still unresolved.
+    (let [gate (promise)
+          r    (runner/create {})
+          handler (media/sync-from-pseudovision-handler
+                   {:job-runner r :catalog nil
+                    :pseudovision {:config {:base-url "http://pv"}}})
+          resp (future
+                 (handler {:parameters {:path {:library "shows"}}}))]
+      (with-redefs [pv-client/get-config (fn [_] {:base-url "http://pv"})
+                    pv-media-sync/sync-library-from-pseudovision!
+                    (fn [_ _ _ _]
+                      (deref gate)        ; block until released
+                      {:synced 0 :skipped 0 :errors []})]
+        (Thread/sleep 100)                ; give the runner time to dispatch
+        (let [r1 (deref resp 500 :timeout)]
+          (is (not= :timeout r1)
+              "handler returned immediately (not blocked on sync)"))
+        (deliver gate {:synced 0 :skipped 0 :errors []})
+        ;; let the runner finish so we can shut down cleanly
+        (Thread/sleep 100))
+      (runner/shutdown! r))))
+
+(deftest sync-from-pseudovision-400-when-no-library
+  (testing "library missing → 400 (not the previous throw + 500)"
+    (let [r (runner/create {})
+          handler (media/sync-from-pseudovision-handler
+                   {:job-runner r :catalog nil :pseudovision nil})]
+      (is (= 400 (:status (handler {:parameters {:path {}}}))))
+      (runner/shutdown! r))))
