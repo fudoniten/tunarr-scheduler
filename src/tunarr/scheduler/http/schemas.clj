@@ -123,7 +123,14 @@
    ;; stripped `:result` even though the runner stored it. That hid the
    ;; :synced/:skipped/:errors counts from sync-from-pseudovision and masked
    ;; the silent CHECK-constraint failures uncovered in 2026-07-18.
-   [:result   {:optional true} [:maybe :map]]])
+   ;;
+   ;; FOLLOWUP BUG (live-tested 2026-07-19): I originally wrote this as
+   ;; `[:maybe :map]`, but in Malli that is closed-empty — it permits the
+   ;; empty map and strips every other key. Live response confirmed
+   ;; `:result: {}` for jobs whose runner actually stored
+   ;; `{:synced … :skipped … :errors …}`. The closed-false shape mirrors
+   ;; every other `[:maybe [:map {:closed false}]]` in this file.
+   [:result   {:optional true} [:maybe [:map {:closed false}]]]])
 
 (def JobSubmitResponse
   [:map

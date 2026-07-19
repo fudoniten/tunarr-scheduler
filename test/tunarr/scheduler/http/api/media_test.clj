@@ -1,6 +1,8 @@
 (ns tunarr.scheduler.http.api.media-test
   (:require [clojure.test :refer [deftest is testing]]
+            [malli.core :as m]
             [tunarr.scheduler.http.api.media :as media]
+            [tunarr.scheduler.http.schemas :as s]
             [tunarr.scheduler.media :as media-ns]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.media.pseudovision-media-sync :as pv-media-sync]
@@ -245,8 +247,8 @@
            (#'pv-media-sync/classify-item-kind
             {:kind "movie" :name "12 Angry Men"})))))
 
-(deftest classify-item-kind-episode-with-full-parents
-  (testing "kind=\"episode\" + parent-id + season-number + episode-number → :episode"
+(deftest classify-item-kind-episode-with-parent
+  (testing "PV kind=\"episode\" + parent-id (Jellyfin or PV) → :episode"
     (is (= :episode
            (#'pv-media-sync/classify-item-kind
             {:kind "episode"
@@ -255,15 +257,28 @@
              :position 1
              :name "Pilot"})))))
 
-(deftest classify-item-kind-malformed-episode-falls-to-filler
-  (testing "kind=\"episode\" but no parent-id is :filler -- lets the
-            :show above do the correct classification"
+(deftest classify-item-kind-pv-episode-with-only-parent-id
+  (testing "PV kind=\"episode\" + parent-id but NO season-number/episode-number → :episode.
+            Regression for the 2026-07-19 silent bug: PV's :episode rows don't
+            carry :season-number/:episode-number (only :parent_id + :position),
+            so the original cond branch (which required season+episode both non-nil)
+            fell through to :filler. Live log tail surfaced this — see PR #118."
+    (is (= :episode
+           (#'pv-media-sync/classify-item-kind
+            {:kind "episode"
+             :parent-id 53781
+             :position 20
+             :name "Karate Island"})))))
+
+(deftest classify-item-kind-orphan-episode-falls-to-filler
+  (testing "PV kind=\"episode\" but no parent-id → :filler (lost episode, no
+            parent to attach to). Demonstrates the new cond correctly demands
+            a parent for the episode classification."
     (is (= :filler
            (#'pv-media-sync/classify-item-kind
             {:kind "episode"
              :parent-id nil
-             :season-number nil
-             :position nil
+             :position 20
              :name "Orphaned"})))))
 
 (deftest catalog-item-show-string-becomes-series-media-type
@@ -297,7 +312,7 @@
   (testing "PV kind=\"movie\" + string → :movie media_type + :movie item_kind"
     (let [out (#'pv-media-sync/pseudovision-item->catalog-item
                {:id 50374
-                :remote-key "0ac31cb1f44ecedc3c1be9e87a3f1fdb"
+                :remote-key "0ac31cb1b1f44ecedc3c1be9e87a3f1fdb"
                 :kind "movie"
                 :name "12 Angry Men"
                 :year 1957
@@ -307,6 +322,38 @@
                                           (= k :tunarr.scheduler.media/type))
                                         out))]
       (is (= :movie (second media-type-key))))))
+
+(deftest catalog-item-pv-episode-gets-episode-item-kind
+  (testing "PV kind=\"episode\" with parent_id+position and no season-number →
+            produces a catalog row with :episode item_kind (not :filler) so
+            the catalog INSERT no longer trips chk_episode_numbers. Regression
+            for the silent 2026-07-19 episode sync issue."
+    (let [out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id 77397
+                :remote-key "69aab4bccd673c50c6cccfb66abfdd9d"
+                :kind "episode"
+                :name "Karate Island"
+                :year 2006
+                :parent-id 53781
+                :position 20
+                :release-date "2006-01-01"}
+              30)
+          item-type-key (first (filter (fn [[k _]]
+                                         (= k :tunarr.scheduler.media/type))
+                                       out))
+          item-kind-key (first (filter (fn [[k _]]
+                                         (= k :tunarr.scheduler.media/item-kind))
+                                       out))
+          ep-num-key    (first (filter (fn [[k _]]
+                                         (= k :tunarr.scheduler.media/episode-number))
+                                       out))
+          parent-id-key (first (filter (fn [[k _]]
+                                         (= k :tunarr.scheduler.media/parent-id))
+                                       out))]
+      (is (= :episode (second item-type-key))  "media_type=:episode")
+      (is (= :episode (second item-kind-key))  "item_kind=:episode (was :filler)")
+      (is (= 20 (second ep-num-key))           ":position became episode_number")
+      (is (= 53781 (second parent-id-key))     ":parent_id propagated"))))
 
 ;; ---------------------------------------------------------------------------
 ;; /api/jobs/:id must surface :result. Regression for the silent failure mode
@@ -337,3 +384,40 @@
       (is (= "boom"
              (-> job-info :result :errors first :error)))
       (runner/shutdown! r))))
+
+;; ---------------------------------------------------------------------------
+;; Followup regression — the JOB schema must admit a non-empty :result map.
+;;
+;; PR #117 added [:result {:optional true} [:maybe :map]] but I wrote
+;; `[:maybe :map]` instead of `[:maybe [:map {:closed false}]]`. Malli's
+;; `[:maybe :map]` is closed-empty by default: it permits the empty map and
+;; strips every other key. Live verification on 2026-07-19 confirmed the
+;; runner was storing `{:synced … :skipped … :errors …}` but the API
+;; returned `result: {}`. This test feeds a finished-job-shaped map directly
+;; through the s/Job schema (the same one Reitit applies to /api/jobs/:id
+;; responses) and asserts the keys survive.
+;; ---------------------------------------------------------------------------
+
+(deftest job-schema-preserves-result-keys
+  (testing "s/Job accepts a non-empty :result map with arbitrary keys"
+    (let [job-with-result {:id "abc-123"
+                           :type :media/sync-from-pseudovision
+                           :status :succeeded
+                           :metadata {}
+                           :progress {:phase "syncing" :page 25 :item 436}
+                           :duration-ms 172000
+                           :created-at "2026-07-19T01:15:54Z"
+                           :started-at "2026-07-19T01:15:54Z"
+                           :completed-at "2026-07-19T01:18:46Z"
+                           :result {:synced 41
+                                    :skipped 0
+                                    :errors [{:item-id 51820
+                                              :name "Gumball"
+                                              :error "boom"}]}}
+          ;; Malli 0.20: `m/validate` returns boolean (true=valid, false=invalid).
+          ;; `m/explain` returns nil on valid or a map of `:errors` on invalid.
+          ;; We use `explain` so the failure message can include the errors.
+          errors (m/explain s/Job job-with-result)]
+      (is (not errors)
+          (str "s/Job must accept a finished job map with non-empty :result; "
+               "got explain errors: " (pr-str errors))))))
