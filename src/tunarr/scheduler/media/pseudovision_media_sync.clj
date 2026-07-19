@@ -34,7 +34,20 @@
 
    IMPORTANT: Pseudovision returns `:kind` as a JSON string (e.g. \"show\",
    \"movie\", \"episode\") because it's stored as a Postgres enum and exposed
-   via PostgREST. We coerce it to a keyword here so the cond branches match."
+   via PostgREST. We coerce it to a keyword here so the cond branches
+   match.
+
+   PV's data model differs from Jellyfin's in one important way: an episode
+   row has `parent_id` + `position` but **no `season-number` /
+   `episode-number` columns**. So the original \"season + episode both
+   non-nil\" requirement can never fire for a PV episode — every PV
+   `:episode` was falling through to `:filler`, producing rows with
+   `media_type='episode'` but `item_kind='filler'`, which trips
+   `chk_episode_numbers` at INSERT time. (Discovered via live log tail
+   on 2026-07-19, after PR #117 fixed the keyword-vs-string bug for
+   shows but the same class of bug still bit episodes because the cond
+   logic itself was Jellyfin-shaped.) The fix: treat `kind=:episode`
+   AND a non-nil `parent-id` as sufficient evidence of an episode."
   [pv-item]
   (let [parent-id (:parent-id pv-item)
         season-number (:season-number pv-item)
@@ -50,10 +63,13 @@
         is-episode (= kind :episode)]
 
     (cond
-      ;; Has parent relationship AND proper episode structure → episode
-      (and parent-id is-episode season-number episode-number) :episode
+      ;; Explicit episode kind AND a parent (series/season parent): episode.
+      ;; PV episodes always have `parent_id`, no season/episode columns, so
+      ;; requiring those used to mis-classify every episode as :filler.
+      (and is-episode parent-id) :episode
 
       ;; Has season/episode structure but no parent → likely series entry
+      ;; (Jellyfin-shaped data only; PV never falls here.)
       (and season-number episode-number (not parent-id)) :series
 
       ;; Explicitly marked as show/series and no parent → series
@@ -108,13 +124,18 @@
         premiere (if (= 4 (count premiere-date-str))
                    (java.time.LocalDate/of year 1 1)  ; Construct date from year
                    (java.time.LocalDate/parse premiere-date-str))
-        ;; Episode numbers - only required for :episode kind, optional for filler
+        ;; Episode numbers - only required for :episode kind, optional for filler.
+        ;; PV episodes only have :position (used as episode-number); they don't
+        ;; carry :season-number, so we can't synthesize a season number from PV
+        ;; alone. season_number is nullable in the catalog row anyway — the
+        ;; schema's `chk_episode_numbers` accepts NULL for seasons here because
+        ;; PV's hierarchy already encodes it (the parent season row holds it).
         season-number (when (= item-kind :episode)
                         (:season-number pv-item))
         episode-number (when (= item-kind :episode)
                          (or (:position pv-item)
                              (:episode-number pv-item)
-                             (:index-number pv-item)))]
+                             (:index-number pv-item)))] ; PV-shape fallback when no Jellyfin columns
     (log/debug "Mapping PV item to catalog"
                {:pv-id (:id pv-item)
                 :name (:name pv-item)
@@ -141,9 +162,16 @@
       ::media/parent-id    (:parent-id pv-item)
       ::media/production-year year
       ::media/premiere     premiere}
-     (when (and season-number episode-number)
-       {::media/season-number season-number
-        ::media/episode-number episode-number}))))
+     ;; PV episodes always have an episode-number (from :position) but no
+     ;; season-number — the season is encoded in the parent row. We therefore
+     ;; write episode-number whenever it's known, regardless of season-number.
+     ;; (Originally required both to be non-nil, which silently dropped every
+     ;; :position-derived episode-number and re-introduced the same CHECK
+     ;; constraint problem the cond fix above is meant to solve.)
+     (when episode-number
+       {::media/episode-number episode-number})
+     (when season-number
+       {::media/season-number season-number}))))
 
 (defn- library-kind->catalog-library
   "Map Pseudovision library kind to tunarr-scheduler library keyword."
