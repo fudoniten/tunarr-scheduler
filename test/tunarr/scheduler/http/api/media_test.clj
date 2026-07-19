@@ -208,3 +208,132 @@
                    {:job-runner r :catalog nil :pseudovision nil})]
       (is (= 400 (:status (handler {:parameters {:path {}}}))))
       (runner/shutdown! r))))
+
+;; ---------------------------------------------------------------------------
+;; Pseudovision kind classification.
+;;
+;; Background: on 2026-07-18 we discovered that the sync-from-pseudovision job
+;; "succeeded" but every show + most episodes silently failed to land in
+;; tunarr-scheduler's media table because classify-item-kind and the
+;; pseudovision-item->catalog-item :case compared against Clojure keywords
+;; (:show/:movie/:episode) while PV's `:kind` actually arrives as a string
+;; ("show"/"movie"/"episode") -- PV stores it as a Postgres enum exposed via
+;; PostgREST. So every cond/case fell through to the default and the row was
+;; inserted with media_type='show' (which violates media_media_type_check)
+;; or item_kind='filler' (which violates chk_episode_numbers on episodes).
+;;
+;; These regression tests pin both the corrected keyword normalization and
+;; the show→series media_type mapping. If either regresses, sync-from-pv
+;; will silently break again and hundreds of items will fail to land in TS.
+;; ---------------------------------------------------------------------------
+
+(deftest classify-item-kind-show-as-string-is-series
+  (testing "PV kind=\"show\" (string) → :series"
+    (is (= :series
+           (#'pv-media-sync/classify-item-kind
+            {:kind "show" :parent-id nil :name "Gumball"})))))
+
+(deftest classify-item-kind-show-as-keyword-is-series
+  (testing "PV kind=:show (keyword) → :series (defensive: accept either form)"
+    (is (= :series
+           (#'pv-media-sync/classify-item-kind
+            {:kind :show :parent-id nil :name "Gumball"})))))
+
+(deftest classify-item-kind-movie-as-string
+  (testing "PV kind=\"movie\" (string) → :movie (not :filler)"
+    (is (= :movie
+           (#'pv-media-sync/classify-item-kind
+            {:kind "movie" :name "12 Angry Men"})))))
+
+(deftest classify-item-kind-episode-with-full-parents
+  (testing "kind=\"episode\" + parent-id + season-number + episode-number → :episode"
+    (is (= :episode
+           (#'pv-media-sync/classify-item-kind
+            {:kind "episode"
+             :parent-id 100
+             :season-number 1
+             :position 1
+             :name "Pilot"})))))
+
+(deftest classify-item-kind-malformed-episode-falls-to-filler
+  (testing "kind=\"episode\" but no parent-id is :filler -- lets the
+            :show above do the correct classification"
+    (is (= :filler
+           (#'pv-media-sync/classify-item-kind
+            {:kind "episode"
+             :parent-id nil
+             :season-number nil
+             :position nil
+             :name "Orphaned"})))))
+
+(deftest catalog-item-show-string-becomes-series-media-type
+  (testing "PV kind=\"show\" maps media_type to :series (not :show), so the
+            `media_media_type_check` CHECK constraint passes"
+    (let [out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id 51820
+                :remote-key "6f8dee6e8463a34167babc45e467adb4"
+                :kind "show"
+                :name "The Amazing World of Gumball"
+                :year 2011
+                :parent-id nil
+                :release-date "2011-05-03"}
+              30)
+          ;; ::media/type === :series, not :show and not :filler
+          media-type-key (first (filter (fn [[k _]]
+                                          (= k :tunarr.scheduler.media/type))
+                                        out))
+          item-kind-key (first (filter (fn [[k _]]
+                                          (= k :tunarr.scheduler.media/item-kind))
+                                       out))]
+      (is (= :series (second media-type-key))
+          "media_type must be :series so PostgreSQL CHECK allows it")
+      (is (= :series (second item-kind-key))
+          "item_kind must be :series so chk_episode_numbers doesn't fire")
+      (is (= "The Amazing World of Gumball"
+             (get out :tunarr.scheduler.media/name))
+          "name is preserved through normalization"))))
+
+(deftest catalog-item-movie-string-becomes-movie-media-type
+  (testing "PV kind=\"movie\" + string → :movie media_type + :movie item_kind"
+    (let [out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id 50374
+                :remote-key "0ac31cb1f44ecedc3c1be9e87a3f1fdb"
+                :kind "movie"
+                :name "12 Angry Men"
+                :year 1957
+                :release-date "1957-04-10"}
+              30)
+          media-type-key (first (filter (fn [[k _]]
+                                          (= k :tunarr.scheduler.media/type))
+                                        out))]
+      (is (= :movie (second media-type-key))))))
+
+;; ---------------------------------------------------------------------------
+;; /api/jobs/:id must surface :result. Regression for the silent failure mode
+;; that masked the 2026-07-18 sync issue: the runner stored :result in memory
+;; but the Job Malli schema didn't include it, so reitit stripped it before
+;; serialization → /api/jobs/:id returned :status:succeeded with no counts.
+;; ---------------------------------------------------------------------------
+
+(deftest job-result-survives-api-serialization
+  (testing "submitting a job whose task-fn returns a result map exposes that
+            map under :result on the job record returned by job-info"
+    (let [r (runner/create {})
+          sent (runner/submit-job!
+                r
+                {:type :media/sync-from-pseudovision}
+                (fn [_]
+                  {:synced 41
+                   :skipped 0
+                   :errors [{:item-id 51820
+                             :name "Gumball"
+                             :error "boom"}]}))
+          job-info (await-terminal r (:id sent))]
+      (is (= :succeeded (:status job-info)))
+      ;; The runner's ->public-job emits :result when status is terminal;
+      ;; formerly the Job Malli schema dropped it before serialization.
+      (is (= 41 (:synced (or (:result job-info) {})))
+          ":result is preserved by the public-job serializer for the Job schema")
+      (is (= "boom"
+             (-> job-info :result :errors first :error)))
+      (runner/shutdown! r))))

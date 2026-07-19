@@ -117,7 +117,13 @@
                                         [:type :string]]]]
    [:created-at {:optional true} [:maybe :string]]
    [:started-at {:optional true} [:maybe :string]]
-   [:completed-at {:optional true} [:maybe :string]]])
+   [:completed-at {:optional true} [:maybe :string]]
+   ;; Result of the task-fn (only present once the job is :succeeded or :failed).
+   ;; Previously this was missing from the schema, so /api/jobs/:id always
+   ;; stripped `:result` even though the runner stored it. That hid the
+   ;; :synced/:skipped/:errors counts from sync-from-pseudovision and masked
+   ;; the silent CHECK-constraint failures uncovered in 2026-07-18.
+   [:result   {:optional true} [:maybe :map]]])
 
 (def JobSubmitResponse
   [:map
