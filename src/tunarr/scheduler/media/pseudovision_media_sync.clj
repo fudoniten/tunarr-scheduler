@@ -28,31 +28,40 @@
 
 (defn- classify-item-kind
   "Determine item_kind based on Pseudovision metadata structure.
-  
+
    This replaces the strict episode number requirement with intelligent
-   classification that allows YouTube/orphaned content to be treated as filler."
+   classification that allows YouTube/orphaned content to be treated as filler.
+
+   IMPORTANT: Pseudovision returns `:kind` as a JSON string (e.g. \"show\",
+   \"movie\", \"episode\") because it's stored as a Postgres enum and exposed
+   via PostgREST. We coerce it to a keyword here so the cond branches match."
   [pv-item]
   (let [parent-id (:parent-id pv-item)
         season-number (:season-number pv-item)
-        episode-number (or (:position pv-item) 
-                          (:episode-number pv-item) 
+        episode-number (or (:position pv-item)
+                          (:episode-number pv-item)
                           (:index-number pv-item))
-        kind (:kind pv-item)
+        ;; Normalize: PV kind is a string ("show"/"movie"/"episode"/...);
+        ;; accept either form defensively so this works regardless of where
+        ;; the data came from (JSON-string vs raw map).
+        kind (cond
+               (keyword? (:kind pv-item)) (:kind pv-item)
+               (some? (:kind pv-item))    (keyword (:kind pv-item)))
         is-episode (= kind :episode)]
-    
+
     (cond
       ;; Has parent relationship AND proper episode structure → episode
       (and parent-id is-episode season-number episode-number) :episode
-      
+
       ;; Has season/episode structure but no parent → likely series entry
       (and season-number episode-number (not parent-id)) :series
-      
+
       ;; Explicitly marked as show/series and no parent → series
       (and (#{:show :series} kind) (not parent-id)) :series
-      
+
       ;; Movie type → movie
       (= kind :movie) :movie
-      
+
       ;; Everything else → filler (YouTube, orphaned content, etc.)
       :else :filler)))
 
@@ -64,22 +73,36 @@
   "Convert a Pseudovision media_item to tunarr-scheduler catalog format.
 
    Uses intelligent classification to determine item_kind, allowing filler
-   content to bypass episode structure requirements. Preserves Jellyfin ID 
-   mapping for tag sync."
+   content to bypass episode structure requirements. Preserves Jellyfin ID
+   mapping for tag sync.
+
+   IMPORTANT: PV returns `:kind` as a JSON string (e.g. \"show\", \"movie\");
+   we coerce to a keyword up-front so the `case` matches the right arm.
+   Without this normalization every item falls through to the default arm
+   and ends up with `media_type='show'` — which violates the
+   `media_media_type_check` Postgres CHECK constraint (the allowed TS value
+   is 'series')."
   [pv-item catalog-library-id]
-  (let [item-kind (classify-item-kind pv-item)
-        item-type (case (:kind pv-item)
-                    :show   :series      ; Map PV \"show\" to TS \"series\"
-                    :episode :episode    ; Keep as-is
-                    :season  :season     ; Keep as-is
-                    :movie   :movie      ; Keep as-is
-                    :song    :song       ; Keep as-is
-                    :music_video :music-video  ; Map PV \"music_video\" to TS \"music-video\"
-                    :image   :image      ; Keep as-is
-                    (keyword (:kind pv-item :movie)))  ; Default to :movie if kind missing
+  (let [kind (cond
+               (keyword? (:kind pv-item)) (:kind pv-item)
+               (some? (:kind pv-item))    (keyword (:kind pv-item)))
+        item-kind (classify-item-kind pv-item)
+        item-type (case kind
+                    :show        :series      ; Map PV "show" to TS "series"
+                    :episode     :episode     ; Keep as-is
+                    :season      :season      ; Keep as-is
+                    :movie       :movie       ; Keep as-is
+                    :song        :song        ; Keep as-is
+                    :music-video :music-video ; Map PV "music_video" to TS "music-video"
+                    :image       :image       ; Keep as-is
+                    ;; If we still have nothing recognizable, fall through to
+                    ;; the default below. Branching on a non-keyword value
+                    ;; here used to be how this whole module silently
+                    ;; mis-classified every show as :filler.
+                    (keyword (name (or kind :movie))))
         year (or (:year pv-item) 1970)  ; Default to 1970 if year is missing
         ;; Premiere is required - use release-date if available, else construct from year
-        ;; Convert to LocalDate for proper SQL DATE type (needs format: \"YYYY-MM-DD\")
+        ;; Convert to LocalDate for proper SQL DATE type (needs format: "YYYY-MM-DD")
         premiere-date-str (or (:release-date pv-item)
                               (str year))
         premiere (if (= 4 (count premiere-date-str))
@@ -95,6 +118,8 @@
     (log/debug "Mapping PV item to catalog"
                {:pv-id (:id pv-item)
                 :name (:name pv-item)
+                :raw-kind (:kind pv-item)
+                :normalized-kind kind
                 :item-kind item-kind
                 :item-type item-type
                 :year year
@@ -173,10 +198,24 @@
                 (catalog/add-media! catalog catalog-item)
                 nil
                 (catch Exception e
+                  ;; Surface ex-message too — the old form logged only the
+                  ;; item's keys, which left the actual cause opaque when the
+                  ;; exception was a Postgres CHECK constraint violation
+                  ;; (the post-mortem was: media_type='show' → CHECK
+                  ;; violation, or item_kind='filler' on an episode →
+                  ;; chk_episode_numbers violation). Once the bug is fixed
+                  ;; these lines should almost never fire, so when they do
+                  ;; we want the engineer to see exactly why.
                   (log/warn e "Failed to sync item"
                             {:item-id (:id item-stub)
+                             :item-name (:name item)
+                             :raw-item-kind (:kind item)
+                             :ex-message (ex-message e)
                              :item-keys (keys item)})
-                  {:item-id (:id item-stub) :error (.getMessage e)})))]
+                  {:item-id (:id item-stub)
+                   :name (:name item)
+                   :raw-item-kind (:kind item)
+                   :error (ex-message e)})))]  
     (report-progress {:phase "syncing" :page page :item idx})
     {:synced (if (or err should-skip?) 0 1)
      :skipped (if should-skip? 1 0)
