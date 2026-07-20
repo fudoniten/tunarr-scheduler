@@ -289,6 +289,19 @@
    [:value :string]
    [:usage-count {:optional true} [:maybe :int]]])
 
+;; Channel descriptions live alongside the values list but in a separate
+;; payload so the simple `/values` endpoint stays cheap to call (it is
+;; hit on every browse page load). The richer `/descriptions` endpoint
+;; is what Grout fetches once at startup to seed its Tunabrain prompt
+;; with per-channel context — without it the LLM has to guess what
+;; `toontown` means and often invents a hallucinated value
+;; (e.g. `educational`) that the controlled-vocabulary guard then
+;; drops, leaving rows with `channel: null`.
+(def DimensionDescriptionInfo
+  [:map
+   [:value :string]
+   [:description :string]])
+
 (def DimensionListResponse
   [:map
    [:dimensions [:vector DimensionInfo]]])
@@ -296,6 +309,10 @@
 (def DimensionValueListResponse
   [:map
    [:values [:vector DimensionValueInfo]]])
+
+(def DimensionDescriptionListResponse
+  [:map
+   [:values [:vector DimensionDescriptionInfo]]])
 
 (def MediaCategoriesResponse
   [:map
