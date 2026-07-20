@@ -176,6 +176,62 @@
         (log/error e "Error fetching channel descriptions")
         {:status 500 :body {:error (util/error-message e)}}))))
 
+(defn- category-value->description
+  "Normalize a `:categories` value entry (a plain keyword/string, or a
+  `{:value ... :description ...}` map) into `{:value :description}`, the
+  same shape `get-channel-descriptions-handler` returns for channels."
+  [v]
+  (if (map? v)
+    {:value (name (:value v)) :description (or (:description v) "")}
+    {:value (name v) :description ""}))
+
+(defn- merge-dimension-values
+  "Union two `:values` vectors of `{:value :description}` maps by `:value`,
+  keeping the first description seen for a value that appears in both."
+  [a b]
+  (->> (concat a b)
+       (reduce (fn [by-value {:keys [value] :as entry}]
+                 (if (contains? by-value value) by-value (assoc by-value value entry)))
+               {})
+       vals
+       (sort-by :value)
+       vec))
+
+(defn get-dimension-descriptions-handler
+  "Return every dimension's controlled vocabulary paired with human-readable
+  descriptions: `channel` (from `:channels` config) plus every dimension
+  defined under `:categories` (audience, freshness, season, time-slot, ...).
+
+  This generalizes `get-channel-descriptions-handler` to the full dimension
+  set so Grout can seed all of Tunabrain's controlled vocabulary at startup,
+  not just channel's - an LLM guessing at an opaque slug and hallucinating a
+  value the vocabulary guard then drops is a problem for every dimension,
+  not only channel."
+  [{:keys [curation-config]}]
+  (fn [_]
+    (try
+      (let [{:keys [categories channels]} curation-config
+            channel-dim   {:description ""
+                           :values (vec (sort-by :value
+                                                  (map (fn [[ch-name cfg]]
+                                                         {:value       (name ch-name)
+                                                          :description (or (::media/channel-description cfg) "")})
+                                                       (or channels {}))))}
+            category-dims (into {}
+                                 (map (fn [[cat-name {:keys [description values]}]]
+                                        [(name cat-name)
+                                         {:description (or description "")
+                                          :values (vec (sort-by :value (map category-value->description values)))}]))
+                                 categories)
+            dims (if (contains? category-dims "channel")
+                   (update-in category-dims ["channel" :values] merge-dimension-values (:values channel-dim))
+                   (assoc category-dims "channel" channel-dim))]
+        {:status 200
+         :body {:dimensions dims}})
+      (catch Exception e
+        (log/error e "Error fetching dimension descriptions")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
 (defn get-media-categories-handler
   "Get all dimension categories for a specific media item."
   [{:keys [catalog]}]

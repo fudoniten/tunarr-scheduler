@@ -897,3 +897,63 @@
           body     (parse-json-response response)]
       (is (= 200 (:status response)))
       (is (= [] (:values body))))))
+
+;; ------------------------------------------------------------------
+;; All-dimensions descriptions endpoint
+;;
+;; Generalizes the channel-only endpoint above: Grout fetches
+;; /api/dimensions/descriptions once at startup to seed every dimension's
+;; controlled vocabulary (not just channel's) into Tunabrain's enrichment
+;; prompt.
+;; ------------------------------------------------------------------
+
+(def ^:private test-curation-config
+  {:channels   test-channels-config
+   :categories {:audience   {:description "Who this content is appropriate for"
+                             :values [{:value :kids :description "Appropriate for young children"}
+                                      {:value :family :description "Appropriate for the whole family"}
+                                      :teen
+                                      :adult]}
+                :freshness  {:description "Era or vintage of content"
+                             :values [:classic :retro :modern :contemporary]}
+                :time-slot  {:values [:daytime :primetime :late-night]}}})
+
+(deftest dimension-descriptions-returns-all-dimensions-test
+  (testing "GET /api/dimensions/descriptions returns channel plus every category dimension"
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog *catalog*
+                                    :tunabrain mock-tunabrain
+                                    :curation-config test-curation-config})
+          response (handler (mock/request :get "/api/dimensions/descriptions"))
+          body     (parse-json-response response)
+          dims     (:dimensions body)]
+      (is (= 200 (:status response)))
+      ;; parse-json-response keywordizes keys, including the dimension-name
+      ;; keys of the `:dimensions` map-of
+      (is (= #{:channel :audience :freshness :time-slot} (set (keys dims))))
+      ;; channel values come from :channels, same as the dedicated endpoint
+      (is (= ["britannia" "infobytes" "no-description" "toontown"]
+             (mapv :value (get-in dims [:channel :values]))))
+      ;; category values support both plain keywords and {:value :description} maps
+      (let [audience-by-value (into {} (map (juxt :value :description))
+                                    (get-in dims [:audience :values]))]
+        (is (= #{"kids" "family" "teen" "adult"} (set (keys audience-by-value))))
+        (is (clojure.string/includes? (get audience-by-value "kids") "young children"))
+        ;; plain-keyword values get an empty description, not omitted
+        (is (= "" (get audience-by-value "teen"))))
+      ;; dimension-level description is preserved
+      (is (= "Era or vintage of content" (get-in dims [:freshness :description])))
+      ;; a dimension with no :description key still gets an empty string
+      (is (= "" (get-in dims [:time-slot :description]))))))
+
+(deftest dimension-descriptions-empty-config-test
+  (testing "GET /api/dimensions/descriptions with no curation config falls back to just an empty channel dimension"
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog *catalog*
+                                    :tunabrain mock-tunabrain})
+          response (handler (mock/request :get "/api/dimensions/descriptions"))
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= {:channel {:description "" :values []}} (:dimensions body))))))

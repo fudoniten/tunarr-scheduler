@@ -314,6 +314,19 @@
   [:map
    [:values [:vector DimensionDescriptionInfo]]])
 
+;; The generic per-dimension counterpart to DimensionDescriptionListResponse:
+;; covers `channel` plus every configured `:categories` dimension (audience,
+;; freshness, season, time-slot, ...) in one call, so Grout can seed all of
+;; Tunabrain's controlled vocabulary at startup instead of only channel's.
+(def AllDimensionsDescriptionInfo
+  [:map
+   [:description {:optional true} :string]
+   [:values [:vector DimensionDescriptionInfo]]])
+
+(def AllDimensionDescriptionsResponse
+  [:map
+   [:dimensions [:map-of :string AllDimensionsDescriptionInfo]]])
+
 (def MediaCategoriesResponse
   [:map
    [:categories [:map-of :string [:vector :string]]]])
