@@ -461,10 +461,17 @@
 
     ["/api/dimensions/channel/descriptions"
      {:tags    ["browse"]
-      :get     {:summary   "List channel values paired with their human-readable description. Used by Grout to seed Tunabrain's per-channel context so the model can pick a channel from opaque slugs (e.g. toontown) instead of guessing a hallucinated value (e.g. educational)."
+      :get     {:summary   "DEPRECATED: use /api/dimensions/descriptions instead, which returns channel plus every other dimension. List channel values paired with their human-readable description. Used by Grout to seed Tunabrain's per-channel context so the model can pick a channel from opaque slugs (e.g. toontown) instead of guessing a hallucinated value (e.g. educational)."
                  :responses {200 {:body s/DimensionDescriptionListResponse}
                              500 {:body s/APIError}}
                  :handler   (browse/get-channel-descriptions-handler ctx)}}]
+
+    ["/api/dimensions/descriptions"
+     {:tags    ["browse"]
+      :get     {:summary   "List every dimension's controlled vocabulary (channel, audience, freshness, season, time-slot, ...) paired with human-readable descriptions. Used by Grout to seed Tunabrain's enrichment prompt so the model can pick from the actual configured vocabulary instead of guessing a hallucinated value the vocabulary guard would then drop."
+                 :responses {200 {:body s/AllDimensionDescriptionsResponse}
+                             500 {:body s/APIError}}
+                 :handler   (browse/get-dimension-descriptions-handler ctx)}}]
 
     ["/api/dimensions/:dimension/values/:value/media"
      {:tags       ["browse"]
