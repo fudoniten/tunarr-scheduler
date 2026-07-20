@@ -2,6 +2,7 @@
   "HTTP handlers for browsing tags, channels, and genres."
   (:require [taoensso.timbre :as log]
             [clojure.walk :as walk]
+            [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
             [tunarr.scheduler.http.util :as util])
   (:import [java.time LocalDate Instant]))
@@ -143,6 +144,36 @@
                                          values)}})
       (catch Exception e
         (log/error e "Error fetching dimension values")
+        {:status 500 :body {:error (util/error-message e)}}))))
+
+(defn get-channel-descriptions-handler
+  "Return each configured channel's value + description, derived from the
+  `:channels` config map in the handler context (the same source `/api/catalog/channels`
+  uses). The response shape matches the values list shape
+  (`:values` of maps with `:value`) so a caller can swap them
+  one-for-one when an extra `:description` is wanted.
+
+  Channels without a description are still returned with an empty
+  description string — Grout's vocabulary guard tolerates either, and
+  omitting channels would silently reduce the controlled vocabulary
+  in a way that's harder to debug than a blank description.
+
+  Channels without a known description are intentionally not dropped:
+  the controlled vocabulary should stay the same set of values
+  whether or not descriptions are populated, so a missing description
+  is a content problem, not a structural one."
+  [{:keys [channels]}]
+  (fn [_]
+    (try
+      (let [rows (->> (or channels {})
+                      (map (fn [[ch-name cfg]]
+                             {:value       (name ch-name)
+                              :description (or (::media/channel-description cfg)
+                                               "")})))]
+        {:status 200
+         :body {:values (vec (sort-by :value rows))}})
+      (catch Exception e
+        (log/error e "Error fetching channel descriptions")
         {:status 500 :body {:error (util/error-message e)}}))))
 
 (defn get-media-categories-handler

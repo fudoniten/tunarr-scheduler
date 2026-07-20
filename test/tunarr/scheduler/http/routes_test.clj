@@ -829,11 +829,71 @@
                       {:id 6 :name "Test Channel"})]
 
         (let [handler  (routes/handler {:job-runner   *job-runner*
-                                         :collection   mock-collection
-                                         :catalog      *catalog*
-                                         :tunabrain    mock-tunabrain
-                                         :pseudovision mock-pv})
+                                        :collection   mock-collection
+                                        :catalog      *catalog*
+                                        :tunabrain    mock-tunabrain
+                                        :pseudovision mock-pv})
               response (handler (mock/request :get "/api/channels/6/schedule"))
               body     (parse-json-response response)]
           (is (= 404 (:status response)))
           (is (contains? body :error)))))))
+
+;; ------------------------------------------------------------------
+;; Channel descriptions endpoint
+;;
+;; Grout fetches /api/dimensions/channel/descriptions at startup to seed
+;; Tunabrain's per-channel context (see grout.tunarr_scheduler). Without
+;; these descriptions the LLM has to guess what an opaque slug like
+;; `toontown` means and routinely invents a hallucinated channel
+;; (`educational`, `thriller`, etc.) that the vocabulary guard drops.
+;; ------------------------------------------------------------------
+
+;; Shape mirrors what config.clj/resolve-channel-config produces at
+;; startup: outer keys are channel-name keywords, inner map uses the
+;; namespaced ::media/channel-description key.
+(def ^:private test-channels-config
+  {:britannia      {::media/channel-description "British shows, sketch comedy, drama, panel shows."}
+   :toontown       {::media/channel-description "Animated content: cartoons, anime, animated films."}
+   :infobytes      {::media/channel-description "Science & technology shorts and shows."}
+   ;; channels without a description should still appear
+   :no-description {}})
+
+(deftest channel-descriptions-returns-sorted-values-test
+  (testing "GET /api/dimensions/channel/descriptions returns one entry per channel"
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog *catalog*
+                                    :tunabrain mock-tunabrain
+                                    :channels  test-channels-config})
+          response (handler (mock/request :get "/api/dimensions/channel/descriptions"))
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (let [values (:values body)]
+        ;; every channel is present, even the one without a description
+        (is (= 4 (count values)))
+        (is (= ["britannia" "infobytes" "no-description" "toontown"]
+               (mapv :value values)))
+        ;; descriptions are populated where available
+        (let [by-name (into {} (map (juxt :value :description) values))]
+          (is (clojure.string/includes? (get by-name "britannia")
+                                        "British shows"))
+          (is (clojure.string/includes? (get by-name "toontown")
+                                        "Animated content"))
+          (is (clojure.string/includes? (get by-name "infobytes")
+                                        "Science"))
+          ;; channels missing a description get an empty string, NOT
+          ;; omitted — the controlled vocabulary should be the same
+          ;; set of values whether descriptions are populated or not.
+          (is (= "" (get by-name "no-description"))))))))
+
+(deftest channel-descriptions-empty-when-no-channels-test
+  (testing "GET /api/dimensions/channel/descriptions with no channels configured"
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog *catalog*
+                                    :tunabrain mock-tunabrain
+                                    :channels  {}})
+          response (handler (mock/request :get "/api/dimensions/channel/descriptions"))
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= [] (:values body))))))

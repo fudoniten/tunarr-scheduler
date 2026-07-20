@@ -459,6 +459,13 @@
                                500 {:body s/APIError}}
                    :handler   (browse/get-dimension-values-handler ctx)}}]
 
+    ["/api/dimensions/channel/descriptions"
+     {:tags    ["browse"]
+      :get     {:summary   "List channel values paired with their human-readable description. Used by Grout to seed Tunabrain's per-channel context so the model can pick a channel from opaque slugs (e.g. toontown) instead of guessing a hallucinated value (e.g. educational)."
+                 :responses {200 {:body s/DimensionDescriptionListResponse}
+                             500 {:body s/APIError}}
+                 :handler   (browse/get-channel-descriptions-handler ctx)}}]
+
     ["/api/dimensions/:dimension/values/:value/media"
      {:tags       ["browse"]
       :parameters {:path [:map 
