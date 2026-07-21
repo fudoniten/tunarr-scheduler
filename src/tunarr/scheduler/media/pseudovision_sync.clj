@@ -7,10 +7,19 @@
       into prefixed strings like `dimension:value` before pushing.
 
    This replaces the old hardcoded derivation from `genres`, `channels`,
-   and `kid_friendly` fields — those are now just dimensions like any other."
+   and `kid_friendly` fields — those are now just dimensions like any other.
+
+   The sync is a **reconcile**, not a merge: `sync-item-tags!` computes
+   the diff between the catalog's desired tag set and Pseudovision's
+   current set, then `add-tags!` for new entries and `delete-tag!` for
+   stale ones. Without the delete leg, recategorizations would leave
+   obsolete `dim:value` strings (e.g. a previous `channel:goldenreels`)
+   behind in PV, where smart collections match on those tags and pull
+   the show into the wrong channel."
   (:require [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.media :as media]
             [tunarr.scheduler.media.catalog :as catalog]
+            [clojure.set :as set]
             [taoensso.timbre :as log]))
 
 ;; ---------------------------------------------------------------------------
@@ -53,45 +62,79 @@
 ;; ---------------------------------------------------------------------------
 
 (defn sync-item-tags!
-  "Sync tags for a single media item from catalog to Pseudovision.
-   
+  "Reconcile tags for a single media item between the catalog (TS) and
+   Pseudovision. Computes the desired tag set from the catalog's
+   `media_tags` and `media_categorization` (flattened to `dim:value`
+   strings), fetches the current set from Pseudovision, and applies a
+   **diff**: `add-tags!` for new entries, `delete-tag!` for entries
+   that are no longer in the catalog. This is what keeps the two
+   stores aligned across recategorizations — without it, a previous
+   value (e.g. `channel:goldenreels` from an earlier LLM
+   categorization) lingers in PV and pulls the show into the wrong
+   smart collection.
+
+   The delete path runs even when the desired set is empty, so a
+   fully-untagged item in TS clears its PV tags too. Adds and deletes
+   are sorted for deterministic logs; the result map reports what
+   changed so callers and the audit endpoint can show the diff.
+
    Args:
      pv-config - Pseudovision client config
      pv-item-id - Pseudovision media_items.id
      catalog - Catalog instance
-     catalog-item-id - Item ID in catalog
-   
+     item - catalog media item (must carry `::media/id`)
+
    Returns:
-     {:synced true/false, :tags [...], :error ...}"
+     {:synced true/false
+      :tags [... desired ...]
+      :added [... added ...]
+      :removed [... removed ...]
+      :unchanged int
+      :error ...}"
   [pv-config pv-item-id catalog item]
   (try
-    (let [;; Base tags from the free-form media_tags table
+    (let [;; Desired tag set: base tags from media_tags + flattened
+          ;; dimension tags from media_categorization. Both
+          ;; `(name nil)` and `(name "")` are safe in Clojure, but we
+          ;; still filter out nils/empties via `clean-tags` below so
+          ;; the result is always presentable to the PV API.
           base-tags (catalog/get-media-tags catalog (::media/id item))
-          ;; Dimension values from media_categorization, flattened to
-          ;; prefixed strings: {:channel [:comedy]} -> ["channel:comedy"]
           dimension-tags
           (mapcat (fn [[dim values]]
                     (map #(str (name dim) ":" (name %)) values))
                   (catalog/get-media-categories catalog (::media/id item)))
-          ;; Merge all tags (deduplicated)
-          all-tags (vec (distinct (concat (map name base-tags)
+          all-tags (vec (distinct (concat (map #(some-> % name) base-tags)
                                           dimension-tags)))
-          ;; Clean: remove nils and empty strings that would fail TagName schema
-          clean-tags (filterv (fn [t] (and (string? t) (seq t))) all-tags)]
-      (if (seq clean-tags)
-        (do
-          (log/info "Syncing tags to Pseudovision"
-                    {:pv-item-id pv-item-id
-                     :tags clean-tags
-                     :all-tags all-tags})
-          (pv/add-tags! pv-config pv-item-id clean-tags)
-          (log/debug "Synced tags to Pseudovision"
-                    {:pv-item-id pv-item-id
-                     :tags clean-tags})
-          {:synced true :tags clean-tags})
-        (do
-          (log/debug "No tags to sync" {:pv-item-id pv-item-id})
-          {:synced false :tags []})))
+          clean-tags (filterv (fn [t] (and (string? t) (seq t))) all-tags)
+          desired-set (set clean-tags)
+          ;; Current tag set in PV. A failed GET (e.g. item not yet in
+          ;; PV, or PV 404) is treated as an empty set so the add path
+          ;; runs and the item is bootstrapped.
+          current-set (try (set (pv/get-tags pv-config pv-item-id))
+                           (catch Exception e
+                             (log/warn e "Failed to fetch current tags from PV; treating as empty"
+                                       {:pv-item-id pv-item-id})
+                             #{}))
+          to-add    (vec (sort (set/difference desired-set current-set)))
+          to-remove (vec (sort (set/difference current-set desired-set)))
+          unchanged (count (set/intersection desired-set current-set))]
+      (log/info "Reconciling PV tags"
+                {:pv-item-id pv-item-id
+                 :desired    clean-tags
+                 :current    (vec (sort current-set))
+                 :added      to-add
+                 :removed    to-remove
+                 :unchanged  unchanged})
+      (when (seq to-remove)
+        (doseq [tag to-remove]
+          (pv/delete-tag! pv-config pv-item-id tag)))
+      (when (seq to-add)
+        (pv/add-tags! pv-config pv-item-id to-add))
+      {:synced    true
+       :tags      clean-tags
+       :added     to-add
+       :removed   to-remove
+       :unchanged unchanged})
     (catch Exception e
       (log/error e "Failed to sync tags" {:pv-item-id pv-item-id})
       {:synced false :error (.getMessage e)})))

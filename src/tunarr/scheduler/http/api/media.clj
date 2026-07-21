@@ -912,6 +912,9 @@
                                   :action "sync-pseudovision"
                                   :synced (:synced result)
                                   :tags (:tags result)
+                                  :added (:added result)
+                                  :removed (:removed result)
+                                  :unchanged (:unchanged result)
                                   :error (:error result)}})
             {:status 404 :body {:error (str "Media not found: " media-id)}})))
       (catch Exception e
