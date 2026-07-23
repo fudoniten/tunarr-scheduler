@@ -356,6 +356,99 @@
       (is (= 53781 (second parent-id-key))     ":parent_id propagated"))))
 
 ;; ---------------------------------------------------------------------------
+;; Grout-clips-as-filler + nil-name fallbacks
+;;
+;; Regression for the 2026-07-23 sync-from-pseudovision run that ingested
+;; 2,579 Grout programs: 2,578 of them errored with `null value in column
+;; "name" of relation "media"` and 2 with `media_media_type_check`
+;; violation. Both are handled below.
+;; ---------------------------------------------------------------------------
+
+(deftest catalog-item-grout-program-becomes-filler
+  (testing "PV kind=\"program\" with no parent/no episode numbers → :filler for
+            both item_kind (drives chk_episode_numbers) and media_type (drives
+            media_media_type_check). Without this the catalog row fails to
+            insert with `new row for relation \"media\" violates check
+            constraint \"media_media_type_check\"`."
+    (let [out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id          1340275
+                :remote-key  "grout:e7c1e7e8-c2d8-43e6-a6d4-65b315c3aada"
+                :kind        "program"
+                :name        nil
+                :year        nil
+                :parent-id   nil
+                :release-date nil}
+              49)
+          media-type-key (first (filter (fn [[k _]]
+                                          (= k :tunarr.scheduler.media/type))
+                                        out))
+          item-kind-key (first (filter (fn [[k _]]
+                                          (= k :tunarr.scheduler.media/item-kind))
+                                       out))]
+      (is (= :filler (second media-type-key))
+          "media_type must be :filler so media_media_type_check passes")
+      (is (= :filler (second item-kind-key))
+          "item_kind must be :filler so chk_episode_numbers doesn't fire"))))
+
+(deftest catalog-item-nil-name-gets-traceable-placeholder
+  (testing "PV item with :name nil (typical Grout clip pre-Tunabrain-enrichment)
+            gets a deterministic placeholder containing the remote-key, so the
+            catalog's `name VARCHAR NOT NULL CHECK (name <> '')` accepts the
+            row and operators can find the underlying Grout clip from the
+            catalog. The placeholder will be replaced by the real title on a
+            subsequent sync once Tunabrain enrichment produces one."
+    (let [rk "grout:6d320143-4bce-4d3b-83c5-3a5e2d44c8af"
+          out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id          1340300
+                :remote-key  rk
+                :kind        "program"
+                :name        nil
+                :year        nil
+                :parent-id   nil
+                :release-date nil}
+              49)
+          name-key (first (filter (fn [[k _]]
+                                    (= k :tunarr.scheduler.media/name))
+                                  out))]
+      (is (= (str "Unnamed (" rk ")")
+             (second name-key))
+          "name is the deterministic placeholder, not nil and not empty")))
+
+  (testing "Empty-string :name is also replaced (the CHECK also forbids '')"
+    (let [rk "grout:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id          1340301
+                :remote-key  rk
+                :kind        "program"
+                :name        ""
+                :year        nil
+                :parent-id   nil
+                :release-date nil}
+              49)
+          name-key (first (filter (fn [[k _]]
+                                    (= k :tunarr.scheduler.media/name))
+                                  out))]
+      (is (= (str "Unnamed (" rk ")")
+             (second name-key))
+          "empty-string :name is also replaced by the placeholder")))
+
+  (testing "Non-empty :name is preserved unchanged (no placeholder substitution)"
+    (let [out (#'pv-media-sync/pseudovision-item->catalog-item
+               {:id          1340302
+                :remote-key  "grout:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                :kind        "program"
+                :name        "Tasty Recipe 2024"
+                :year        2024
+                :parent-id   nil
+                :release-date "2024-03-15"}
+              49)
+          name-key (first (filter (fn [[k _]]
+                                    (= k :tunarr.scheduler.media/name))
+                                  out))]
+      (is (= "Tasty Recipe 2024" (second name-key))
+          "real :name is passed through verbatim"))))
+
+;; ---------------------------------------------------------------------------
 ;; /api/jobs/:id must surface :result. Regression for the silent failure mode
 ;; that masked the 2026-07-18 sync issue: the runner stored :result in memory
 ;; but the Job Malli schema didn't include it, so reitit stripped it before
