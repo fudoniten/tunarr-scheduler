@@ -103,6 +103,15 @@
                (keyword? (:kind pv-item)) (:kind pv-item)
                (some? (:kind pv-item))    (keyword (:kind pv-item)))
         item-kind (classify-item-kind pv-item)
+        ;; PV kind="program" is a Grout-ingested clip — it has no episode or
+        ;; series metadata, no parent, and (usually) no name yet (Tunabrain
+        ;; enrichment hasn't reached it). Both `item-kind` (which drives
+        ;; chk_episode_numbers) and `item-type` (which drives
+        ;; media_media_type_check) must land in the SQL CHECK-allowed set;
+        ;; `:filler` is the catch-all. Without this, the default branch in
+        ;; classify-item-kind already classifies Grout clips as :filler
+        ;; (good), but the case below would produce media_type=:program
+        ;; (bad — :program is not in the SQL CHECK enum).
         item-type (case kind
                     :show        :series      ; Map PV "show" to TS "series"
                     :episode     :episode     ; Keep as-is
@@ -111,11 +120,25 @@
                     :song        :song        ; Keep as-is
                     :music-video :music-video ; Map PV "music_video" to TS "music-video"
                     :image       :image       ; Keep as-is
+                    :program     :filler      ; Grout clips are catalog filler
                     ;; If we still have nothing recognizable, fall through to
                     ;; the default below. Branching on a non-keyword value
                     ;; here used to be how this whole module silently
                     ;; mis-classified every show as :filler.
                     (keyword (name (or kind :movie))))
+        ;; Default the name when PV returns nil so the catalog's
+        ;; `name VARCHAR NOT NULL CHECK (name <> '')` doesn't reject the
+        ;; row. Grout items in particular come through with :name nil
+        ;; before Tunabrain enrichment has produced a title — using a
+        ;; deterministic placeholder (rather than dropping the row) keeps
+        ;; the item in the catalog so the eventual enriched title (from a
+        ;; subsequent sync) lands on the right row. The placeholder is
+        ;; traceable via the remote-key so operators can find the
+        ;; underlying Grout clip from the catalog.
+        item-name (or (not-empty (:name pv-item))
+                      (str "Unnamed ("
+                           (:remote-key pv-item)
+                           ")"))
         year (or (:year pv-item) 1970)  ; Default to 1970 if year is missing
         ;; Premiere is required - use release-date if available, else construct from year
         ;; Convert to LocalDate for proper SQL DATE type (needs format: "YYYY-MM-DD")
@@ -155,7 +178,7 @@
                 :episode-number episode-number})
     (merge
      {::media/id           (:remote-key pv-item)  ; Use Jellyfin ID as catalog ID
-      ::media/name         (:name pv-item)
+      ::media/name         item-name              ; Defaulted to "Unnamed (<rk>)" when PV's :name is nil
       ::media/type         item-type
       ::media/item-kind    item-kind              ; NEW: Add item_kind classification
       ::media/library-id   catalog-library-id    ; TS catalog library ID
