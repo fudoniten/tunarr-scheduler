@@ -5,8 +5,9 @@
    1. Call Tunabrain to generate a channel-appropriate image (prompt + generation)
    2. Select a matching music track from the CC0 library
    3. Compose image + audio into a short MP4 with subtle motion using ffmpeg
-   4. Write the result to the shared Grout staging mount
-   5. Upload it to Grout via the intake API, tagged so Pseudovision can find it
+   4. Write the result to a local scratch directory on this service's own disk
+   5. Upload it to Grout via the intake API (a multipart HTTP POST — no shared
+      filesystem required), tagged so Pseudovision can find it
 
    Generated bumpers are organized into duration buckets:
      - 5 seconds  → tiny cracks between content
@@ -15,9 +16,9 @@
 
    Bumpers are tagged with channel/kind/theme metadata at intake so Pseudovision
    can select the right one at playout time. Grout owns the stored bytes (it
-   normalises + content-addresses on intake), so the staging file is a transient
-   hand-off, not the system of record — replacing the old Jellyfin scan → poll →
-   PV-collection registration dance."
+   normalises + content-addresses on intake), so the local scratch file is a
+   transient hand-off, not the system of record — replacing the old Jellyfin
+   scan → poll → PV-collection registration dance."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -291,12 +292,14 @@
 ;; Grout upload
 ;; ---------------------------------------------------------------------------
 ;;
-;; Bumpers land in Grout, the filler-content store. We hand Grout the staging
-;; path and it hashes → ffprobes → normalises → content-addresses → indexes,
-;; returning the stored Media. Intake is idempotent by source hash, so re-runs
-;; are safe and the 201/200 response *is* the confirmation — no scan-polling or
-;; filename matching. Duration lives on the Media as ffprobed `duration-ms`, so
-;; Pseudovision queries by min_ms/max_ms rather than a duration tag.
+;; Bumpers land in Grout, the filler-content store. We stream the composed
+;; file's bytes to Grout over HTTP (multipart POST) and it hashes → ffprobes →
+;; normalises → content-addresses → indexes, returning the stored Media. No
+;; filesystem is shared between this service and Grout. Intake is idempotent
+;; by source hash, so re-runs are safe and the 201/200 response *is* the
+;; confirmation — no scan-polling or filename matching. Duration lives on the
+;; Media as ffprobed `duration-ms`, so Pseudovision queries by min_ms/max_ms
+;; rather than a duration tag.
 
 (defn- bumper->tags
   "Build the intake tag list for a bumper. `kind` and `channel` are dedicated
@@ -306,9 +309,10 @@
   (into [] (comp (remove nil?) (map name)) [theme]))
 
 (defn- cleanup-staging-file!
-  "Best-effort removal of a staging file once Grout owns the bytes. Grout stores
-   at its own content-addressed path, so the staging copy is disposable; failing
-   to delete it is not fatal (worst case a harmless re-upload, deduped by hash)."
+  "Best-effort removal of a local scratch file once Grout owns the bytes. Grout
+   stores at its own content-addressed path, so the local copy is disposable;
+   failing to delete it is not fatal (worst case a harmless re-upload, deduped
+   by hash)."
   [path]
   (try
     (when (and path (.exists (io/file path)))
@@ -384,15 +388,13 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- default-output-dir
-  "Return the default bumper staging directory.
-   Prefers BUMPER_OUTPUT_DIR, then GROUT_STAGING_DIR, then a staging subdir under
-   the shared Grout mount. Grout requires intake paths to live under
-   GROUT_MEDIA_DIR, and it takes ownership of the bytes on intake, so this is a
-   transient staging area rather than the store of record."
+  "Return the default bumper scratch directory: BUMPER_OUTPUT_DIR, or a
+   bumpers/ subdir under this JVM's own temp dir. Grout intake is a multipart
+   HTTP upload, so this directory only needs to be local to this service —
+   nothing else needs to read it."
   []
   (or (System/getenv "BUMPER_OUTPUT_DIR")
-      (System/getenv "GROUT_STAGING_DIR")
-      "/data/media/grout/staging"))
+      (str (io/file (System/getProperty "java.io.tmpdir") "tunarr-bumpers"))))
 
 (defn create-service
   "Create the bumper generation service from system config.
@@ -400,7 +402,7 @@
    Config keys under :bumpers:
      :tunabrain         — Tunabrain client (required)
      :music-library-dir — Path to CC0 music library
-     :output-dir        — Grout staging dir for generated MP4s
+     :output-dir        — Local scratch dir for generated MP4s, pre-upload
      :grout             — Grout client config map with :base-url (optional; when
                           absent, generation still works but upload is skipped)"
   [{:keys [tunabrain music-library-dir output-dir grout]}]

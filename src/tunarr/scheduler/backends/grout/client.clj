@@ -4,12 +4,17 @@
    Grout is a special-purpose, content-addressed media store: media bytes go in,
    tags (channel, audience, source, …) get attached, and Pseudovision queries it
    to fill scheduling gaps. This client implements the Tunarr Scheduler *write
-   path*: after a bumper is composed onto the shared mount, we hand Grout the
-   path and it hashes → ffprobes → normalises → stores → indexes.
+   path*: it streams the composed bumper's bytes to Grout over HTTP, which
+   hashes → ffprobes → normalises → stores → indexes them. No filesystem is
+   shared between TS and Grout — the client and server may run on entirely
+   separate hosts.
 
    Wire conventions (see GROUT.md):
-   - All media routes live under `/grout`; JSON in and out.
-   - Response bodies use kebab-case keys (`duration-ms`, `content-hash`,
+   - All media routes live under `/grout`.
+   - Intake (`POST /grout/media`) is a `multipart/form-data` upload: the `file`
+     part carries the media bytes, everything else is a plain string field.
+   - Other routes (query, by-hash, get) are JSON in and out, with response
+     bodies using kebab-case keys (`duration-ms`, `content-hash`,
      `stream-url`, …). We pin to those.
    - Intake is idempotent by SHA-256 of the *source* bytes: re-posting the same
      file returns 200 (matched existing) instead of 201 (newly stored), never a
@@ -72,11 +77,30 @@
 ;; Intake — the write path
 ;; ---------------------------------------------------------------------------
 
-(defn intake!
-  "Register a media file with Grout (POST /grout/media).
+(defn- intake-multipart-fields
+  "Build the `:multipart` field vector for a `POST /grout/media` upload.
+   `file` always comes first; the rest are only included when present, since
+   Grout treats `channel`/`tags`/`source`/`source-url`/`name`/`description` as
+   optional. Grout's multipart parser expects `tags` as a single
+   comma-separated string, not repeated fields."
+  [path kind channel tags source source-url name description]
+  (let [tag-str (when (seq tags) (str/join "," tags))]
+    (cond-> [{:name "file" :content (io/file path) :filename (.getName (io/file path))}
+             {:name "kind" :content kind}]
+      channel     (conj {:name "channel" :content channel})
+      tag-str     (conj {:name "tags" :content tag-str})
+      source      (conj {:name "source" :content source})
+      source-url  (conj {:name "source-url" :content source-url})
+      name        (conj {:name "name" :content name})
+      description (conj {:name "description" :content description}))))
 
-   `params` keys (kebab-case, matching the API body):
-     :path        — absolute path on the shared mount, under GROUT_MEDIA_DIR (required)
+(defn intake!
+  "Upload a media file to Grout (POST /grout/media, multipart/form-data). The
+   file's bytes are streamed to Grout — no filesystem is shared between the
+   caller and the server.
+
+   `params` keys:
+     :path        — local path to the file to upload (required)
      :kind        — \"bumper\" | \"filler\" | \"program\" (required)
      :channel     — channel slug, or nil/omitted for generic (usable everywhere)
      :tags        — vector of tag strings (optional)
@@ -91,14 +115,18 @@
    Returns {:created? bool :status int :media <Media>}:
      201 → :created? true  (newly stored)
      200 → :created? false (matched an existing item by hash; tags unioned)
-   Throws ex-info on 400 (missing/outside media dir), 422 (pipeline failure),
-   or any other non-2xx."
-  [{:keys [base-url]} params]
-  (let [body (into {} (remove (comp nil? val))
-                   (select-keys params
-                                [:path :kind :channel :tags
-                                 :source :source-url :name :description]))
-        {:keys [status body]} (request! base-url :post "/grout/media" :body body)]
+   Throws ex-info on 400 (missing file/kind), 422 (pipeline failure), or any
+   other non-2xx."
+  [{:keys [base-url]} {:keys [path kind channel tags source source-url name description] :as params}]
+  (let [url (api-url base-url "/grout/media")
+        fields (intake-multipart-fields path kind channel tags source source-url name description)
+        response (http/post url {:multipart fields
+                                  :accept :json
+                                  :as :json
+                                  :coerce :always
+                                  :throw-exceptions false})
+        status (:status response)
+        body (:body response)]
     (case (int status)
       (200 201)
       (do (log/info "Grout intake ok"
