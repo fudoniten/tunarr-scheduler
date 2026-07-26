@@ -322,7 +322,16 @@
 
    Args:
      grout-client — Map from grout/create! (or nil to skip)
-     channel-name — Channel slug for the Grout `channel` field
+     channel-name — The Grout `channel` value. This MUST be the kebab-cased
+                    form of the channel's Pseudovision display name (e.g.
+                    \"enigma-tv\" for \"Enigma TV\"), matching how
+                    Pseudovision derives its own Grout query filter
+                    (pseudovision.media.grout-source/channel-tag) — NOT the
+                    TS config-key slug (e.g. \"enigma\"). Callers should
+                    build this with the caller-side equivalent of
+                    `http.api.bumpers/grout-channel-tag`; passing the raw
+                    config key here silently orphans the upload (PV's query
+                    will never match it).
      bumper-info  — Map returned by generate-bumper!
 
    Returns {:uploaded boolean :grout-id (or nil) :created? boolean
@@ -356,7 +365,9 @@
 
    Args:
      grout-client — Map from grout/create! (or nil to skip)
-     channel-name — Channel slug for the Grout `channel` field
+     channel-name — The Grout `channel` value (see `upload-bumper!` — this
+                    MUST be the kebab-cased PV display name, not the config
+                    key)
      bumper-infos — Seq of maps returned by generate-bumper!
 
    Returns a vector of per-bumper result maps (see upload-bumper!)."

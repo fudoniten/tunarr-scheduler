@@ -1,6 +1,7 @@
 (ns tunarr.scheduler.http.api.bumpers
   "HTTP handlers for bumper generation operations."
   (:require [taoensso.timbre :as log]
+            [camel-snake-kebab.core :as csk]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [tunarr.scheduler.jobs.runner :as jobs]
@@ -16,6 +17,22 @@
      :hint "nix-shell -p ffmpeg"}
 
     :else nil))
+
+(defn- grout-channel-tag
+  "The Grout `channel` value to tag a channel's bumper uploads with —
+   NOT the `?channel=` config-key slug (e.g. :enigma) this handler is keyed
+   by. Pseudovision resolves its own Grout `channel` query filter by
+   kebab-casing the PV channel's `:name` column
+   (pseudovision.media.grout-source/channel-tag), and that `:name` is set
+   from this same channel-spec's `:name` by the channel sync
+   (tunarr.scheduler.channels.sync/channel-spec->pseudovision) — e.g.
+   \"Enigma TV\" for the :enigma config key. Tagging uploads with the raw
+   config-key slug instead (\"enigma\") would silently never match PV's
+   query (\"enigma-tv\"), so this must kebab-case the same `:name` field PV
+   derives its filter from, not the config key."
+  [channel-spec]
+  (let [nm (:name channel-spec)]
+    (when-not (str/blank? nm) (csk/->kebab-case nm))))
 
 (defn generate-bumpers-handler
   "POST /api/bumpers/generate
@@ -69,12 +86,14 @@
                                                       :durations durations-list
                                                       :count target-count})
                                           valid-bumpers (filter some? generated)]
-                                      ;; Upload all generated bumpers to Grout (tagged for PV)
+                                      ;; Upload all generated bumpers to Grout (tagged for PV) —
+                                      ;; must use the PV-matching kebab-cased display name, not
+                                      ;; the raw config-key slug (see grout-channel-tag).
                                       (when (seq valid-bumpers)
                                         (try
                                           (bumpers/upload-bumper-batch!
                                            (:grout bumpers)
-                                           (name channel-key)
+                                           (grout-channel-tag channel-spec)
                                            valid-bumpers)
                                           (catch Exception e
                                             (log/error e "Bumper batch upload to Grout failed"
