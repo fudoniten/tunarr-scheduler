@@ -1,11 +1,13 @@
 (ns tunarr.scheduler.backends.grout.client-test
   (:require [clojure.test :refer [deftest is testing]]
             [clj-http.client :as http]
-            [cheshire.core :as json]
             [tunarr.scheduler.backends.grout.client :as grout])
   (:import [java.io File]))
 
 (def ^:private client {:base-url "http://grout:8080"})
+
+(defn- multipart-field [captured n]
+  (some #(when (= n (:name %)) %) (get-in captured [:opts :multipart])))
 
 (deftest create!-test
   (testing "a base-url yields a client map"
@@ -18,35 +20,40 @@
 
 (deftest intake!-created-test
   (testing "201 → :created? true and the parsed Media"
-    (let [captured (atom nil)]
-      (with-redefs [http/post (fn [url opts]
-                                (reset! captured {:url url :opts opts})
-                                {:status 201 :body {:id "abc" :kind "bumper"}})]
-        (let [result (grout/intake! client
-                                    {:path "/data/media/grout/staging/x.mp4"
-                                     :kind "bumper"
-                                     :channel "hua"
-                                     :tags ["spooky"]
-                                     :source "tunarr-bumper"
-                                     :name "Title"
-                                     :description "Script"})]
-          (is (true? (:created? result)))
-          (is (= 201 (:status result)))
-          (is (= "abc" (get-in result [:media :id])))
-          ;; Request went to the intake route with a JSON body carrying the
-          ;; kebab-case fields (nil values dropped).
-          (is (= "http://grout:8080/grout/media" (:url @captured)))
-          (let [sent (json/parse-string (get-in @captured [:opts :body]) true)]
-            (is (= "bumper" (:kind sent)))
-            (is (= "hua" (:channel sent)))
-            (is (= ["spooky"] (:tags sent)))
-            (is (not (contains? sent :source-url)))))))))
+    (let [captured (atom nil)
+          mp4 (File/createTempFile "grout-intake" ".mp4")]
+      (try
+        (with-redefs [http/post (fn [url opts]
+                                  (reset! captured {:url url :opts opts})
+                                  {:status 201 :body {:id "abc" :kind "bumper"}})]
+          (let [result (grout/intake! client
+                                      {:path (.getAbsolutePath mp4)
+                                       :kind "bumper"
+                                       :channel "hua"
+                                       :tags ["spooky" "retro"]
+                                       :source "tunarr-bumper"
+                                       :name "Title"
+                                       :description "Script"})]
+            (is (true? (:created? result)))
+            (is (= 201 (:status result)))
+            (is (= "abc" (get-in result [:media :id])))
+            ;; Request went to the intake route as a multipart upload — the
+            ;; file part carries the bytes, everything else is a string field
+            ;; (tags comma-joined, per Grout's parser), and there's no JSON
+            ;; body/path field at all.
+            (is (= "http://grout:8080/grout/media" (:url @captured)))
+            (is (nil? (get-in @captured [:opts :body])))
+            (is (= (.getAbsolutePath mp4) (.getAbsolutePath (:content (multipart-field @captured "file")))))
+            (is (= "bumper" (:content (multipart-field @captured "kind"))))
+            (is (= "hua" (:content (multipart-field @captured "channel"))))
+            (is (= "spooky,retro" (:content (multipart-field @captured "tags"))))
+            (is (nil? (multipart-field @captured "source-url")))))
+        (finally (.delete mp4))))))
 
 (deftest intake!-matched-test
   (testing "200 → :created? false (matched existing by hash)"
     (with-redefs [http/post (fn [_ _] {:status 200 :body {:id "dup"}})]
-      (let [result (grout/intake! client {:path "/data/media/grout/staging/x.mp4"
-                                          :kind "bumper"})]
+      (let [result (grout/intake! client {:path "/tmp/x.mp4" :kind "bumper"})]
         (is (false? (:created? result)))
         (is (= "dup" (get-in result [:media :id])))))))
 
