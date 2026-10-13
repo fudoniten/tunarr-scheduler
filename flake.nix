@@ -113,11 +113,14 @@
         };
 
         checks = {
-          clojureTests = pkgs.runCommand "clojure-tests" { } ''
-            mkdir -p $TMPDIR
-            cd $TMPDIR
-            ${pkgs.clojure}/bin/clojure -M:test
-          '';
+          # Same helper as pseudovision and grout: runs the :test alias
+          # against the locked deps (deps-lock.json) inside the sandbox.
+          # The old hand-rolled runCommand ran `clojure` with no source
+          # tree, no deps and HOME=/homeless-shelter, so it could never pass.
+          clojureTests = helpers.mkClojureTests {
+            name = "org.fudo/tunarr-scheduler";
+            src = ./.;
+          };
         };
 
         devShells = rec {
