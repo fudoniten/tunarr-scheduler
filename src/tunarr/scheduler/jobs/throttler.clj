@@ -155,28 +155,33 @@
         queue (LinkedBlockingQueue.)
         last-execution (atom 0)
         running (atom true)
-        worker (Thread.
-                 (fn []
-                   (while @running
-                     (try
-                       (when-let [job (.poll queue 100 TimeUnit/MILLISECONDS)]
-                         (if (= job ::stop)
-                           (reset! running false)
-                            (let [{:keys [f p]} job
-                                  now (System/nanoTime)
-                                  elapsed-ns (- now @last-execution)
-                                  elapsed-ms (/ elapsed-ns 1e6)
-                                  sleep-ms (max 0 (- min-interval-ms elapsed-ms))]
-                              (when (pos? sleep-ms)
-                                (Thread/sleep (long sleep-ms)))
-                              (let [result (run-with-retries f opts)]
-                                (reset! last-execution (System/nanoTime))
-                                (when p
-                                  (deliver p result))))))
-                       (catch InterruptedException _
-                         (reset! running false))
-                       (catch Exception e
-                         (log/error e "Error in throttler worker"))))))]
+        ;; Daemon: the worker polls forever until it receives ::stop, and
+        ;; nothing in the codebase stops a throttler (no integrant halt hook),
+        ;; so a non-daemon thread would pin the JVM open forever — which hung
+        ;; the flake's test build. A background poller must not block exit.
+        worker (doto (Thread.
+                      (fn []
+                        (while @running
+                          (try
+                            (when-let [job (.poll queue 100 TimeUnit/MILLISECONDS)]
+                              (if (= job ::stop)
+                                (reset! running false)
+                                (let [{:keys [f p]} job
+                                      now (System/nanoTime)
+                                      elapsed-ns (- now @last-execution)
+                                      elapsed-ms (/ elapsed-ns 1e6)
+                                      sleep-ms (max 0 (- min-interval-ms elapsed-ms))]
+                                  (when (pos? sleep-ms)
+                                    (Thread/sleep (long sleep-ms)))
+                                  (let [result (run-with-retries f opts)]
+                                    (reset! last-execution (System/nanoTime))
+                                    (when p
+                                      (deliver p result))))))
+                            (catch InterruptedException _
+                              (reset! running false))
+                            (catch Exception e
+                              (log/error e "Error in throttler worker"))))))
+                 (.setDaemon true))]
     (.start worker)
     {:queue queue
      :worker worker

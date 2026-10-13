@@ -95,7 +95,7 @@
         (let [resp ((scheduling/quarterly-handler (ctx)) (req {}))]
           (is (= 202 (:status resp)))
           (await-job (get-in resp [:body :job :id]))
-          (is (= #{:enigma :prime} (set (keys @seen)))))))))
+          (is (= #{:enigma :prime :spectrum} (set (keys @seen)))))))))
 
 ;; ── ?date (target quarter selection) ─────────────────────────────────────────
 
@@ -191,7 +191,8 @@
 (deftest monthly-channel-matches-display-name
   (testing "monthly: ?channel=Sitcom%20Spectrum selects :spectrum (async job)"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-monthly! (fn [c] (reset! seen (:channels c)) nil)]
+        ;; Accept & ignore the trailing :date kwargs the handler forwards.
+        (with-redefs [tasks/run-monthly! (fn [c & _] (reset! seen (:channels c)) nil)]
         (let [resp ((scheduling/monthly-handler (ctx)) (req {:channel "Sitcom Spectrum"}))]
           (is (= 202 (:status resp)))
           (await-job (get-in resp [:body :job :id]))

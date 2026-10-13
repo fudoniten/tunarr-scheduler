@@ -252,11 +252,13 @@
                          (map (fn [{:keys [dimension values notes]}]
                                 (let [notes-v (vec (or notes []))]
                                   [(keyword dimension)
-                                   (map-indexed
-                                    (fn [i v]
-                                      {::media/category-value (keyword v)
-                                       ::media/rationale      (or (get notes-v i) "")})
-                                    values)])))
+                                   ;; mapv, not map-indexed: values must be a
+                                   ;; vector so `(get values idx ...)` lookups
+                                   ;; (malli schemas, get-in in consumers) work.
+                                   (mapv (fn [i v]
+                                           {::media/category-value (keyword v)
+                                            ::media/rationale      (or (get notes-v i) "")})
+                                         (range) values)])))
                          dimensions)
        :context   (parse-context (:context response))})
     (throw (ex-info "No response received from tunabrain categorization"

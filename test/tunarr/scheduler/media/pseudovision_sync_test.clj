@@ -176,10 +176,10 @@
         (fn [{:keys [added removed added-tags removed-tags]}]
           (let [result (pv-sync/sync-item-tags! {} 52238 cat it)]
             (is (true? (:synced result)))
-            (is (= [] added-tags)
+            (is (= [] @added-tags)
                 "no new tags to add (everything we want is already in PV)")
             (is (= #{"channel:goldenreels" "channel:hua" "channel:spotlight"}
-                   (set removed-tags))
+                   (set @removed-tags))
                 "stale channel tags get deleted")
             (is (= #{"channel:goldenreels" "channel:hua" "channel:spotlight"}
                    (set (:removed result))))
@@ -206,8 +206,8 @@
         (fn [{:keys [added removed added-tags removed-tags]}]
           (let [result (pv-sync/sync-item-tags! {} 52238 cat it)]
             (is (true? (:synced result)))
-            (is (= #{"channel:goldenreels" "channel:spotlight"} (set removed-tags)))
-            (is (= ["channel:nippon"] added-tags))
+            (is (= #{"channel:goldenreels" "channel:spotlight"} (set @removed-tags)))
+            (is (= ["channel:nippon"] @added-tags))
             (is (= ["channel:nippon"] (:added result)))
             (is (= 1 (:unchanged result)))))))))
 
@@ -219,8 +219,8 @@
         (fn [{:keys [added removed added-tags removed-tags]}]
           (let [result (pv-sync/sync-item-tags! {} 52238 cat it)]
             (is (true? (:synced result)))
-            (is (= [] added-tags))
-            (is (= #{"comedy" "channel:goldenreels"} (set removed-tags)))
+            (is (= [] @added-tags))
+            (is (= #{"comedy" "channel:goldenreels"} (set @removed-tags)))
             (is (= #{"comedy" "channel:goldenreels"} (set (:removed result))))
             (is (= [] (:tags result)))
             (is (= 0 (:unchanged result)))))))))
@@ -303,7 +303,7 @@
             (is (true? (:synced result)))
             (is (= #{"comedy" "channel:nippon"} (set (:tags result)))
                 "empty-string base-tags are filtered, not sent as empty strings")
-            (is (empty? (filter (fn [t] (= "" t)) (:tags result)))))))))
+            (is (empty? (filter (fn [t] (= "" t)) (:tags result))))))))))
 
 (deftest reconcile-pv-add-throws-is-reported
   (testing "If the underlying PV add fails, the function returns :error and :synced false"

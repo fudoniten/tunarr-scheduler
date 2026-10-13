@@ -22,7 +22,11 @@
   (get-media [_]
     (get @state :media []))
   (get-media-by-id [_ media-id]
-    (filter #(= (:id %) media-id) (get @state :media [])))
+    ;; Like the real catalogs, return the single matching item or nil.
+    ;; (Returning a filter seq here made misses truthy: `()` flows through
+    ;; `resolve-media-by-id`'s `or` and the handlers then read nil out of it.)
+    (first (filter #(= (or (::media/id %) (:id %)) media-id)
+                   (get @state :media []))))
   (get-media-by-library-id [_ library-id]
     (filter #(= (:library-id %) library-id) (get @state :media [])))
   (get-media-by-library [_ library]
@@ -224,7 +228,7 @@
       (let [body (parse-json-response response)]
         (is (contains? body :job))
         (is (contains? (:job body) :id))
-        (is (= :media/rescan (get-in body [:job :type])))))))
+        (is (= "media/rescan" (get-in body [:job :type])))))))
 
 (deftest rescan-endpoint-job-has-library-metadata-test
   (testing "rescan job includes library metadata"
@@ -249,7 +253,7 @@
       (is (= 202 (:status response)))
       (let [body (parse-json-response response)]
         (is (contains? body :job))
-        (is (= :media/retag (get-in body [:job :type])))))))
+        (is (= "media/retag" (get-in body [:job :type])))))))
 
 (deftest retag-endpoint-job-has-library-metadata-test
   (testing "retag job includes library metadata"
@@ -274,7 +278,7 @@
       (is (= 202 (:status response)))
       (let [body (parse-json-response response)]
         (is (contains? body :job))
-        (is (= :media/taglines (get-in body [:job :type])))))))
+        (is (= "media/taglines" (get-in body [:job :type])))))))
 
 (deftest add-taglines-endpoint-job-has-library-metadata-test
   (testing "tagline job includes library metadata"
@@ -301,7 +305,7 @@
         (is (= 202 (:status response)))
         (let [body (parse-json-response response)]
           (is (contains? body :job))
-          (is (= :media/tag-audit (get-in body [:job :type])))
+          (is (= "media/tag-audit" (get-in body [:job :type])))
           (let [job-info (await-job *job-runner* (get-in body [:job :id]) 5000)]
             (is (= :succeeded (:status job-info)))
             (is (contains? (:result job-info) :tags-audited))
@@ -377,7 +381,7 @@
             response (handler (mock/request :post "/api/media/tags/triage?target-limit=50"))
             body (parse-json-response response)]
         (is (= 202 (:status response)))
-        (is (= :media/tag-triage (get-in body [:job :type])))
+        (is (= "media/tag-triage" (get-in body [:job :type])))
         (let [job-info (await-job *job-runner* (get-in body [:job :id]) 5000)
               result (:result job-info)]
           (is (= :succeeded (:status job-info)))
@@ -463,7 +467,7 @@
       (is (= 200 (:status info-response)))
       (is (contains? body :job))
       (is (= job-id (get-in body [:job :id])))
-      (is (= :media/rescan (get-in body [:job :type]))))))
+      (is (= "media/rescan" (get-in body [:job :type]))))))
 
 (deftest get-job-info-not-found-test
   (testing "GET /api/jobs/:job-id returns 404 for nonexistent job"
@@ -582,9 +586,11 @@
           (is (= 200 (:status response)))
           (is (= 2 (count (:libraries body))))
           (is (= "Movies" (:name (first (:libraries body)))))
+          ;; The catalog keys libraries by the library NAME (matching the
+          ;; startup sync; see sync-libraries-handler).
           (let [registered (get @(:state *catalog*) :libraries)]
-            (is (= 1 (:movies registered)))
-            (is (= 2 (:shows registered)))))))))
+            (is (= 1 (:Movies registered)))
+            (is (= 2 (get registered (keyword "TV Shows"))))))))))
 
 (deftest sync-libraries-no-pseudovision-test
   (testing "POST /api/media/sync-libraries returns 400 when Pseudovision is not configured"
@@ -617,9 +623,10 @@
 
 (deftest get-media-by-id-direct-hit-test
   (testing "GET /api/media-item/:id returns the item when the ID matches the catalog key directly"
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "catalog-1")
-                               {::media/id "catalog-1" ::media/name "Direct Hit"}))]
+    ;; Seed the mock catalog rather than redef'ing the protocol method:
+    ;; `with-redefs` cannot intercept protocol dispatch on record instances.
+    (swap! (:state *catalog*) assoc :media
+           [{::media/id "catalog-1" ::media/name "Direct Hit"}])
       (let [handler (routes/handler {:job-runner   *job-runner*
                                      :collection   mock-collection
                                      :catalog      *catalog*
@@ -627,17 +634,18 @@
             response (handler (mock/request :get "/api/media-item/catalog-1"))
             body     (parse-json-response response)]
         (is (= 200 (:status response)))
-        (is (= "catalog-1" (:tunarr.scheduler.media/id body)))))))
+        (is (= "catalog-1" (:tunarr.scheduler.media/id body))))))
 
 (deftest get-media-by-id-resolves-external-id-test
   (testing "GET /api/media-item/:id resolves an external/Jellyfin ID via Pseudovision"
     ;; Catalog is keyed on the Jellyfin remote-key; caller supplies the
     ;; Pseudovision internal ID, which Pseudovision maps back to the remote-key.
     (let [mock-pv {:config {:base-url "http://localhost:8080"}}]
-      (with-redefs [catalog/get-media-by-id
-                    (fn [_ id] (when (= id "jelly-1")
-                                 {::media/id "jelly-1" ::media/name "External Hit"}))
-                    pv-client/get-media-item
+      ;; Catalog is seeded with the item keyed on the Jellyfin remote-key;
+      ;; only the Pseudovision client (a plain fn, redef-able) is stubbed.
+      (swap! (:state *catalog*) assoc :media
+             [{::media/id "jelly-1" ::media/name "External Hit"}])
+      (with-redefs [pv-client/get-media-item
                     (fn [_ id] (when (= id "pv-1")
                                  {:id "pv-1" :remote-key "jelly-1"}))]
         (let [handler (routes/handler {:job-runner   *job-runner*
@@ -653,8 +661,8 @@
 (deftest get-media-by-id-not-found-test
   (testing "GET /api/media-item/:id returns 404 when neither direct nor Pseudovision lookup matches"
     (let [mock-pv {:config {:base-url "http://localhost:8080"}}]
-      (with-redefs [catalog/get-media-by-id (fn [_ _] nil)
-                    pv-client/get-media-item (fn [_ _] nil)]
+      ;; The catalog stays empty, so the direct lookup misses.
+      (with-redefs [pv-client/get-media-item (fn [_ _] nil)]
         (let [handler (routes/handler {:job-runner   *job-runner*
                                        :collection   mock-collection
                                        :catalog      *catalog*
@@ -667,13 +675,13 @@
 
 (deftest get-media-by-id-no-pseudovision-test
   (testing "GET /api/media-item/:id falls back to direct lookup only when Pseudovision is absent"
-    (with-redefs [catalog/get-media-by-id (fn [_ _] nil)]
-      (let [handler (routes/handler {:job-runner *job-runner*
-                                     :collection mock-collection
-                                     :catalog    *catalog*
-                                     :tunabrain  mock-tunabrain})
-            response (handler (mock/request :get "/api/media-item/whatever"))]
-        (is (= 404 (:status response)))))))
+    ;; The catalog stays empty, so the direct lookup misses.
+    (let [handler (routes/handler {:job-runner *job-runner*
+                                   :collection mock-collection
+                                   :catalog    *catalog*
+                                   :tunabrain  mock-tunabrain})
+          response (handler (mock/request :get "/api/media-item/whatever"))]
+      (is (= 404 (:status response))))))
 
 (deftest get-schedule-endpoint-test
   (testing "GET /api/channels/:id/schedule returns current schedule"
@@ -721,72 +729,68 @@
 
 (deftest add-media-item-tags-test
   (testing "POST /api/media-item/:id/tags adds tags and returns the full list"
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "m1") {::media/id "m1" ::media/name "Item"}))]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (json-post handler :post "/api/media-item/m1/tags"
-                                {:tags ["noir" "heist"]})
-            body     (parse-json-response response)]
-        (is (= 200 (:status response)))
-        (is (= "m1" (:media-id body)))
-        (is (= #{"noir" "heist"} (set (:tags body))))))))
+    (swap! (:state *catalog*) assoc :media [{::media/id "m1" ::media/name "Item"}])
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (json-post handler :post "/api/media-item/m1/tags"
+                              {:tags ["noir" "heist"]})
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= "m1" (:media-id body)))
+      (is (= #{"noir" "heist"} (set (:tags body)))))))
 
 (deftest get-media-item-tags-test
   (testing "GET /api/media-item/:id/tags returns the current tags"
     (swap! (:state *catalog*) assoc-in [:media-tags "m1"] [:noir :heist])
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (handler (mock/request :get "/api/media-item/m1/tags"))
-            body     (parse-json-response response)]
-        (is (= 200 (:status response)))
-        (is (= #{"noir" "heist"} (set (:tags body))))))))
+    (swap! (:state *catalog*) assoc :media [{::media/id "m1"}])
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (handler (mock/request :get "/api/media-item/m1/tags"))
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= #{"noir" "heist"} (set (:tags body)))))))
 
 (deftest set-media-item-tags-test
   (testing "PUT /api/media-item/:id/tags replaces the tag set"
     (swap! (:state *catalog*) assoc-in [:media-tags "m1"] [:old-tag])
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (json-post handler :put "/api/media-item/m1/tags"
-                                {:tags ["fresh"]})
-            body     (parse-json-response response)]
-        (is (= 200 (:status response)))
-        (is (= ["fresh"] (:tags body)))))))
+    (swap! (:state *catalog*) assoc :media [{::media/id "m1"}])
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (json-post handler :put "/api/media-item/m1/tags"
+                              {:tags ["fresh"]})
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= ["fresh"] (:tags body))))))
 
 (deftest delete-media-item-tag-test
   (testing "DELETE /api/media-item/:id/tags/:tag removes one tag"
     (swap! (:state *catalog*) assoc-in [:media-tags "m1"] [:noir :heist])
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (handler (mock/request :delete "/api/media-item/m1/tags/noir"))
-            body     (parse-json-response response)]
-        (is (= 200 (:status response)))
-        (is (= ["heist"] (:tags body)))))))
+    (swap! (:state *catalog*) assoc :media [{::media/id "m1"}])
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (handler (mock/request :delete "/api/media-item/m1/tags/noir"))
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= ["heist"] (:tags body))))))
 
 (deftest media-item-tags-not-found-test
   (testing "tag endpoints return 404 when the media item does not resolve"
-    (with-redefs [catalog/get-media-by-id (fn [_ _] nil)]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (json-post handler :post "/api/media-item/missing/tags"
-                                {:tags ["x"]})]
-        (is (= 404 (:status response)))))))
+    ;; The catalog stays empty, so the media item does not resolve.
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (json-post handler :post "/api/media-item/missing/tags"
+                              {:tags ["x"]})]
+      (is (= 404 (:status response))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-item dimension value editing endpoints
@@ -794,32 +798,30 @@
 
 (deftest add-media-item-category-values-test
   (testing "POST /api/media-item/:id/categories/:category adds dimension values"
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (json-post handler :post "/api/media-item/m1/categories/mood"
-                                {:values ["tense" "dark"] :rationale "manual"})
-            body     (parse-json-response response)]
-        (is (= 200 (:status response)))
-        (is (= "mood" (:category body)))
-        (is (= #{"tense" "dark"} (set (:values body))))))))
+    (swap! (:state *catalog*) assoc :media [{::media/id "m1"}])
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (json-post handler :post "/api/media-item/m1/categories/mood"
+                              {:values ["tense" "dark"] :rationale "manual"})
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= "mood" (:category body)))
+      (is (= #{"tense" "dark"} (set (:values body)))))))
 
 (deftest delete-media-item-category-value-test
   (testing "DELETE /api/media-item/:id/categories/:category/values/:value removes a value"
     (swap! (:state *catalog*) assoc-in [:category-values "m1" :mood] [:tense :dark])
-    (with-redefs [catalog/get-media-by-id
-                  (fn [_ id] (when (= id "m1") {::media/id "m1"}))]
-      (let [handler  (routes/handler {:job-runner *job-runner*
-                                      :collection mock-collection
-                                      :catalog    *catalog*
-                                      :tunabrain  mock-tunabrain})
-            response (handler (mock/request :delete "/api/media-item/m1/categories/mood/values/tense"))
-            body     (parse-json-response response)]
-        (is (= 200 (:status response)))
-        (is (= ["dark"] (:values body)))))))
+    (swap! (:state *catalog*) assoc :media [{::media/id "m1"}])
+    (let [handler  (routes/handler {:job-runner *job-runner*
+                                    :collection mock-collection
+                                    :catalog    *catalog*
+                                    :tunabrain  mock-tunabrain})
+          response (handler (mock/request :delete "/api/media-item/m1/categories/mood/values/tense"))
+          body     (parse-json-response response)]
+      (is (= 200 (:status response)))
+      (is (= ["dark"] (:values body))))))
 
 (deftest get-schedule-no-schedule-test
   (testing "GET /api/channels/:id/schedule returns 404 when no schedule attached"

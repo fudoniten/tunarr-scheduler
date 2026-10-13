@@ -239,7 +239,8 @@
         (let [client (tunabrain/create! {:endpoint "http://test.local"})
               media {::media/name "Test Movie"}]
           (tunabrain/request-tags! client media :catalog-tags [:existing-tag])
-          (is (= [:existing-tag] (:existing_tags @posted-data))))))))
+          ;; JSON bodies carry strings; keywordize-keys only touches map keys.
+          (is (= ["existing-tag"] (:existing_tags @posted-data))))))))
 
 (deftest request-tags-error-handling-test
   (testing "request-tags! throws on non-2xx response"
@@ -266,10 +267,10 @@
             result (tunabrain/request-categorization! client media
                                                      :categories {:mood {:description "Overall mood"
                                                                          :values ["exciting" "calm"]}})]
-        (is (= 1 (count (:mappings result))))
-        (is (= :action_channel (get-in result [:mappings 0 ::media/channel-name])))
-        (is (= "High action content" (get-in result [:mappings 0 ::media/rationale])))
-        (is (contains? (:dimensions result) :mood))
+        ;; The legacy `mappings` block in the response is ignored: channel
+        ;; membership is derived from the channels config, not a dimension
+        ;; (see the dimension cleanup in PLAN.md).
+        (is (= #{:mood} (set (keys (:dimensions result)))))
         (is (= :exciting (get-in result [:dimensions :mood 0 ::media/category-value])))
         (is (= "Fast paced" (get-in result [:dimensions :mood 0 ::media/rationale])))))))
 

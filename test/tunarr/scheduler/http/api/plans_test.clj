@@ -125,7 +125,10 @@
     (let [handler (plans-api/get-grid-handler *ctx*)
           resp    (handler (req "goldenreels" {:query {:quarter "Q1" :year 2026}}))]
       (is (= 200 (:status resp)))
-      (is (= "Golden Reels" (-> resp :body :channel)))
+      ;; `:channel` echoes the storage key (the TS channel UUID); the
+      ;; display name rides along as `:channel-name`.
+      (is (= golden-uuid (-> resp :body :channel)))
+      (is (= "Golden Reels" (-> resp :body :channel-name)))
       (is (= "tb-grid-1" (-> resp :body :grid_id)))))
   (testing "URL with the display name 'Golden Reels' (legacy direct lookup) still works"
     (let [handler (plans-api/get-grid-handler *ctx*)

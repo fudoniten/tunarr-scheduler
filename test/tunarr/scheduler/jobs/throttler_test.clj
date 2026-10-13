@@ -98,6 +98,10 @@
           (doseq [interval intervals]
             (is (>= interval 400.0)))))
       (finally
-        (.put queue ::stop)
+        ;; `::stop` here would auto-resolve to the TEST namespace's
+        ;; ::tunarr.scheduler.jobs.throttler-test/stop, which the worker
+        ;; (comparing ::stop in the throttler ns) never matches — the worker
+        ;; then loops forever. Send the throttler's own keyword.
+        (.put queue :tunarr.scheduler.jobs.throttler/stop)
         (.join ^Thread worker 2000)))
     (is (= 500000000 (get-in throttler [:opts :min-interval-ms])))))

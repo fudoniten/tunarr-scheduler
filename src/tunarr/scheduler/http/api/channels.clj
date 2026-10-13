@@ -44,8 +44,8 @@
                       :channel-name (:name channel)
                       :schedule-id  schedule-id
                       :schedule     schedule
-                      :slots        slots
-                      :upcoming-events (take 10 events)}})))
+                      :slots        (vec slots)
+                      :upcoming-events (vec (take 10 events))}})))
       (catch Exception e
         (log/error e "Error getting channel schedule")
         {:status 500 :body {:error (util/error-message e)}}))))
