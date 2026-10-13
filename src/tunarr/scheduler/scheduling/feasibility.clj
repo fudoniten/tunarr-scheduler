@@ -29,7 +29,7 @@
          same few shorts grind round 15×/week) — the rate, not the raw count,
          tells those apart. This is the
          grid-authoring-time half of the duration-aware scheduling work (see
-         DURATION_AWARE_SCHEDULING.md §3.4) — Pseudovision's air-time
+         archive/DURATION_AWARE_SCHEDULING.md §3.4) — Pseudovision's air-time
          selection (pseudovision#119) already fits content to slots, but
          without this check a strip could still be authored at a length its
          category has no content anywhere near, which Pseudovision's

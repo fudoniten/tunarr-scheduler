@@ -1,3 +1,7 @@
+> **Archived design record.** Kept because code comments in `scheduling/`
+> and `tunabrain.clj` cite its sections. It isn't maintained; current work is in
+> [PLAN.md](../PLAN.md).
+
 # Duration-Aware Scheduling — Phases 2 & 3 Design
 
 **Status:** ✅ Implemented (Phase 2 and Phase 3/Option A). This started as a

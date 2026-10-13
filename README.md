@@ -1,202 +1,161 @@
-# Tunarr Scheduler Service
+# Tunarr Scheduler
 
-This repository contains a Clojure service that automates programming for
-Pseudovision TV channels: it categorises the catalogue with the help of a
-Large Language Model (via Tunabrain), authors a layered quarterly/monthly
-schedule "grid" per channel (see [SCHEDULING.md](SCHEDULING.md) and
-[ROADMAP.md](ROADMAP.md) for the current design and delivery status), and
-generates custom bumpers with text-to-speech narration.
+Tunarr Scheduler (TS) is the control plane for Pseudovision's TV channels. It's
+a Clojure service that:
 
-## Features
+1. **Curates the catalog.** It pulls media items from Pseudovision, has
+   Tunabrain categorize and tag them, and pushes the resulting tags back to PV.
+2. **Plans each channel's schedule.** Once a quarter it has Tunabrain propose a
+   frozen weekly **grid**, checks it for feasibility, and syncs it onto PV's
+   native schedule engine. Once a month it stores sparse **overrides**.
+3. **Generates bumpers.** It asks Tunabrain for bumper art, composes short
+   clips with ffmpeg, and uploads them to Grout.
 
-* **Media ingestion** - pluggable catalog component (Jellyfin and/or
-  Pseudovision as the source of truth; see
-  [PSEUDOVISION_SYNC.md](PSEUDOVISION_SYNC.md)).
-* **LLM abstraction** - a provider-agnostic interface for Ollama, OpenAI, or
-  other Large Language Models via TunaBrain.
-* **Layered-grid scheduling** - quarterly propose→feasibility-check→repair→freeze
-  loop, sparse monthly overrides, and a deterministic weekly/native-schedule
-  delivery step (see [SCHEDULING.md](SCHEDULING.md)).
-* **Bumper generation** - stubs for script generation and TTS synthesis.
-* **HTTP API** - endpoints to trigger retagging, scheduling, and bumper creation.
-* **Pseudovision integration** - direct sync of tags and schedules to Pseudovision
-  for IPTV streaming (see [PSEUDOVISION_SYNC.md](PSEUDOVISION_SYNC.md)).
-* **Nix & Docker ready** - includes a development shell for NixOS and a Docker
-  image suitable for Kubernetes deployments.
+TS holds all scheduling state. Tunabrain is stateless and makes every AI call;
+TS calls no model directly except the legacy strategies feature (see
+[PLAN.md](PLAN.md)). Pseudovision owns the media library and the playout
+timeline.
 
-## Project Layout
+Deployed at `https://tunarr-scheduler.kube.sea.fudo.link`.
+
+Ongoing work, open checklists, and known issues live in [PLAN.md](PLAN.md).
+Conventions and pitfalls for contributors are in [AGENTS.md](AGENTS.md).
+
+## How it fits
 
 ```
-├── resources/
-│   ├── config.edn          # default service configuration
-│   └── migratus.edn        # default database migration configuration
-├── src/tunarr/scheduler/
-│   ├── config.clj          # config loading helpers
-│   ├── main.clj            # CLI entry point
-│   ├── system.clj          # integrant system wiring
-│   ├── http/               # API routes + server
-│   ├── media/              # media catalogue integration
-│   ├── backends/           # backend clients (Pseudovision)
-│   ├── scheduling/         # scheduling engine
-│   ├── curation/           # LLM-based tagging and categorization
-│   ├── channels/           # channel management
-│   ├── util/               # misc helpers
-│   ├── tunabrain.clj       # TunaBrain LLM client
-│   ├── tts.clj             # TTS abstraction
-│   └── bumpers.clj         # bumper orchestration
-└── test/                   # unit tests
+              ┌──── media items ─────┐
+              ▼                      │
+   Tunarr Scheduler ── tags, channels, grid ──► Pseudovision ──► streams
+     │        │
+     │        └── bumper uploads ──► Grout ◄── filler queries ── Pseudovision
+     ▼
+   Tunabrain (all LLM work: categorize, tags, grids, overrides, bumpers)
 ```
 
-## Architecture
+Marquee and pvcli read TS's catalog, dimension, plan, and job endpoints.
 
-```
-┌─────────────────────┐
-│  tunarr-scheduler   │
-│  - Jellyfin sync    │
-│  - LLM categorize   │
-│  - Tag management   │
-└──────────┬──────────┘
-           │
-           │ Direct API
-           ▼
-┌─────────────────────┐
-│   Pseudovision      │
-│  - Tag storage      │
-│  - Scheduling       │
-│  - HLS streaming    │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│     Jellyfin        │
-│  - Media server     │
-└─────────────────────┘
+## Running locally
+
+Requires Java 21+ and the Clojure CLI (`nix develop` provides both).
+
+```sh
+docker compose up -d postgres                       # optional: local PostgreSQL
+clojure -M:run --config resources/config.edn
+clojure -M:run --config base.edn --config local.edn --log-level debug   # layered config
 ```
 
-## Getting Started
+`resources/config.edn` defaults to an in-memory catalog, a mock LLM, and
+`localhost` for every service, so the service starts with no dependencies.
+Options: `--config PATH` (repeatable; later files win), `--log-level LEVEL`,
+`--help`.
 
-### Prerequisites
+### Configuration
 
-* [Clojure CLI tools](https://clojure.org/guides/install_clojure)
-* Java 21+
+| Variable | Purpose |
+|---|---|
+| `PSEUDOVISION_URL` | Pseudovision base URL |
+| `TUNABRAIN_ENDPOINT` | Tunabrain base URL |
+| `GROUT_URL` | Grout base URL; unset disables bumper upload |
+| `BUMPER_OUTPUT_DIR` | Local scratch dir for composing bumpers (not shared with Grout) |
+| `PSEUDOVISION_AUTO_SYNC` | Push tag edits to PV as they happen (default `true`) |
+| `PSEUDOVISION_SYNC_DEBOUNCE_MS`, `_BULK_THRESHOLD`, `_BACKOFF_MS`, `_RECONCILE_HOURS` | Auto-sync tuning |
+| `TZ` (or `TIME_ZONE`) | Scheduling time zone; keep it the same as PV's |
+| `CATALOG_HOST`, `CATALOG_PORT`, `CATALOG_DATABASE`, `CATALOG_USER`, `CATALOG_PASSWORD` | PostgreSQL catalog connection, used when the config sets `:catalog {:type :postgresql}` |
+| `PORT`, `LOG_LEVEL` | Server port (default 8080), log level |
+| `LLM_*` | Only used by the legacy strategies feature |
 
-### Running the service locally
-
-```bash
-clojure -M:run --config my-config.edn
-```
-
-Options:
-- `--config PATH` - Path to configuration EDN file (can be specified multiple times)
-- `--log-level LEVEL` - Set log level (trace, debug, info, warn, error)
-- `--help` - Show usage information
-
-Examples:
-
-```bash
-# Run with default config and debug logging
-clojure -M:run --config resources/config.edn --log-level debug
-
-# Run with multiple config files
-clojure -M:run --config base-config.edn --config prod-overrides.edn
-```
-
-### Running the tests
-
-```bash
-clojure -M:test
-```
-
-### Development shell (Nix)
-
-A [`flake.nix`](flake.nix) file is provided for NixOS hosts:
-
-```bash
-nix develop
-clojure -M:run
-```
-
-### Docker image
-
-Build and run the container image:
-
-```bash
-docker build -t tunarr-scheduler .
-docker run -p 5545:5545 tunarr-scheduler
-```
-
-The container defaults to serving HTTP on port `5545` and reads configuration
-from environment variables defined in `resources/config.edn`.
+Channels are defined under a top-level `:channels` key, supplied as a separate
+config file (a Kubernetes configmap in production). The categorization
+dimensions (`:categories`) in `resources/config.edn` are the controlled
+vocabulary for the whole ecosystem; Grout validates against them too. Don't add
+a `:channel` dimension there; its values come from `:channels`.
 
 ### Database migrations
 
-Database migrations are managed with
-[Migratus](https://github.com/yogthos/migratus). The default configuration lives
-in `resources/migratus.edn` and assumes a PostgreSQL database reachable at
-`jdbc:postgresql://localhost:5432/tunarr_scheduler`. Point the migratus runner
-at an alternate configuration by setting the `MIGRATUS_CONFIG` environment
-variable when invoking the `tunarr-scheduler-migratus` container or binary.
+Migrations live in `resources/migrations` and run with
+[Migratus](https://github.com/yogthos/migratus) (the flake also builds a
+`tunarr-scheduler-migratus` image). To migrate a local database:
 
-For example, to run migrations locally with the default config:
-
-```bash
-clojure -Sdeps '{:deps {migratus/migratus {:mvn/version \"1.6.3\"}}}' -M -m migratus.core migrate resources/migratus.edn
+```sh
+clojure -Sdeps '{:deps {migratus/migratus {:mvn/version "1.6.3"}}}' \
+  -M -m migratus.core migrate resources/migratus.edn
 ```
 
-#### LLM configuration
+## Testing
 
-To use the OpenAI client set the following environment variables (or override
-the configuration file):
+```sh
+clojure -M:test                                     # full suite
+clojure -M:test --focus tunarr.scheduler.scheduling.expander-test
+nix flake check                                     # the same suite against locked deps
+```
 
-* `LLM_PROVIDER=openai`
-* `LLM_API_KEY=<your-openai-api-key>`
-* `LLM_MODEL` (defaults to `gpt-4o`)
-* `LLM_ENDPOINT` (defaults to `https://api.openai.com/v1`)
+The tests in `test_postgres_only/` need a real PostgreSQL and aren't part of the
+default run.
 
-The service will call the Chat Completions API for media classification,
-scheduling suggestions, and bumper script generation.
+## How scheduling works
 
-#### TunaBrain configuration
+| Cadence | Endpoint | What happens |
+|---|---|---|
+| Quarterly | `POST /api/scheduling/quarterly` | Build a `CatalogProfile` from PV's `/api/catalog/aggregate` → Tunabrain proposes a grid → deterministic feasibility check → bounded repair loop → optional taste review → freeze. For the current quarter, sync the grid onto PV's native schedule. |
+| Monthly | `POST /api/scheduling/monthly` | Tunabrain proposes sparse overrides against the frozen grid; TS stores them. |
+| Weekly | `POST /api/scheduling/weekly` | Expand grid + overrides into dated `DailySlot`s and push them to PV. Being retired; see [PLAN.md](PLAN.md). |
+| Daily | `POST /api/scheduling/daily` | Ask PV to extend each channel's playout horizon. |
 
-TunaBrain is the LLM orchestration service that powers media categorization:
+Kubernetes CronJobs call these endpoints; TS runs no in-process scheduler. See
+[deploy/k8s/README.md](deploy/k8s/README.md) for the manifests and for running
+a quarter ahead of time.
 
-* `TUNABRAIN_ENDPOINT` (defaults to `http://localhost:5546`)
+The wire contracts (`CatalogProfile`, `Grid`, `Override`, `FeasibilityReport`,
+`DailySlot`) are defined by Tunabrain's Pydantic models and mirrored here as
+Malli schemas in `scheduling/contracts.clj`. The prose spec, including the
+expander's precedence rules, is
+[Tunabrain's `docs/scheduling-grid-spec.md`](https://github.com/fudoniten/tunabrain/blob/master/docs/scheduling-grid-spec.md).
 
-### Kubernetes deployment
+Operators steer generation per channel through
+`/api/scheduling/channels/:channel/guidance` (themes, planned events, strategic
+guidance), and can read the frozen grid, overrides, preview, and plan from the
+same prefix.
 
-The resulting image can be used in Kubernetes by defining a `Deployment` and
-`Service`. Configure secrets for Jellyfin, Pseudovision, LLM, and TTS endpoints
-as needed. The service exposes the following HTTP endpoints:
+## Catalog and tag sync
 
-* `GET /healthz` - readiness/liveness probe.
-* `POST /api/media/:library/sync-pseudovision-tags`
-* `POST /api/media/:library/retag`
-* `POST /api/media/tags/audit` - async LLM tag audit; deletes unsuitable tags
-  unless `?dry-run=true`. Results are reported via `GET /api/jobs/:job-id`.
-* `POST /api/media/tags/triage` - async LLM tag governance; applies
-  keep/remove/rename decisions using per-tag usage counts and example titles.
-  Supports `?dry-run=true` and `?target-limit=N`.
-* `POST /api/channels/sync-pseudovision`
-* `POST /api/channels/:channel-id/schedule`
-* `POST /api/bumpers/up-next`
+TS's catalog (in-memory or PostgreSQL) mirrors PV's media items and adds
+categorization and tags. Dimensions are flattened to `dimension:value` tags
+when pushed to PV.
 
-Payloads are JSON documents.
+With auto-sync on, every item-level tag or category write marks the item dirty,
+and a background worker pushes dirty items to PV after a short debounce. Global
+tag operations (rename, delete, purge) trigger a full reconcile, and a periodic
+reconcile (default every 24 h) catches anything missed. The
+`POST /api/media/:library/sync-pseudovision-tags` endpoint still forces a
+full-library sync.
 
-## Next Steps
+## Bumpers
 
-* Implement LLM-driven scheduling agent for automated programming
-* Add web UI for instruction editing and schedule preview
-* Add episode tracking database schema
-* Implement bumper generation with TTS
-* Set up automated daily schedule regeneration
+`POST /api/bumpers/generate?channel=X&count=N&durations=5,10,15` asks Tunabrain
+for an image, picks a CC0 music track (or goes silent), composes a Ken Burns
+clip with ffmpeg into `BUMPER_OUTPUT_DIR`, and uploads it to Grout as a
+multipart `POST /grout/media`. PV's gap filler then pulls bumpers from Grout.
+[`tools/bumper-music/`](tools/bumper-music/README.md) sources the music library
+from Freesound.
 
-See [ROADMAP.md](ROADMAP.md) for the complete roadmap.
+## Source layout
 
-## Related Documentation
+```
+src/tunarr/scheduler/
+├── main.clj, system.clj, config.clj   entry point, Integrant system, layered config
+├── http/                              reitit routes, schemas, one api/ ns per resource
+├── scheduling/                        contracts, expander, feasibility, candidates,
+│                                      orchestration, native_schedule, review,
+│                                      storage, plans, tasks (cron entry points)
+├── media/                             catalog protocol + SQL/memory impls, PV sync
+├── curation/                          LLM categorization, tags, dimension validation
+├── channels/                          channel config → PV channel sync
+├── backends/{pseudovision,grout}/     HTTP clients
+├── tunabrain.clj                      Tunabrain client
+└── bumpers.clj                        bumper pipeline
+```
 
-- [PSEUDOVISION_INTEGRATION.md](PSEUDOVISION_INTEGRATION.md) - Integration design
-- [PSEUDOVISION_SYNC.md](PSEUDOVISION_SYNC.md) - Tag sync documentation
-- [PSEUDOVISION_MIGRATION.md](PSEUDOVISION_MIGRATION.md) - One-time migration guide
-- [SCHEDULING.md](SCHEDULING.md) - Scheduling system design
-
-Contributions are welcome as the project grows.
+The full HTTP API is at `GET /openapi.json`; `GET /healthz` is the readiness
+probe. `archive/` holds one finished design record (duration-aware scheduling)
+that code comments cite by section.

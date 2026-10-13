@@ -14,7 +14,7 @@ with `{:error ...}` on failure.
 | Endpoint                      | What it does                                            | Query params |
 |-------------------------------|---------------------------------------------------------|--------------|
 | `/api/scheduling/daily`       | Extend the playout horizon for every channel            | `horizon` (days, default `14`), `channel`, `channel_id` |
-| `/api/scheduling/weekly`      | Re-apply schedule templates to every channel            | `channel`, `channel_id` |
+| `/api/scheduling/weekly`      | Expand grid + overrides and push DailySlots to PV (being retired; see PLAN.md) | `channel`, `channel_id` |
 | `/api/scheduling/monthly`     | Propose + store sparse monthly overrides (async)        | `channel`, `channel_id` |
 | `/api/scheduling/quarterly`   | Generate + freeze the quarterly grid (async)            | `date` (`YYYY-MM-DD`, default today), `channel`, `channel_id` |
 

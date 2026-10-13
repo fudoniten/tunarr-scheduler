@@ -59,7 +59,7 @@
 (defn ^:deprecated list-channels-handler
   "DEPRECATED: Hardcoded channel list. Channels are dimensions now.
     Use list-tags-handler or get-media-by-tag-handler with channel:NAME tag.
-    See DIMENSION_CLEANUP.md for removal timeline."
+    See the dimension cleanup in PLAN.md."
   [{:keys [catalog]}]
   (fn [_]
     (try
@@ -71,7 +71,7 @@
 (defn ^:deprecated get-media-by-channel-handler
   "DEPRECATED: Hardcoded channel filter. Channels are dimensions now.
     Use get-media-by-tag-handler with the channel:NAME tag.
-    See DIMENSION_CLEANUP.md for removal timeline."
+    See the dimension cleanup in PLAN.md."
   [{:keys [catalog]}]
   (fn [req]
     (try
@@ -89,7 +89,7 @@
 (defn ^:deprecated list-genres-handler
   "DEPRECATED: Hardcoded genre list. Genres are dimensions now.
     Use list-tags-handler or get-media-by-tag-handler with genre:NAME tag.
-    See DIMENSION_CLEANUP.md for removal timeline."
+    See the dimension cleanup in PLAN.md."
   [{:keys [catalog]}]
   (fn [_]
     (try
@@ -102,7 +102,7 @@
 (defn ^:deprecated get-media-by-genre-handler
   "DEPRECATED: Hardcoded genre filter. Genres are dimensions now.
     Use get-media-by-tag-handler with the genre:NAME tag.
-    See DIMENSION_CLEANUP.md for removal timeline."
+    See the dimension cleanup in PLAN.md."
   [{:keys [catalog]}]
   (fn [req]
     (try

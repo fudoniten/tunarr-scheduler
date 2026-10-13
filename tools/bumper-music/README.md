@@ -10,7 +10,7 @@ This directory contains tools to automatically download royalty-free (CC0) music
 
 2. **Run the sourcer**:
    ```bash
-   cd /net/projects/niten/tunarr-scheduler/tools/bumper-music
+   cd tools/bumper-music
    export FREESOUND_API_KEY=your-key-here
    
    # Download music for a single mood

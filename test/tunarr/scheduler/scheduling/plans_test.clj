@@ -24,8 +24,8 @@
   (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel_guidance (
       channel VARCHAR(128) PRIMARY KEY, strategic_guidance TEXT, quarterly_theme TEXT,
       monthly_theme TEXT, planned_events TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)"])
-  ;; The `channel` table mirrors the live TS schema (see PSEUDOVISION_INTEGRATION.md
-  ;; and channels/sync.clj). `find-channel-id` and `find-channel-full-name` look
+  ;; The `channel` table mirrors the live TS schema (see
+  ;; channels/sync.clj). `find-channel-id` and `find-channel-full-name` look
   ;; up the canonical `id` UUID from this table.
   (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS channel (
       id VARCHAR(64) PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,

@@ -309,7 +309,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; propose-grid-via-daypart-candidates! — split round trip
-;; (DURATION_AWARE_SCHEDULING.md §4.3, Option A)
+;; (archive/DURATION_AWARE_SCHEDULING.md §4.3, Option A)
 ;;
 ;; This is an alternative :propose-grid implementation with the SAME calling
 ;; contract as tb/propose-quarterly-grid!, so it's tested directly here

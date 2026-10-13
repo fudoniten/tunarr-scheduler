@@ -1,5 +1,5 @@
 (ns tunarr.scheduler.scheduling.candidates-test
-  "Tests for propose-daypart-candidates (DURATION_AWARE_SCHEDULING.md §4.2)."
+  "Tests for propose-daypart-candidates (archive/DURATION_AWARE_SCHEDULING.md §4.2)."
   (:require [clojure.test :refer [deftest testing is]]
             [tunarr.scheduler.scheduling.candidates :as sut]))
 
