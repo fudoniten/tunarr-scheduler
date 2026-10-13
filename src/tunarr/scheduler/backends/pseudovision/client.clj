@@ -63,7 +63,10 @@
 ;; ---------------------------------------------------------------------------
 ;;
 ;; Pseudovision list endpoints return an offset-pagination envelope:
-;;   {:items [...] :pagination {:limit ... :offset ... :total ... :has_more ...}}
+;;   {:items [...] :pagination {:limit ... :offset ... :total ... :has-more ...}}
+;; PV builds the envelope with a `:has_more` key, but its JSON encoder
+;; kebab-cases every key on the way out, so the wire key is `has-more`.
+;; Reading `:has_more` here silently stopped every listing after one page.
 ;; These helpers unwrap that envelope and transparently fetch every page so
 ;; callers always receive a flat vector of items.
 
@@ -79,7 +82,7 @@
     (let [body  (fetch-page page-size offset)
           items (:items body)
           acc'  (into acc items)]
-      (if (and (get-in body [:pagination :has_more]) (seq items))
+      (if (and (get-in body [:pagination :has-more]) (seq items))
         (recur (+ offset (count items)) acc')
         acc'))))
 

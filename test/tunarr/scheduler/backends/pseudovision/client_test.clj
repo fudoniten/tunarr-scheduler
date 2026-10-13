@@ -57,3 +57,20 @@
       (is (= {"schedule-id" 9} (json/parse-string (:body @captured)))))
     (testing "query-params passed alongside the json body survive"
       (is (= {"rebuild" "true" "horizon" "14"} (:query-params @captured))))))
+
+;; Regression: fetch-all-pages read `:has_more`, but PV's JSON encoder
+;; kebab-cases keys, so the wire key is `has-more` and every listing stopped
+;; after the first 500-item page.
+
+(deftest list-all-tags-follows-has-more-across-pages
+  (let [offsets (atom [])
+        pages   {0   {:items [{:name "a"} {:name "b"}]
+                      :pagination {:limit 500 :offset 0 :total 3 :has-more true}}
+                 2   {:items [{:name "c"}]
+                      :pagination {:limit 500 :offset 2 :total 3 :has-more false}}}]
+    (with-redefs [http/request (fn [{:keys [query-params]}]
+                                 (let [offset (get query-params "offset")]
+                                   (swap! offsets conj offset)
+                                   {:status 200 :body (get pages offset)}))]
+      (is (= ["a" "b" "c"] (map :name (pv/list-all-tags config))))
+      (is (= [0 2] @offsets)))))
