@@ -23,12 +23,12 @@
 
   ;; DEPRECATED: Hardcoded channel concept. Channels are a dimension now.
   ;; Use get-media-categories with "channel" dimension instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (get-channels [catalog])
 
   ;; DEPRECATED: Hardcoded genre concept. Genres are a dimension now.
   ;; Use get-media-categories with "genre" dimension instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (get-genres [catalog])
 
   (get-media-tags [catalog media-id])
@@ -42,33 +42,33 @@
 
   ;; DEPRECATED: Hardcoded channel update. Channels are a dimension now.
   ;; Use set-media-category-values! with "channel" dimension instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (update-channels! [catalog channels])
 
   (update-libraries! [catalog libraries])
 
   ;; DEPRECATED: Hardcoded channel assignment. Channels are a dimension now.
   ;; Use add-media-category-values! with "channel" dimension instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (add-media-channels! [catalog media-id channels])
 
   ;; DEPRECATED: Hardcoded genre assignment. Genres are a dimension now.
   ;; Use add-media-category-values! with "genre" dimension instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (add-media-genres! [catalog media-id channels])
 
   (add-media-taglines! [catalog media-id taglines])
 
   ;; DEPRECATED: Hardcoded channel filter. Channels are a dimension now.
   ;; Use get-media-by-tag with "channel:NAME" tag instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (get-media-by-channel [catalog channel])
 
   (get-media-by-tag [catalog tag])
 
   ;; DEPRECATED: Hardcoded genre filter. Genres are a dimension now.
   ;; Use get-media-by-tag with "genre:NAME" tag instead.
-  ;; See DIMENSION_CLEANUP.md Phase 3.
+  ;; See the dimension cleanup in PLAN.md.
   (get-media-by-genre [catalog genre])
 
   (get-media-process-timestamps [catalog media-id])

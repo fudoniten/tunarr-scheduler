@@ -37,7 +37,7 @@
         (assoc ::media/name (or (:title item) (:name item) :unknown))
         (assoc ::media/overview (:description item))
         ;; FIXME: Hardcoded genres field. PV genres should be mapped to a dimension
-        ;; or derived from tags. See DIMENSION_CLEANUP.md.
+        ;; or derived from tags. See the dimension cleanup in PLAN.md.
         (assoc ::media/genres (or (:genres item) []))
         (assoc ::media/community-rating (:community-rating item))
         (assoc ::media/critic-rating (:critic-rating item))
@@ -52,7 +52,7 @@
         (assoc ::media/tags [])
         (assoc ::media/library-id library-id)
         ;; FIXME: Hardcoded kid-friendly boolean. Should read from dimensions
-        ;; or be removed entirely. See DIMENSION_CLEANUP.md.
+        ;; or be removed entirely. See the dimension cleanup in PLAN.md.
         (assoc ::media/kid-friendly? false)
         (cond->
           (= :episode (keyword (:kind item)))

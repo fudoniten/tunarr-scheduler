@@ -1,8 +1,8 @@
 (ns tunarr.scheduler.scheduling.contracts-test
   "Conformance tests for the layered-grid contracts.
 
-   The example maps below are transcribed from the handoff spec
-   (tunabrain docs/handoff-tunarr-pseudovision.md §2) and round-tripped through
+   The example maps below follow Tunabrain's Pydantic contracts
+   (tunabrain src/tunabrain/scheduling/grid.py) and are round-tripped through
    Cheshire to prove the schemas accept the exact wire format (snake_case keys)
    that Tunabrain produces and consumes."
   (:require [clojure.test :refer [deftest testing is]]

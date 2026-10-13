@@ -1,236 +1,51 @@
 # AGENTS.md — Tunarr Scheduler
 
-> Working notes for AI agents and humans working on this repo.
-> For a deeper tour, see [README.md](README.md), [ROADMAP.md](ROADMAP.md),
-> and `PSEUDOVISION_INTEGRATION.md`.
+> Working notes for AI agents and humans changing this repo. Start with
+> [README.md](README.md) (what TS does, how to run and test it, how scheduling
+> works) and [PLAN.md](PLAN.md) (what's being worked on).
 
-## What this is
+## Ground rules
 
-Tunarr Scheduler is the **control plane** for the Fudo stack. It is a Clojure
-service that:
-
-1. Pulls media metadata from **Jellyfin** (catalog sync).
-2. Calls **Tunabrain** (LLM gateway) to tag and categorise media.
-3. Computes and freezes **quarterly grids + monthly overrides** per channel.
-4. Runs a deterministic **weekly expander** that projects the grid onto a
-   date range and pushes concrete DailySlots to **Pseudovision**.
-5. Drives the **bumper pipeline** (LLM script → TTS → ffmpeg → Grout).
-
-Pseudovision owns the playout timeline. Tunarr Scheduler decides *what* to
-schedule. Tunabrain supplies the LLM reasoning. Tunarr Scheduler is stateful;
-Tunabrain is stateless.
-
-## How it fits in the ecosystem
-
-```
-   Jellyfin ──►  Tunarr Scheduler  ──► Pseudovision  ──► HLS stream
-                  │       │
-                  ▼       ▼
-                Tunabrain  Grout (bumpers)
-                (LLM)      (filler)
-                  ▲
-                  │
-                 Marquee (UI, optional)
-```
-
-- **Upstream**: Jellyfin (`jellyfin.kube.sea.fudo.link`) is the source of
-  truth for media. Tunarr Scheduler reads library metadata, episodes, and tags
-  from it.
-- **Outbound writer**: Pseudovision
-  (`pseudovision.kube.sea.fudo.link`) is the only writer for `daily-slots` and
-  channel-tags in the live cluster. Tunarr Scheduler never edits PV directly
-  outside of these two flows.
-- **LLM dependency**: Tunabrain (`tunabrain.kube.sea.fudo.link`) is
-  invoked for tagging, channel-mapping, propose-grid, repair-grid, and
-  propose-overrides.
-- **Bumper target**: Grout (`grout.pseudovision.svc.cluster.local:8080`,
-  in-cluster only) for LLM-generated bumpers. Tunarr Scheduler's `8df074d`
-  switched the bumper pipeline from Jellyfin to Grout.
-
-## Live endpoints (cluster)
-
-| Service | URL | Notes |
-|---|---|---|
-| Public HTTPS | `https://tunarr-scheduler.kube.sea.fudo.link` | Ingress via cert-manager |
-| Version | `GET /api/version` | `{git-commit, git-timestamp, version-tag}` |
-| OpenAPI | `GET /openapi.json` | Reitit-generated; ~30 endpoints (5 cron-driven + 5 scheduling + dimensions + tags + jobs) |
-| Health | none at root | Use `/api/version` as a liveness probe |
-| In-cluster | `tunarr-scheduler.arr.svc.cluster.local:3000` | In the `arr` namespace; Pseudovision calls into this when migrating media |
-
-**Deployed as of 2026-07-03:** `c08c4c0` (most recent, includes the Grout
-bumper migration). Live cluster and `upstream/master` are at the same SHA.
-
-## Local development
-
-```bash
-# Run
-clojure -M:run --config resources/config.edn
-clojure -M:run --config resources/config.edn --log-level debug
-clojure -M:run --config base.edn --config prod-overrides.edn  # layered config
-
-# Tests (eftest)
-clojure -M:test
-clojure -M:test --focus tunarr.scheduler.scheduling.expander-test
-
-# nREPL
-clojure -M:repl
-```
-
-Tooling:
-
-- **Clojure CLI** (deps.edn-based)
-- **Java 21+**
-- The service expects a `pseudovision` config block pointing at PV's base URL
-  and a `tunabrain` config block. See `resources/config.edn`.
-
-## Source layout
-
-```
-src/tunarr/scheduler/
-├── main.clj              ; CLI / system boot
-├── system.clj            ; integrant system map (wires everything together)
-├── config.clj            ; Aero + layered config loading
-├── http/                 ; reitit routes
-│   ├── core.clj          ; the router
-│   ├── api/              ; one ns per resource
-│   │   ├── scheduling.clj     ; /api/scheduling/{daily|weekly|monthly|quarterly}
-│   │   ├── plans.clj          ; /api/scheduling/channels/{ch}/{grid|overrides|plan|preview|guidance}
-│   │   ├── media.clj          ; recategorize, retag, sync-pseudovision
-│   │   ├── dimensions.clj     ; /api/dimensions/*
-│   │   ├── tags.clj           ; /api/tags
-│   │   ├── jobs.clj           ; /api/jobs/* (async job runner)
-│   │   └── ...
-│   └── ...
-├── scheduling/
-│   ├── orchestration.clj  ; run-quarterly! / run-monthly! / sync-native-schedule!
-│   ├── native_schedule.clj ; Grid -> PV native schedule/slot translator (base
-│   │                        grids; called from run-quarterly! via
-│   │                        sync-native-schedule! when pv-channel-id is given)
-│   ├── integration.clj   ; publish-week! / publish-daily-slots!  (talks to PV;
-│   │                       still the only path for monthly Overrides — see
-│   │                       ROADMAP.md's "DailySlot ingestion" open item)
-│   ├── expander.clj      ; deterministic grid + overrides → DailySlot[]
-│   ├── contracts.clj     ; Malli schemas (CatalogProfile, Grid, Override, DailySlot)
-│   ├── feasibility.clj   ; pre-flight capacity checks
-│   ├── candidates.clj    ; duration-feasible slot-tiling menu (opt-in, not
-│   │                       yet the default — see DURATION_AWARE_SCHEDULING.md)
-│   ├── plans.clj         ; preview + storage layer for frozen grids
-│   └── tasks.clj         ; cron-driven task entry points (also defines
-│                           run-daily!/run-weekly!, not just thin wrappers
-│                           around orchestration.clj)
-├── backends/
-│   └── pseudovision/
-│       └── client.clj    ; the PV HTTP client; push-daily-slots! lives here
-├── curation/             ; LLM-driven tagging + categorisation
-├── media/                ; Jellyfin client + per-library operations
-├── channels/             ; channel definitions, config keys
-├── tunabrain.clj         ; Tunabrain HTTP client
-├── bumpers.clj           ; bumper orchestration
-└── tts.clj               ; TTS abstraction (used by bumpers)
-```
-
-## Public API surface (high-traffic endpoints)
-
-The 5 cron-driven endpoints (per the [tunarr-scheduler-scheduling-redesign.md](references/tunarr-scheduler-scheduling-redesign.md)):
-
-| Endpoint | Purpose | Caller |
-|---|---|---|
-| `POST /api/scheduling/daily` | Extend the playout horizon (1-2 days) | K8s CronJob (frequent) |
-| `POST /api/scheduling/weekly` | Re-apply schedule templates to every channel (deterministic) | K8s CronJob (weekly) |
-| `POST /api/scheduling/monthly` | LLM-proposed sparse overrides | K8s CronJob (monthly) |
-| `POST /api/scheduling/quarterly` | LLM-proposed frozen weekly grid + repair loop, **plus** syncing the frozen grid onto Pseudovision's native schedule/slot engine (`sync-native-schedule!`) when a `pv-channel-id` is resolvable | K8s CronJob (quarterly) |
-| `GET /api/scheduling/channels` | List channels with stored plan/guidance | Marquee |
-
-`weekly`'s "re-apply schedule templates" description is now only half the story for a channel whose base grid has been native-synced: Pseudovision's own horizon extension (`daily`) keeps that channel's timeline full without a weekly DailySlot push. `weekly` remains the only delivery mechanism for monthly Overrides, so it's still live and cron-wired — see ROADMAP.md's "DailySlot ingestion" open item for the unresolved overlap.
-
-Plus the per-channel control plane (under `/api/scheduling/channels/{slug}/`):
-`grid`, `overrides`, `plan`, `preview`, `guidance` (PUT/GET).
-
-The dimensions and tags endpoints are the **truth source** for channel-tagged
-media:
-
-- `GET /api/dimensions` — `[{name, value-count}, ...]`
-- `GET /api/dimensions/channel/values` — `[{value, usage-count}, ...]`
-- `GET /api/dimensions/channel/values/{slug}/media` — concrete media for a
-  channel. **Use this, not `GET /api/catalog/aggregate?channel=X`** — the
-  latter lives in PV and was the source of Issue 4.
-- `GET /api/tags`, `GET /api/tags/{tag}/media` — flat tag inventory (no
-  `channel:*` prefix in tag names; the `:` prefix is a display convention
-  in dimensions, not stored in `media_tags`).
-
-Full schema: `GET /openapi.json`.
+- **All AI calls go through Tunabrain.** TS holds no model keys. The one
+  exception, `llm.clj` and the strategies feature, is scheduled for deletion;
+  don't build on it.
+- **Pseudovision owns media and the timeline.** TS reads media items from PV
+  and writes tags, channels, and schedules to it. Jellyfin is no longer a TS
+  dependency; PV scans it.
+- **The Tunabrain Pydantic models are the source of truth for the scheduling
+  contracts.** When one changes, update `scheduling/contracts.clj` (Malli) in
+  the same change, and keep the expander golden test
+  (`expander_golden_test.clj`, ported from Tunabrain's
+  `tests/test_grid_expander.py`) passing.
+- **Expansion and feasibility are pure.** No I/O, randomness, or LLM calls in
+  `expander.clj`, `feasibility.clj`, or `candidates.clj`. Episode rotation
+  happens at air time in PV, not here.
+- **The grid is frozen.** Monthly and weekly steps never mutate it; re-freezing
+  inserts a new version.
 
 ## Common pitfalls
 
-1. **Pattern 8a — sync the fork before debugging.** `~/repos/tunarr-scheduler`
-   is the `fudohermes` personal fork. Active work happens on
-   `fudoniten/tunarr-scheduler` upstream. Local WIP (uncommitted files, draft
-   branches) is **not** what's deployed. Always run
-   `git fetch upstream && git log upstream/master --since="14 days ago"` first.
-   The Jul 2026 changes digest (`references/tunarr-scheduler-july-2026-changes.md`)
-   is the second stop.
-2. **The 4e8fb6b WARN is the most common "I never saw this before" cause.**
-   When weekly scheduling silently fails, this WARN surfaces it:
-   `publish-week!: pushed daily slots but NONE were ingested`. Look at it
-   before assuming a code regression. If it's there, the failure is in
-   Pseudovision's `daily-slots` handler (e.g. the `category_filters` show-vs-episode
-   bug fixed in PV PR #114), not in this repo.
-3. **`channel-tag` injection is the cause AND the cure.** Scheduler adds
-   `channel:<slug>` to every slot's `category_filters` (via
-   `tasks.clj:39 channel-catalog-tag` and `integration.clj:publish-daily-slots!`).
-   If PV's filter doesn't honour it, every weekly push is silently rejected.
-   This is the same plumbing that exposes the underlying PV bug, and fixing
-   the PV side makes scheduling work again.
-4. **`channel-names` in `media_items` is empty.** The legacy hardcoded field
-   is no longer the source of truth. Channel membership lives in
-   `media_categorization` (the dimension table) and is flattened into
-   `media_tags` as the `channel:<slug>` tag at sync time. Don't read
-   `media.channel_names` to filter — use the dimensions endpoint.
-5. **`channel_ids` are slug strings, not integers.** Tunarr Scheduler's
-   `channel` query param takes the config-key slug (`goldenreels`), not the
-   display name (`Golden Reels`) and not PV's integer id. The `channel_id`
-   query param takes PV's integer id. Internally, **storage keys on the
-   TS `channel.id` UUID** (not the slug, not the display name, not the
-   PV integer id) — see pitfall 8.
-6. **Tunabrain responses can have explicit `null` in scope fields.** Strip
-   them before validating against `Override` (commit `1caf909`). The
-   `Tunabrain → Override` step in `scheduling/orchestration.clj` is the
-   place to look.
-7. **Heredocs and shell-interpretation can corrupt OpenAPI generation.** The
-   reitit OpenAPI spec is generated at boot from the route table; if routes
-   are added inside `with-redefs` blocks in tests, they won't appear in the
-   spec. Define routes at the top level, then add the handler impls.
-8. **Storage uses `channel.id` UUID, NOT the display name.** Until the
-   July 2026 fix, `freeze-grid!` / `store-overrides!` / `set-guidance!`
-   stored the `::media/channel-fullname` (e.g. "Enigma TV") in
-   `grids.channel` etc. That collided with the slug used in HTTP URLs
-   (`/api/scheduling/channels/enigma/grid` — exact-match `WHERE channel = ?`
-   returned 0 rows because the stored value was "Enigma TV", not "enigma")
-   and even with `channel-storage-uuid` doing slug→fullname translation,
-   case mismatches and slug-with-spaces values ("enigma tv", "golden reels")
-   in older `channel_guidance` rows still failed. The fix is to use the
-   TS `channel.id` UUID as the canonical storage key. **All new code must
-   pass `::media/channel-uuid` to the storage functions; passing
-   `::media/channel-fullname` is a bug.** The pre-migration data in the
-   `grids` / `overrides` / `channel_guidance` tables is a one-shot
-   migration target — see `references/ts-storage-channel-uuid-2026-07.md`
-   (the SQL lives at `/opt/media/2026-07-10-ts-channel-uuid-migration.*.sql`
-   on the hermes-shares sidecar).
-9. **Tunabrain is now in `arr` namespace, not `media`.** When looking up
-   the service, use `tunabrain.arr.svc.cluster.local:5546` (in-cluster) or
-   `tunabrain.kube.sea.fudo.link` (ingress). The legacy `media` namespace
-   service was a sidecar-only stub that had no endpoints.
-
-## Where to look next
-
-- `README.md` — features, layout, getting started
-- `ROADMAP.md` — current phase of the layered grid scheduling
-- `PSEUDOVISION_INTEGRATION.md` — why this repo talks directly to PV instead
-  of going through Jellyfin
-- `references/tunarr-scheduler-scheduling-redesign.md` — the batch→cron
-  pipeline (commit `ba6f7c0`)
-- `references/tunarr-scheduler-july-2026-changes.md` — 14-day commit digest
-  (always re-run `git log upstream/master --since="14 days ago"` for current)
-- `references/catalog-aggregate-channel-filter-bug.md` — Issue 4 (PV-side)
-- `references/handoff-tunarr-pseudovision.md` (in tunabrain repo) — the
-  authoritative spec for the scheduler↔tunabrain contract
+1. **Channel identity has five spellings:** the config slug (`goldenreels`),
+   the display name (`Golden Reels`), the TS channel UUID, the PV UUID, and the
+   PV integer id. HTTP routes take the slug. Storage (`grids`, `overrides`,
+   `channel_guidance`) is keyed by the **TS channel UUID**: pass
+   `::media/channel-uuid` to storage functions, never
+   `::media/channel-fullname`.
+2. **PV emits kebab-case JSON** (`has-more`, not `has_more`), while the
+   scheduling contracts and Tunabrain use snake_case. The conversion happens at
+   the `scheduling/integration.clj` boundary; don't sprinkle it elsewhere.
+3. **Tunabrain can return explicit `null` in override scope fields.** Strip
+   them before validating against `Override` (see `orchestration.clj`).
+4. **`media.channel_names` is empty.** Channel membership lives in
+   `media_categorization` (the `channel` dimension) and reaches PV as the
+   `channel:<slug>` tag. Use the dimensions endpoints, not the legacy fields.
+5. **Define routes at the top level of `http/routes.clj`.** The OpenAPI spec is
+   generated from the route table at boot, so routes added elsewhere (for
+   example inside a test's `with-redefs`) won't appear in it.
+6. **Quarterly grid proposals are slow** (about two minutes per channel).
+   Keep the Tunabrain socket timeout at two minutes or more.
+7. **Don't add a `:channel` dimension to `:categories`.** Its values are
+   derived from the top-level `:channels` config.
+8. **Ignore the `^:deprecated` genre and channel functions** in `media.clj`,
+   `catalog.clj`, and `sql_catalog.clj`. They're slated for removal (see the
+   dimension cleanup in [PLAN.md](PLAN.md)); new code should use dimensions.

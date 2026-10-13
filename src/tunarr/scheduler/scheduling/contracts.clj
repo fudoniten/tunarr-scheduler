@@ -155,7 +155,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; DaypartCandidate — Pass B input, computed here from tag_runtime_histograms
-;; (§4.2/§4.3 of DURATION_AWARE_SCHEDULING.md). Sent TO Tunabrain's
+;; (§4.2/§4.3 of archive/DURATION_AWARE_SCHEDULING.md). Sent TO Tunabrain's
 ;; propose-strip-fill endpoint; never invented by Tunabrain, never stored.
 ;; ---------------------------------------------------------------------------
 

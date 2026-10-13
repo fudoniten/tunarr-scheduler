@@ -265,7 +265,7 @@
 
 ;; NOTE: Tag governance keeps the free-form tag namespace clean.
 ;; Dimensions use a controlled vocabulary and don't need governance.
-;; See DIMENSION_CLEANUP.md for the full migration plan.
+;; See the dimension cleanup in PLAN.md.
 (defn request-tag-triage!
   "Request governance recommendations for a collection of tags.
 
@@ -296,7 +296,7 @@
 
 ;; NOTE: Tag audit keeps the free-form tag namespace clean.
 ;; Dimensions use a controlled vocabulary and don't need audit.
-;; See DIMENSION_CLEANUP.md for the full migration plan.
+;; See the dimension cleanup in PLAN.md.
 (defn request-tag-audit!
   "Audit a list of tags for suitability and get removal recommendations.
 
@@ -418,7 +418,7 @@
    :cost_tier           cost-tier})
 
 (defn daypart-skeleton-request
-  "Build a DaypartSkeletonRequest payload (DURATION_AWARE_SCHEDULING.md §4.3,
+  "Build a DaypartSkeletonRequest payload (archive/DURATION_AWARE_SCHEDULING.md §4.3,
    Option A — Pass A alone, the first half of the split round-trip)."
   [{:keys [channel catalog-profile quarterly-theme strategic-guidance
            broadcast-day-start cost-tier]
@@ -431,7 +431,7 @@
    :cost_tier           cost-tier})
 
 (defn strip-fill-request
-  "Build a StripFillRequest payload (DURATION_AWARE_SCHEDULING.md §4.3,
+  "Build a StripFillRequest payload (archive/DURATION_AWARE_SCHEDULING.md §4.3,
    Option A — Pass B for one daypart, the second half of the split round-trip).
    `candidates` is the duration-feasible menu from
    `scheduling.candidates/propose-daypart-candidates` for this exact block."
@@ -509,7 +509,7 @@
 
 (defn propose-daypart-skeleton!
   "Ask Tunabrain for Pass A alone: the coarse dayparting for a channel
-   (DURATION_AWARE_SCHEDULING.md §4.3, Option A). `opts` are the keys consumed
+   (archive/DURATION_AWARE_SCHEDULING.md §4.3, Option A). `opts` are the keys consumed
    by `daypart-skeleton-request`. Returns the parsed DaypartSkeletonResponse:
    {:skeleton :cost_estimate}."
   [client opts]
@@ -524,7 +524,7 @@
 
 (defn propose-strip-fill!
   "Ask Tunabrain for Pass B for one daypart block, against a precomputed
-   candidate menu (DURATION_AWARE_SCHEDULING.md §4.3, Option A). `opts` are the
+   candidate menu (archive/DURATION_AWARE_SCHEDULING.md §4.3, Option A). `opts` are the
    keys consumed by `strip-fill-request`. Returns the parsed
    StripFillResponse: {:strips :cost_estimate}. An empty :strips list is
    valid (the caller should warn, not fail, same as propose-quarterly-grid's

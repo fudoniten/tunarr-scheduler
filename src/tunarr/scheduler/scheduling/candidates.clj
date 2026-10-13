@@ -5,7 +5,7 @@
    arithmetic the LLM should never have to do freehand when filling a daypart
    with strips.
 
-   See DURATION_AWARE_SCHEDULING.md §4.2 for the design and §4.3 for how this
+   See archive/DURATION_AWARE_SCHEDULING.md §4.2 for the design and §4.3 for how this
    fits into the split-round-trip proposal flow (Pass A returns real daypart
    bounds; this runs against those bounds; the result is handed to Tunabrain's
    propose-strip-fill as a menu it's guided to prefer over inventing lengths).
@@ -15,7 +15,7 @@
    representative length. Mixed-category layouts (e.g. a movie followed by
    several half-hour sitcoms) are a documented future extension; the
    DaypartCandidate shape (a vector of CandidateSlots) already supports them
-   without a contract change — see DURATION_AWARE_SCHEDULING.md §4.2."
+   without a contract change — see archive/DURATION_AWARE_SCHEDULING.md §4.2."
   (:require [clojure.string :as str]))
 
 (def ^:const max-candidates-per-block

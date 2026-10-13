@@ -169,7 +169,7 @@
 
 ;; DEPRECATED: Hardcoded genre table. Genres are dimensions in media_categorization now.
 ;; Use sql:add-media-category-values! with "genre" category instead.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (defn sql:insert-genres
   [genres]
   (-> (insert-into :genre)
@@ -180,7 +180,7 @@
 
 ;; DEPRECATED: Hardcoded media_genres table. Genres are dimensions now.
 ;; Use sql:add-media-category-values! with "genre" category instead.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (defn sql:insert-media-genres
   [media-id genres]
   (-> (insert-into :media_genres)
@@ -190,7 +190,7 @@
 
 ;; DEPRECATED: Hardcoded channel table. Channels are dimensions in media_categorization now.
 ;; Use sql:add-media-category-values! with "channel" category instead.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (defn sql:insert-channels
   [channels]
   (-> (insert-into :channel)
@@ -216,7 +216,7 @@
 
 ;; DEPRECATED: Hardcoded media_channels table. Channels are dimensions now.
 ;; Use sql:add-media-category-values! with "channel" category instead.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (defn sql:insert-media-channels
   [media-id channels]
   (-> (insert-into :media_channels)
@@ -251,7 +251,7 @@
 
 ;; DEPRECATED: Hardcoded channel table. Channels are dimensions now.
 ;; Use get-media-categories or tag-based queries instead.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (defn sql:get-channels
   []
   (-> (select :name :full_name :id :description)
@@ -260,7 +260,7 @@
 
 ;; DEPRECATED: Hardcoded genre table. Genres are dimensions now.
 ;; Use get-media-categories or tag-based queries instead.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (defn sql:get-genres
   []
   (-> (select :name) (from :genre) (order-by :name)))

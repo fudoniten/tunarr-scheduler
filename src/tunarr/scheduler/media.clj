@@ -78,7 +78,7 @@
 
 ;; DEPRECATED: Uses hardcoded ::genres, ::channel-names, ::kid-friendly?.
 ;; These should be replaced by dimensions in ::category-name / ::category-value.
-;; See DIMENSION_CLEANUP.md Phase 3.
+;; See the dimension cleanup in PLAN.md.
 (s/def ::metadata
   (s/keys :req [::name
                 ::overview

@@ -39,7 +39,7 @@
 
 (defn propose-grid-via-daypart-candidates!
   "Alternative `:propose-grid` implementation for `run-quarterly!`, using the
-   split round-trip (DURATION_AWARE_SCHEDULING.md §4.3, Option A) instead of
+   split round-trip (archive/DURATION_AWARE_SCHEDULING.md §4.3, Option A) instead of
    the single monolithic `tb/propose-quarterly-grid!` call: Pass A alone
    (`tb/propose-daypart-skeleton!`) gets real daypart bounds, then for each
    block, `scheduling.candidates/propose-daypart-candidates` computes a
@@ -52,7 +52,7 @@
    of `[tunabrain opts] -> {:grid_id :grid :skeleton :warnings ...}`), so it's
    a drop-in for `run-quarterly!`'s `:propose-grid` component —
    opt in explicitly (`:propose-grid propose-grid-via-daypart-candidates!`)
-   rather than the default; per DURATION_AWARE_SCHEDULING.md §4.5 this should
+   rather than the default; per archive/DURATION_AWARE_SCHEDULING.md §4.5 this should
    land as an additive alternative, validated against real catalogs, before
    any channel is switched over."
   [tunabrain {:keys [channel quarter year catalog-profile quarterly-theme
