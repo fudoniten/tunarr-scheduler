@@ -213,11 +213,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- process-single-item
-  "Process a single media item from Pseudovision.
-  
+  "Process a single media item from Pseudovision. `overrides` replaces fields
+   of the fetched PV item (see [[catalog-overrides]]).
+
    Returns a map with :synced, :skipped, :errors to accumulate results."
-  [catalog pv-config item-stub catalog-lib-id idx report-progress page]
-  (let [item (pv/get-media-item pv-config (:id item-stub))
+  [catalog pv-config item-stub overrides catalog-lib-id idx report-progress]
+  (let [item (merge (pv/get-media-item pv-config (:id item-stub)) overrides)
         _ (when (< idx 5)
             (log/debug "Fetched PV item"
                        {:item-id (:id item-stub)
@@ -267,76 +268,86 @@
                    :name (:name item)
                    :raw-item-kind (:kind item)
                    :error (ex-message e)})))]  
-    (report-progress {:phase "syncing" :page page :item idx})
+    (report-progress {:phase "syncing" :item idx})
     {:synced (if (or err should-skip?) 0 1)
      :skipped (if should-skip? 1 0)
      :errors (if (and err (not should-skip?)) [err] [])}))
 
-(defn- process-item-batch
-  "Process a batch of item stubs from Pseudovision.
-  
-   Returns a map with :synced, :skipped, :errors counts."
-  [catalog pv-config item-stubs catalog-lib-id report-progress page]
-  (loop [remaining item-stubs
-         idx 0
-         synced 0
-         skipped 0
-         errors []]
-    (if (empty? remaining)
-      {:synced synced :skipped skipped :errors errors}
-      (let [stub (first remaining)
-            result (process-single-item catalog pv-config stub catalog-lib-id idx report-progress page)]
-        (recur (rest remaining)
-               (inc idx)
-               (+ synced (:synced result))
-               (+ skipped (:skipped result))
-               (concat errors (:errors result)))))))
+(defn- stub-kind [stub]
+  (some-> (:kind stub) name keyword))
 
-(defn- fetch-and-process-pages
-  "Fetch and process items from Pseudovision in paginated batches.
+(defn catalog-overrides
+  "Translates a PV item's place in PV's hierarchy into TS catalog terms.
+
+   TS catalog rows are keyed by the PV item's remote-key, but PV's :parent-id
+   is PV's own numeric id, so copying it across made every child violate
+   media_parent_id_fkey. PV also nests episodes under seasons
+   (show → season → episode), while the TS catalog hangs episodes directly off
+   the series and stores the season number on the episode.
+
+   Given the stub and an index of every stub in the library by PV id, returns
+   {:parent-id <parent's remote-key> :season-number n} (only the keys that
+   apply). An episode's parent season contributes its :position as the season
+   number, and the episode is re-parented to that season's show."
+  [stub stubs-by-id]
+  (let [parent (get stubs-by-id (:parent-id stub))]
+    (cond
+      (nil? (:parent-id stub)) {}
+
+      (and (= :episode (stub-kind stub)) (= :season (stub-kind parent)))
+      (let [show (get stubs-by-id (:parent-id parent))]
+        (cond-> {:parent-id (:remote-key show)}
+          (:position parent) (assoc :season-number (:position parent))))
+
+      :else {:parent-id (:remote-key parent)})))
+
+(defn- depth
+  "Number of ancestors a stub has within the library (cycle-safe)."
+  [stub stubs-by-id]
+  (loop [s stub n 0]
+    (if-let [p (and (< n 10) (get stubs-by-id (:parent-id s)))]
+      (recur p (inc n))
+      n)))
+
+(defn sync-order
+  "Orders a library's stubs for syncing: seasons are dropped (the TS catalog
+   folds them into their episodes), and parents come before their children so
+   each child's parent row exists when it's inserted."
+  [stubs stubs-by-id]
+  (->> stubs
+       (remove #(= :season (stub-kind %)))
+       (sort-by #(depth % stubs-by-id))))
+
+(defn- fetch-and-process-items
+  "Fetch a library's items from Pseudovision and sync them parents-first.
   
    Returns a map with :synced, :skipped, :errors counts."
   [catalog pv-config pv-library-id catalog-lib-id library report-progress]
-  (let [batch-size 500
-        attrs-str "id,remote-key,name,year,parent-id,position"]
-    (log/info "Starting PV→TS sync with pagination"
-              {:library library :batch-size batch-size})
-    
-    (loop [page 0
-           total-synced 0
-           total-skipped 0
-           total-errors []]
-      (let [offset (* page batch-size)
-            item-stubs (pv/list-library-items pv-config pv-library-id 
-                                              {:attrs attrs-str
-                                               :limit batch-size
-                                               :offset offset})]
-        
-        (if (empty? item-stubs)
-          ;; Pagination complete: no more items returned
-          (do
-            (log/info "Pseudovision media sync complete"
-                      {:library library 
-                       :total-synced total-synced 
-                       :total-skipped total-skipped 
-                       :total-errors-count (count total-errors)})
-            (when (seq total-errors)
-              (log/debug "Sample sync errors" {:first-errors (take 3 total-errors)}))
-            {:synced total-synced :skipped total-skipped :errors total-errors})
-          
-          ;; Process this batch of items
-          (do
-            (log/debug "Fetching page"
-                       {:page page :offset offset :batch-size (count item-stubs)})
-            (report-progress {:phase "fetching" :page page :offset offset :items-in-batch (count item-stubs)})
-            
-            (let [batch-result (process-item-batch catalog pv-config item-stubs 
-                                                   catalog-lib-id report-progress page)]
-              ;; Accumulate results from this batch and fetch next page
-              (recur (inc page)
-                     (+ total-synced (:synced batch-result))
-                     (+ total-skipped (:skipped batch-result))
-                     (concat total-errors (:errors batch-result))))))))))
+  (report-progress {:phase "fetching"})
+  (let [stubs       (pv/list-library-items pv-config pv-library-id
+                                           {:attrs "id,kind,remote-key,name,year,parent-id,position"})
+        stubs-by-id (into {} (map (juxt :id identity)) stubs)
+        ordered     (sync-order stubs stubs-by-id)]
+    (log/info "Starting PV→TS sync"
+              {:library library :items (count stubs) :to-sync (count ordered)})
+    (let [result (reduce (fn [acc [idx stub]]
+                           (let [r (process-single-item catalog pv-config stub
+                                                        (catalog-overrides stub stubs-by-id)
+                                                        catalog-lib-id idx report-progress)]
+                             (-> acc
+                                 (update :synced + (:synced r))
+                                 (update :skipped + (:skipped r))
+                                 (update :errors into (:errors r)))))
+                         {:synced 0 :skipped 0 :errors []}
+                         (map-indexed vector ordered))]
+      (log/info "Pseudovision media sync complete"
+                {:library library
+                 :total-synced (:synced result)
+                 :total-skipped (:skipped result)
+                 :total-errors-count (count (:errors result))})
+      (when (seq (:errors result))
+        (log/debug "Sample sync errors" {:first-errors (take 3 (:errors result))}))
+      result)))
 
 (defn- normalize-library-name
   "Normalize library name for lookup (convert hyphens to spaces)."
@@ -390,7 +401,7 @@
         (log/info "Fetching items from Pseudovision library"
                   {:pv-library-id pv-library-id :catalog-lib-id catalog-lib-id})
         
-        (fetch-and-process-pages catalog pv-config pv-library-id catalog-lib-id 
+        (fetch-and-process-items catalog pv-config pv-library-id catalog-lib-id
                                  library report-progress))
       (catch Exception e
         (log/error e "Failed to sync from Pseudovision")
