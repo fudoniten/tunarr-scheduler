@@ -6,7 +6,8 @@
 # image tag to match your cluster.
 #
 #   daily     — extend the playout horizon for every channel
-#   weekly    — re-apply schedule templates to every channel
+#   weekly    — push DailySlots to PV (SUSPENDED: it overwrites PV's native
+#               engine timeline with an unfilled one; being deleted)
 #   monthly   — generate + apply a monthly programming strategy
 #   quarterly — generate + apply a quarterly programming strategy
 #
@@ -59,6 +60,11 @@ metadata:
   labels: { app: tunarr-scheduler, task: weekly }
 spec:
   schedule: "0 4 * * 1"            # 04:00 every Monday
+  # Suspended 2026-10-14. The DailySlot push deletes the native engine's events
+  # for the week and writes one item per slot with no filler, which is where the
+  # dead air between shows comes from. Monthly overrides stop applying until
+  # they move into native_schedule.clj; then this CronJob is deleted (PLAN.md).
+  suspend: true
   timeZone: "UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3

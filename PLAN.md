@@ -22,8 +22,9 @@ events.
 - [ ] Delete the weekly push: `run-weekly!`, `integration/publish-week!`,
       `publish-daily-slots!`, the PV client's `push-daily-slots!`,
       `POST /api/scheduling/weekly`, and the weekly CronJob in
-      `deploy/k8s/cronjobs.yaml`. PV deletes its `daily-slots` endpoint in the
-      same step.
+      `deploy/k8s/cronjobs.yaml` (suspended 2026-10-14, so overrides don't
+      apply until the first item lands). PV deletes its `daily-slots` endpoint
+      in the same step.
 - [ ] Keep the expander: plan preview and the review loop still use it.
 
 ### Dead code (ecosystem step 3)
