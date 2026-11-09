@@ -155,19 +155,21 @@
   (testing "daily accepts ?horizon, but still rejects unknown params"
     (with-redefs [tasks/run-daily! (fn [_ & _] {})]
       (let [ok ((scheduling/daily-handler (ctx)) (req {:horizon 30} {"horizon" "30"}))]
-        (is (= 200 (:status ok))))
+        (is (= 202 (:status ok)))
+        (is (= :succeeded (:status (await-job (get-in ok [:body :job :id]))))))
       (let [bad ((scheduling/daily-handler (ctx)) (req {} {"horzon" "30"}))]
         (is (= 400 (:status bad)))
         (is (re-find #"unrecognized query param" (get-in bad [:body :error])))))))
 
-;; ── Same behavior on the synchronous daily endpoint ──────────────────────────
+;; ── Same behavior on the daily endpoint ──────────────────────────────────────
 
 (deftest daily-shares-selector-and-strict-param-behavior
   (testing "daily applies the same channel filter and strict param checks"
     (let [seen (atom nil)]
       (with-redefs [tasks/run-daily! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [ok ((scheduling/daily-handler (ctx)) (req {:channel "enigma"}))]
-          (is (= 200 (:status ok)))
+          (is (= 202 (:status ok)))
+          (await-job (get-in ok [:body :job :id]))
           (is (= #{:enigma} (set (keys @seen)))))
         (let [bad ((scheduling/daily-handler (ctx)) (req {} {"nope" "1"}))]
           (is (= 400 (:status bad))))))))
@@ -185,7 +187,8 @@
     (let [seen (atom nil)]
       (with-redefs [tasks/run-daily! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [resp ((scheduling/daily-handler (ctx)) (req {:channel "Enigma TV"}))]
-          (is (= 200 (:status resp)))
+          (is (= 202 (:status resp)))
+          (await-job (get-in resp [:body :job :id]))
           (is (= #{:enigma} (set (keys @seen)))))))))
 
 (deftest monthly-channel-matches-display-name
@@ -221,5 +224,18 @@
     (let [seen (atom nil)]
       (with-redefs [tasks/run-daily! (fn [c & _] (reset! seen (:channels c)) {})]
         (let [resp ((scheduling/daily-handler (ctx)) (req {:channel "enigma"}))]
-          (is (= 200 (:status resp)))
+          (is (= 202 (:status resp)))
+          (await-job (get-in resp [:body :job :id]))
           (is (= #{:enigma} (set (keys @seen)))))))))
+
+(deftest daily-runs-as-a-job-with-results
+  (testing "the per-channel results land in the job's :result"
+    (with-redefs [tasks/run-daily! (fn [_ & {:keys [horizon]}] {:enigma {:status "ok" :horizon horizon}})]
+      (let [resp ((scheduling/daily-handler (ctx)) (req {:horizon 14 :channel "enigma"}
+                                                         {"horizon" "14" "channel" "enigma"}))
+            job  (await-job (get-in resp [:body :job :id]))]
+        (is (= 202 (:status resp)))
+        (is (= "daily" (get-in resp [:body :task])))
+        (is (= :succeeded (:status job)))
+        (is (= {:task "daily" :horizon 14 :results {:enigma {:status "ok" :horizon 14}}}
+               (:result job)))))))

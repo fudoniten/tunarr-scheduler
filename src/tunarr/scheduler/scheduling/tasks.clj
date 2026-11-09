@@ -23,6 +23,7 @@
             [tunarr.scheduler.scheduling.plans :as plans]
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
+            [tunarr.scheduler.jobs.runner :as jobs]
             [tunarr.scheduler.http.util :as util]))
 
 (def ^:private default-horizon 14)
@@ -108,32 +109,39 @@
    :no-channel-id / :not-found, or a map `{:status \"ok\"|\"failed\"|\"timeout\"
    :job-id .. :events-generated N :warning .. :error ..}` (see
    `daily-channel-result`)."
-  [{:keys [pseudovision channels]} & {:keys [horizon job-timeout-ms]
+  [{:keys [pseudovision channels]} & {:keys [horizon job-timeout-ms report-progress]
                                       :or {horizon default-horizon
-                                           job-timeout-ms (* 20 60 1000)}}]
+                                           job-timeout-ms (* 20 60 1000)
+                                           report-progress (fn [_])}}]
   (log/info "task: daily horizon extension" {:horizon horizon})
   (let [conf  (pv-config pseudovision)
         index (uuid->pv-id conf)]
+    (jobs/start-items! report-progress "extending horizon" (count channels) 0)
     (into {}
           (for [[channel-key cfg] channels]
             (let [pv-id (get index (str (::media/channel-id cfg)))]
-              [channel-key
-               (cond
-                 (not (::media/channel-id cfg)) :no-channel-id
-                 (not pv-id)                    :not-found
-                 :else
-                 (try
-                   (let [result (daily-channel-result conf pv-id horizon job-timeout-ms)]
-                     (if (and (= "ok" (:status result)) (nil? (:warning result)))
-                       (log/info "task: horizon extended"
-                                 (assoc result :channel channel-key :channel-id pv-id))
-                       (log/warn "task: horizon extension did not complete"
-                                 (assoc result :channel channel-key :channel-id pv-id)))
-                     result)
-                   (catch Exception e
-                     (log/error e "task: failed to extend horizon"
-                                {:channel channel-key :channel-id pv-id})
-                     {:status "failed" :error (util/error-message e)})))])))))
+              (jobs/item-started! report-progress {:id pv-id :name (name channel-key)})
+              (let [result
+                    (cond
+                      (not (::media/channel-id cfg)) :no-channel-id
+                      (not pv-id)                    :not-found
+                      :else
+                      (try
+                        (let [result (daily-channel-result conf pv-id horizon job-timeout-ms)]
+                          (if (and (= "ok" (:status result)) (nil? (:warning result)))
+                            (log/info "task: horizon extended"
+                                      (assoc result :channel channel-key :channel-id pv-id))
+                            (log/warn "task: horizon extension did not complete"
+                                      (assoc result :channel channel-key :channel-id pv-id)))
+                          result)
+                        (catch Exception e
+                          (log/error e "task: failed to extend horizon"
+                                     {:channel channel-key :channel-id pv-id})
+                          {:status "failed" :error (util/error-message e)})))]
+                (if (= "ok" (:status result))
+                  (jobs/item-completed! report-progress)
+                  (jobs/item-failed! report-progress))
+                [channel-key result]))))))
 
 (defn- components [{:keys [tunabrain pseudovision catalog]}]
   {:executor (:executor catalog)

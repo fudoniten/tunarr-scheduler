@@ -123,6 +123,10 @@
 
 (defn daily-handler
   "POST /api/scheduling/daily — extend the playout horizon for every channel.
+   Returns 202 with a job ID; poll GET /api/jobs/:id for the per-channel
+   :results. Each channel's PV build is awaited in turn, so a full run can take
+   longer than an HTTP client will wait.
+
    Optional ?horizon=N (days, default 14). Optional ?channel=key /
    ?channel_id=uuid to limit."
   [ctx]
@@ -131,8 +135,17 @@
       (with-selected-channels ctx daily-params req
         (fn [ctx']
           (let [horizon (get-in req [:parameters :query :horizon] 14)
-                results (tasks/run-daily! ctx' :horizon horizon)]
-            {:status 200 :body {:task "daily" :horizon horizon :results results}})))
+                job     (jobs/submit-job!
+                         (:job-runner ctx)
+                         {:type     :media/scheduling-daily
+                          :metadata {:horizon  horizon
+                                     :channels (mapv name (keys (:channels ctx')))}}
+                         (fn [report-progress]
+                           {:task    "daily"
+                            :horizon horizon
+                            :results (tasks/run-daily! ctx' :horizon horizon
+                                                       :report-progress report-progress)}))]
+            {:status 202 :body {:task "daily" :job job}})))
       (catch Exception e
         (log/error e "daily scheduling task failed")
         {:status 500 :body {:error (util/error-message e)}}))))
