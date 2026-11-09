@@ -141,11 +141,11 @@
   "POST /api/scheduling/monthly — propose + store sparse monthly overrides for
    every channel against their frozen grids. Returns 202 with a job ID.
 
-   Optional ?date=YYYY-MM-DD selects which month to generate (default today).
-   Pass a date in next month (run a week or so before month-end) to pre-generate
-   the coming month's overrides — always safe, they're only stored until the
-   weekly expander applies them. Optional ?channel=key / ?channel_id=uuid to
-   limit."
+   Optional ?date=YYYY-MM-DD (or ?date=next-month) selects which month to
+   generate (default today). Override slots are bounded to their own dates, so
+   generating ahead is safe; it needs to be at least two weeks ahead to land
+   past the already-built timeline. Optional ?channel=key / ?channel_id=uuid
+   to limit."
   [ctx]
   (fn [req]
     (with-selected-channels ctx date-params req

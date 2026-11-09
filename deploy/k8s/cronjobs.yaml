@@ -6,7 +6,7 @@
 # image tag to match your cluster.
 #
 #   daily     — extend the playout horizon for every channel
-#   monthly   — generate + apply a monthly programming strategy
+#   monthly   — generate next month's overrides and sync them to PV
 #   quarterly — generate + apply a quarterly programming strategy
 #
 # Schedules are evaluated in the CronJob's timeZone (UTC below). The service
@@ -57,7 +57,9 @@ metadata:
   name: tunarr-scheduler-monthly
   labels: { app: tunarr-scheduler, task: monthly }
 spec:
-  schedule: "0 5 1 * *"           # 05:00 on the 1st of every month
+  # 05:00 on the 10th: generate NEXT month's overrides ~3 weeks ahead, so they
+  # land beyond the 14-day timeline PV has already built.
+  schedule: "0 5 10 * *"
   timeZone: "UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -80,7 +82,7 @@ spec:
                 - "10"
                 - "-X"
                 - "POST"
-                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/monthly"
+                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/monthly?date=next-month"
 ---
 apiVersion: batch/v1
 kind: CronJob

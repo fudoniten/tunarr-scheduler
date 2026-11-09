@@ -98,7 +98,7 @@ default run.
 | Cadence | Endpoint | What happens |
 |---|---|---|
 | Quarterly | `POST /api/scheduling/quarterly` | Build a `CatalogProfile` from PV's `/api/catalog/aggregate` → Tunabrain proposes a grid → deterministic feasibility check → bounded repair loop → optional taste review → freeze. For the current quarter, sync the grid onto PV's native schedule. |
-| Monthly | `POST /api/scheduling/monthly` | Tunabrain proposes sparse overrides against the frozen grid; TS stores them. |
+| Monthly | `POST /api/scheduling/monthly` | Tunabrain proposes sparse overrides against the frozen grid; TS stores them and re-syncs the native schedule with them as date-bounded override slots. |
 | Daily | `POST /api/scheduling/daily` | Ask PV to extend each channel's playout horizon. |
 
 Kubernetes CronJobs call these endpoints; TS runs no in-process scheduler. See

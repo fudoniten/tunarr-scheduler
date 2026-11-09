@@ -56,7 +56,7 @@ your cluster:
   kubectl apply -n arr -f deploy/k8s/cronjobs.yaml
   ```
 - **Schedules / timeZone** — the defaults (UTC) mirror the previous in-process
-  defaults: daily 03:00, monthly 1st 05:00, quarterly
+  defaults: daily 03:00, monthly 10th 05:00 (for next month), quarterly
   Jan/Apr/Jul/Oct 1st 06:00.
 
 ## Triggering a task manually

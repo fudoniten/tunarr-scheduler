@@ -166,6 +166,16 @@
                                  :category {:category (:category spec)
                                             :channel-tag (:channel-tag spec)})}})))))
 
+(defn active-overrides
+  "The stored overrides that can still air: the active sets for the month of
+   `today` and the following month, as `{:month \"YYYY-MM\" :override ..}`
+   maps for `sync-native-schedule!`."
+  [executor channel-uuid today]
+  (let [d (java.time.LocalDate/parse (str today))]
+    (vec (for [m [(plans/month-of d) (plans/month-of (.plusMonths d 1))]
+               o (:overrides (storage/current-overrides executor channel-uuid m))]
+           {:month m :override o}))))
+
 (defn sync-native-schedule!
   "Translates a frozen Grid to Pseudovision's native schedule/slot model
    (scheduling.native-schedule/->schedule) and syncs it to the channel:
@@ -195,16 +205,21 @@
    already durable in Tunarr Scheduler's own storage); callers should log
    and surface it without failing the whole quarterly run.
 
+   `:overrides` (optional, `{:month :override}` maps, see `active-overrides`)
+   are added as date-bounded override slots, which PV plays in place of the
+   base strips they overlap.
+
    Returns `{:schedule-id :slot-count :warnings}`."
-  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name rebuild-from]
+  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name rebuild-from overrides]
                                                :or   {rebuild-from "horizon"}}]
-  (let [sources (native/content-sources grid channel-tag)
+  (let [sources (native/content-sources grid channel-tag overrides)
         source-id-by-name (into {}
                                  (map (fn [spec] [(:name spec) (ensure-collection! pv-config spec)]))
                                  sources)
         {:keys [name slots warnings]} (native/->schedule
                                        grid channel-tag source-id-by-name
-                                       :schedule-name schedule-name)
+                                       :schedule-name schedule-name
+                                       :overrides overrides)
         prior-schedule-id (:schedule-id (pv/get-playout pv-config pv-channel-id))
         sched   (pv/create-schedule! pv-config {:name name})
         sched-id (:id sched)]
@@ -310,7 +325,9 @@
                                              :grid-id grid-id :feasibility report)
         sync-result    (when pv-channel-id
                          (try
-                           {:ok (sync-schedule pv-config pv-channel-id labeled catalog-tag)}
+                           {:ok (sync-schedule pv-config pv-channel-id labeled catalog-tag
+                                               :overrides (active-overrides executor channel-uuid
+                                                                            (plans/today)))}
                            (catch Exception e
                              (log/error e "native schedule sync failed"
                                         {:channel channel :pv-channel-id pv-channel-id})
@@ -328,12 +345,20 @@
 (defn run-monthly!
   "Ask Tunabrain for sparse monthly Overrides against the channel's frozen grid
    and store them. An empty override list is normal. Throws if no grid is frozen
-   for the month's quarter."
-  [{:keys [executor tunabrain pv-config fetch-profile propose-overrides]
+   for the month's quarter.
+
+   When `:pv-channel-id` is given and a grid is frozen for TODAY's quarter, the
+   channel's native schedule is re-synced with that grid plus every override
+   that can still air (`active-overrides`), so the new overrides reach PV. The
+   re-sync extends the timeline, so an override only takes effect beyond the
+   already-built horizon (14 days): run monthly at least two weeks ahead.
+   The result carries `:native-sync` ({:ok ..} or {:error ..}) when attempted."
+  [{:keys [executor tunabrain pv-config fetch-profile propose-overrides sync-schedule]
     :or   {fetch-profile     integ/fetch-catalog-profile
-           propose-overrides tb/propose-monthly-overrides!}}
+           propose-overrides tb/propose-monthly-overrides!
+           sync-schedule     sync-native-schedule!}}
    channel-spec month
-   & {:keys [cost-tier catalog-tag] :or {cost-tier "balanced"}}]
+   & {:keys [cost-tier catalog-tag pv-channel-id] :or {cost-tier "balanced"}}]
   (let [channel     (:name channel-spec)
         channel-uuid (:uuid channel-spec)
         as-of       (str month "-01")
@@ -359,4 +384,16 @@
       (log/info "monthly overrides stored"
                 {:channel channel :channel-uuid channel-uuid :month month
                  :count (count (:overrides resp))})
-      stored)))
+      (let [today    (plans/today)
+            live     (when pv-channel-id
+                       (storage/current-grid executor channel-uuid
+                                             (plans/quarter-of today) (plans/year-of today)))
+            sync-res (when live
+                       (try
+                         {:ok (sync-schedule pv-config pv-channel-id (:grid live) catalog-tag
+                                             :overrides (active-overrides executor channel-uuid today))}
+                         (catch Exception e
+                           (log/error e "native schedule re-sync after monthly overrides failed"
+                                      {:channel channel :pv-channel-id pv-channel-id})
+                           {:error (ex-message e)})))]
+        (cond-> stored sync-res (assoc :native-sync sync-res))))))

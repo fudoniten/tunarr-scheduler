@@ -7,6 +7,7 @@
             [tunarr.scheduler.sql.executor :as executor]
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.orchestration :as orch]
+            [tunarr.scheduler.scheduling.plans :as plans]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.tunabrain :as tb]))
 
@@ -151,6 +152,29 @@
         stored (orch/run-monthly! comps channel-spec "2026-01")]
     (is (= [] (:overrides stored)))))
 
+(deftest monthly-resyncs-native-schedule-with-overrides
+  (storage/freeze-grid! *ex* channel-uuid "Q1" 2026 feasible-grid :grid-id "g-1")
+  (let [override {:override_id "o-1" :scope {:date "2026-01-10"} :start "10:00" :end "22:00"
+                  :content {:media_id "series:42" :strategy "sequential"} :mode "replace" :priority 0}
+        calls    (atom [])
+        comps    (base-components
+                  {:propose-overrides (fn [_ _] {:overrides_id "ov-1" :overrides [override]})
+                   :sync-schedule     (fn [_pv pv-id grid tag & {:keys [overrides]}]
+                                        (swap! calls conj [pv-id grid tag overrides])
+                                        {:schedule-id 9})})]
+    (with-redefs [plans/today (fn [] (java.time.LocalDate/parse "2026-01-05"))]
+      (let [stored (orch/run-monthly! comps channel-spec "2026-01"
+                                      :pv-channel-id 42 :catalog-tag "channel:classic-comedy")]
+        (is (= {:ok {:schedule-id 9}} (:native-sync stored)))
+        (is (= [[42 feasible-grid "channel:classic-comedy"
+                 [{:month "2026-01" :override override}]]]
+               @calls))))
+    (testing "no re-sync without a PV channel id"
+      (reset! calls [])
+      (with-redefs [plans/today (fn [] (java.time.LocalDate/parse "2026-01-05"))]
+        (orch/run-monthly! comps channel-spec "2026-01"))
+      (is (empty? @calls)))))
+
 ;; ---------------------------------------------------------------------------
 ;; run-quarterly! :pv-channel-id -> sync-native-schedule! wiring
 ;; ---------------------------------------------------------------------------
@@ -159,7 +183,7 @@
   (let [sync-calls (atom [])
         comps (base-components
                {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
-                :sync-schedule (fn [pv-config pv-channel-id grid channel-tag]
+                :sync-schedule (fn [pv-config pv-channel-id grid channel-tag & _]
                                 (swap! sync-calls conj [pv-config pv-channel-id grid channel-tag])
                                 {:schedule-id 9 :slot-count 3 :warnings []})})
         out (orch/run-quarterly! comps channel-spec "Q1" 2026

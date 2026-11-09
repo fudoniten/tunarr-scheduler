@@ -142,27 +142,39 @@
 
 (defn run-monthly!
   "Propose + store sparse monthly overrides for every channel, against the
-   channel's frozen grid for a month.
+   channel's frozen grid for a month, then re-sync each channel's native PV
+   schedule so overrides that can still air reach the playout (see
+   orch/run-monthly!).
 
-   `:date` (optional, a 'YYYY-MM-DD' string or LocalDate) selects WHICH month —
-   the overrides are stored for the month of that date; defaults to today. Pass
-   a date in NEXT month (e.g. run a week before month-end) to pre-generate the
-   coming month's overrides. Unlike quarterly, this is always safe to run ahead:
-   overrides are only stored, never attached to a live playout — the weekly
-   expander applies them per-date once that month arrives, so there is no early
-   cutover and no current-month guard is needed.
+   `:date` (optional, a 'YYYY-MM-DD' string, a LocalDate, or \"next-month\")
+   selects WHICH month; the overrides are stored for the month of that date.
+   Defaults to today. The CronJob passes \"next-month\" on the 10th. The
+   override slots are bounded to their own dates, so syncing them early is safe;
+   run at least two weeks ahead, because the re-sync only extends the timeline
+   past the already-built horizon.
 
-   Returns channel-key → stored overrides record / {:error …} (a missing grid
-   surfaces as an error)."
+   Returns channel-key → stored overrides record (with :native-sync when a PV
+   channel was found) / {:error …} (a missing grid surfaces as an error)."
   [{:keys [channels] :as ctx} & {:keys [date]}]
   (let [comps (components ctx)
-        month (plans/month-of (or date (plans/today)))]
+        ;; Without PV the overrides are still stored; they reach PV on the
+        ;; next successful sync.
+        index (try (uuid->pv-id (:pv-config comps))
+                   (catch Exception e
+                     (log/warn e "task: monthly could not list PV channels; skipping re-sync")
+                     {}))
+        today (plans/today)
+        month (plans/month-of (cond
+                                (= "next-month" (str date)) (.plusMonths today 1)
+                                date                        date
+                                :else                       today))]
     (log/info "task: monthly overrides" {:month month})
     (into {}
           (for [[channel-key cfg] channels]
             [channel-key
              (try (orch/run-monthly! comps (channel-spec (:executor comps) cfg) month
-                                     :catalog-tag (channel-catalog-tag channel-key))
+                                     :catalog-tag (channel-catalog-tag channel-key)
+                                     :pv-channel-id (get index (str (::media/channel-id cfg))))
                   (catch Exception e
                     (log/error e "task: monthly overrides failed" {:channel channel-key})
                     {:error (util/error-message e)}))]))))

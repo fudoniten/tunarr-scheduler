@@ -118,3 +118,46 @@
       (is (= 1 (count slots)))
       (is (= 1 (count warnings)))
       (is (re-find #"series 99" (first warnings))))))
+
+;; ---------------------------------------------------------------------------
+;; Monthly overrides -> override slots
+;; ---------------------------------------------------------------------------
+
+(def one-day-override
+  {:override_id "o-1" :scope {:date "2026-11-26"} :start "18:00" :end "21:00"
+   :content {:media_id "random:holiday" :strategy "random"}})
+
+(def recurring-override
+  {:override_id "o-2" :scope {:days "weekends" :effective_start "2026-10-20"}
+   :start "09:00" :end "11:00"
+   :content {:media_id "series:7"}})
+
+(deftest override-date-range-clamps-to-the-month
+  (is (= ["2026-11-26" "2026-11-26"] (sut/override-date-range one-day-override "2026-11")))
+  (is (= ["2026-11-01" "2026-11-30"] (sut/override-date-range recurring-override "2026-11")))
+  (is (= ["2026-10-20" "2026-10-31"] (sut/override-date-range recurring-override "2026-10")))
+  (is (nil? (sut/override-date-range (assoc-in recurring-override [:scope :effective_end] "2026-10-01")
+                                     "2026-11"))))
+
+(deftest overrides-become-date-bounded-override-slots
+  (let [grid    {:channel "Hua" :strips [{:strip_id "s1" :days "daily" :start "18:00" :end "22:00"
+                                          :content {:media_id "series:1"}}]}
+        ovrs    [{:month "2026-11" :override one-day-override}
+                 {:month "2026-11" :override recurring-override}]
+        sources (sut/content-sources grid "channel:hua" ovrs)
+        ids     (into {} (map-indexed (fn [i s] [(:name s) (inc i)])) sources)
+        {:keys [slots warnings]} (sut/->schedule grid "channel:hua" ids :overrides ovrs)]
+    (testing "override content gets a collection like a strip's"
+      (is (contains? ids "auto:category:holiday:channel:hua"))
+      (is (contains? ids "auto:series:7")))
+    (is (empty? warnings))
+    (is (= 3 (count slots)))
+    (let [[base o-recurring o-day] slots]
+      (is (not (:is-override base)))
+      (is (nil? (:active-from base)))
+      (testing "overrides sort by first date"
+        (is (= ["2026-11-01" "2026-11-30" true 96]
+               ((juxt :active-from :active-until :is-override :days-of-week) o-recurring)))
+        (is (= ["2026-11-26" "2026-11-26" true 127 "18:00:00" "PT3H"]
+               ((juxt :active-from :active-until :is-override :days-of-week
+                      :start-time :block-duration) o-day)))))))
