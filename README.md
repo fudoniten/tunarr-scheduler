@@ -99,7 +99,7 @@ default run.
 |---|---|---|
 | Quarterly | `POST /api/scheduling/quarterly` | Build a `CatalogProfile` from PV's `/api/catalog/aggregate` → Tunabrain proposes a grid → deterministic feasibility check → bounded repair loop → optional taste review → freeze. For the current quarter, sync the grid onto PV's native schedule. |
 | Monthly | `POST /api/scheduling/monthly` | Tunabrain proposes sparse overrides against the frozen grid; TS stores them and re-syncs the native schedule with them as date-bounded override slots. |
-| Daily | `POST /api/scheduling/daily` | Ask PV to extend each channel's playout horizon. |
+| Daily | `POST /api/scheduling/daily` | Ask PV to extend each channel's playout horizon. Async: returns 202 + a job; per-channel results are in the job's `:result`. |
 
 Kubernetes CronJobs call these endpoints; TS runs no in-process scheduler. See
 [deploy/k8s/README.md](deploy/k8s/README.md) for the manifests and for running

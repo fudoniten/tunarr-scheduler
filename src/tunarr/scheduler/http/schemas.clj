@@ -488,15 +488,8 @@
 ;; Periodic scheduling tasks (triggered by k8s CronJobs)
 ;; ---------------------------------------------------------------------------
 
-(def SchedulingTaskResponse
-  "Open envelope for a scheduling-task result. The concrete payload varies by
-   task (daily/weekly return per-channel :results; monthly/quarterly return the
-   generated :strategy), so only :task is required."
-  [:map {:closed false}
-   [:task :string]])
-
 (def SchedulingJobResponse
-  "Response for async scheduling tasks (monthly/quarterly) that return
+  "Response for async scheduling tasks (daily/monthly/quarterly) that return
    immediately with a job ID for polling."
   [:map {:closed false}
    [:task :string]

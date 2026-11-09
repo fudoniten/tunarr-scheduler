@@ -577,9 +577,9 @@
     ;; ── Scheduling tasks (triggered by k8s CronJobs) ─────────────────────────
     ["/api/scheduling/daily"
      {:tags ["scheduling"]
-      :post {:summary    "Extend the playout horizon (all channels, or filtered by ?channel=key / ?channel_id=uuid)"
+      :post {:summary    "Extend the playout horizon (all channels, or filtered by ?channel=key / ?channel_id=uuid) (async)"
              :parameters {:query s/DailyTaskQuery}
-             :responses  {200 {:body s/SchedulingTaskResponse}
+             :responses  {202 {:body s/SchedulingJobResponse}
                           500 {:body s/APIError}}
              :handler    (scheduling/daily-handler ctx)}}]
 
