@@ -113,6 +113,22 @@
       (is (= 40 (:episodes_available found))
           "the prefixed tag_aggregate's episode_count is read for the pool check"))))
 
+(deftest hyphenated-category-matches-underscored-tag
+  (testing "random:dark-comedy finds the curated snake_case tag 'dark_comedy'
+            (and vice versa), so a separator mismatch is neither a false
+            'hallucinated' shortfall nor an empty pool count"
+    (let [cat (assoc catalog :tag_aggregates
+                     [{:tag "dark_comedy" :show_count 3 :episode_count 30}
+                      {:tag "genre:sci-fi-and-fantasy" :show_count 2 :episode_count 25}])
+          report (f/check (grid [(strip "dc" "weekdays" "10:00" "11:00"
+                                        "random:dark-comedy" :strategy "random")
+                                 (strip "sf" "weekdays" "12:00" "13:00"
+                                        "random:sci_fi_and_fantasy" :strategy "random")])
+                          cat week-start week-end)]
+      (is (= 30 (:episodes_available (finding-for report "dc"))))
+      (is (= 25 (:episodes_available (finding-for report "sf"))))
+      (is (f/known-random-category? cat "dark-comedy")))))
+
 ;; ---------------------------------------------------------------------------
 ;; Duration fit (random:<category> strips, tag_runtime_histograms)
 ;; ---------------------------------------------------------------------------
