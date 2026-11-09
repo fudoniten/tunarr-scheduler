@@ -547,6 +547,32 @@
             {:query-params {"from" from "horizon" (str horizon)}}))
 
 ;; ---------------------------------------------------------------------------
+;; Jobs
+;; ---------------------------------------------------------------------------
+
+(defn get-job
+  "Fetch one PV async job record (GET /api/jobs/:job-id): `{:id :status
+   :result :error ...}`, with :status one of queued/running/succeeded/failed."
+  [config job-id]
+  (request! :get (api-url config (str "/api/jobs/" job-id)) {}))
+
+(defn await-job!
+  "Poll PV job `job-id` until it reaches succeeded/failed or `timeout-ms`
+   elapses. Returns the final job record, or `{:id job-id :status \"timeout\"}`
+   when it never finished. A failed poll is retried until the deadline."
+  [config job-id & {:keys [timeout-ms poll-ms] :or {timeout-ms (* 20 60 1000) poll-ms 2000}}]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [job (try (get-job config job-id)
+                     (catch Exception e
+                       (log/warn e "polling PV job failed; retrying" {:job-id job-id})
+                       nil))]
+        (cond
+          (#{"succeeded" "failed"} (some-> job :status name)) job
+          (> (System/currentTimeMillis) deadline) {:id job-id :status "timeout"}
+          :else (do (Thread/sleep (long poll-ms)) (recur)))))))
+
+;; ---------------------------------------------------------------------------
 ;; Playout Events
 ;; ---------------------------------------------------------------------------
 

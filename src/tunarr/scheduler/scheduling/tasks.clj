@@ -96,11 +96,41 @@
                    (or (:id ch) (:channels/id ch))]))
         (pv/list-channels pv-conf)))
 
+(defn- daily-channel-result
+  "Submit one channel's horizon rebuild to PV and wait for the job to finish.
+   PV's rebuild endpoint is asynchronous (202 + job), so treating the 202 as
+   success reported every channel `:ok` even when its build failed or did
+   nothing. Returns `{:status \"ok\"|\"failed\"|\"timeout\" :job-id ..}` plus
+   PV's job result (`:events-generated`, and `:warning` when PV skipped the
+   channel) or `:error`."
+  [conf pv-id horizon job-timeout-ms]
+  (let [submitted (pv/rebuild-playout! conf pv-id {:from "horizon" :horizon horizon})
+        job-id    (get-in submitted [:job :id])
+        job       (if job-id
+                    (pv/await-job! conf job-id :timeout-ms job-timeout-ms)
+                    {:status "failed" :error {:message "PV returned no job id"}})
+        status    (some-> (:status job) name)]
+    (cond-> {:status (case status "succeeded" "ok" (or status "unknown"))
+             :job-id job-id}
+      (map? (:result job))         (merge (select-keys (:result job)
+                                                       [:events-generated :warning]))
+      (= "failed" status)          (assoc :error (or (get-in job [:error :message])
+                                                     "PV job failed"))
+      (= "timeout" status)         (assoc :error (str "PV job did not finish within "
+                                                      (quot job-timeout-ms 60000) " min")))))
+
 (defn run-daily!
   "Extend the playout horizon for every channel via Pseudovision's
    rebuild-horizon endpoint (preserves the cursor and sequential positions).
-   Returns channel-key → :ok / :no-channel-id / :not-found / {:error …}."
-  [{:keys [pseudovision channels]} & {:keys [horizon] :or {horizon default-horizon}}]
+
+   Channels are rebuilt one at a time and each PV job is awaited, so the
+   response says what actually happened per channel. Returns channel-key ->
+   :no-channel-id / :not-found, or a map `{:status \"ok\"|\"failed\"|\"timeout\"
+   :job-id .. :events-generated N :warning .. :error ..}` (see
+   `daily-channel-result`)."
+  [{:keys [pseudovision channels]} & {:keys [horizon job-timeout-ms]
+                                      :or {horizon default-horizon
+                                           job-timeout-ms (* 20 60 1000)}}]
   (log/info "task: daily horizon extension" {:horizon horizon})
   (let [conf  (pv-config pseudovision)
         index (uuid->pv-id conf)]
@@ -113,12 +143,17 @@
                  (not pv-id)                    :not-found
                  :else
                  (try
-                   (pv/rebuild-playout! conf pv-id {:from "horizon" :horizon horizon})
-                   :ok
+                   (let [result (daily-channel-result conf pv-id horizon job-timeout-ms)]
+                     (if (and (= "ok" (:status result)) (nil? (:warning result)))
+                       (log/info "task: horizon extended"
+                                 (assoc result :channel channel-key :channel-id pv-id))
+                       (log/warn "task: horizon extension did not complete"
+                                 (assoc result :channel channel-key :channel-id pv-id)))
+                     result)
                    (catch Exception e
                      (log/error e "task: failed to extend horizon"
                                 {:channel channel-key :channel-id pv-id})
-                     {:error (util/error-message e)})))])))))
+                     {:status "failed" :error (util/error-message e)})))])))))
 
 (defn run-weekly!
   "Expand each channel's frozen grid + overrides for the coming week and push the
