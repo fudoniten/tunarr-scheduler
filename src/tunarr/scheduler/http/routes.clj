@@ -583,14 +583,6 @@
                           500 {:body s/APIError}}
              :handler    (scheduling/daily-handler ctx)}}]
 
-    ["/api/scheduling/weekly"
-     {:tags ["scheduling"]
-      :post {:summary    "Re-apply schedule templates to every channel"
-             :parameters {:query s/ChannelFilter}
-             :responses  {200 {:body s/SchedulingTaskResponse}
-                          500 {:body s/APIError}}
-             :handler    (scheduling/weekly-handler ctx)}}]
-
     ["/api/scheduling/monthly"
      {:tags ["scheduling"]
       :post {:summary    "Propose + store sparse monthly overrides for every channel (async)"

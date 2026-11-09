@@ -14,7 +14,6 @@ with `{:error ...}` on failure.
 | Endpoint                      | What it does                                            | Query params |
 |-------------------------------|---------------------------------------------------------|--------------|
 | `/api/scheduling/daily`       | Extend the playout horizon for every channel            | `horizon` (days, default `14`), `channel`, `channel_id` |
-| `/api/scheduling/weekly`      | Expand grid + overrides and push DailySlots to PV (being retired; see PLAN.md) | `channel`, `channel_id` |
 | `/api/scheduling/monthly`     | Propose + store sparse monthly overrides (async)        | `channel`, `channel_id` |
 | `/api/scheduling/quarterly`   | Generate + freeze the quarterly grid (async)            | `date` (`YYYY-MM-DD`, default today), `channel`, `channel_id` |
 
@@ -57,7 +56,7 @@ your cluster:
   kubectl apply -n arr -f deploy/k8s/cronjobs.yaml
   ```
 - **Schedules / timeZone** — the defaults (UTC) mirror the previous in-process
-  defaults: daily 03:00, weekly Mon 04:00, monthly 1st 05:00, quarterly
+  defaults: daily 03:00, monthly 10th 05:00 (for next month), quarterly
   Jan/Apr/Jul/Oct 1st 06:00.
 
 ## Triggering a task manually
@@ -65,7 +64,7 @@ your cluster:
 Run any task immediately by creating a one-off Job from a CronJob:
 
 ```sh
-kubectl create job --from=cronjob/tunarr-scheduler-weekly weekly-adhoc -n arr
+kubectl create job --from=cronjob/tunarr-scheduler-daily daily-adhoc -n arr
 ```
 
 …or just curl the endpoint from inside the cluster:

@@ -23,7 +23,7 @@
    create-schedule!, add-slot!, attach-schedule!, …) failed with PV 400
    \"Request coercion failed\" on `body-params`: PV received an empty body and the
    required fields were missing. Translate `:json-params` into an explicit
-   JSON-encoded `:body` (matching the working push-daily-slots!/add-tags! calls)."
+   JSON-encoded `:body` (matching the working add-tags! call)."
   [opts]
   (if-let [e (find opts :json-params)]
     (-> (dissoc opts :json-params)
@@ -547,6 +547,32 @@
             {:query-params {"from" from "horizon" (str horizon)}}))
 
 ;; ---------------------------------------------------------------------------
+;; Jobs
+;; ---------------------------------------------------------------------------
+
+(defn get-job
+  "Fetch one PV async job record (GET /api/jobs/:job-id): `{:id :status
+   :result :error ...}`, with :status one of queued/running/succeeded/failed."
+  [config job-id]
+  (request! :get (api-url config (str "/api/jobs/" job-id)) {}))
+
+(defn await-job!
+  "Poll PV job `job-id` until it reaches succeeded/failed or `timeout-ms`
+   elapses. Returns the final job record, or `{:id job-id :status \"timeout\"}`
+   when it never finished. A failed poll is retried until the deadline."
+  [config job-id & {:keys [timeout-ms poll-ms] :or {timeout-ms (* 20 60 1000) poll-ms 2000}}]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (let [job (try (get-job config job-id)
+                     (catch Exception e
+                       (log/warn e "polling PV job failed; retrying" {:job-id job-id})
+                       nil))]
+        (cond
+          (#{"succeeded" "failed"} (some-> job :status name)) job
+          (> (System/currentTimeMillis) deadline) {:id job-id :status "timeout"}
+          :else (do (Thread/sleep (long poll-ms)) (recur)))))))
+
+;; ---------------------------------------------------------------------------
 ;; Playout Events
 ;; ---------------------------------------------------------------------------
 
@@ -655,32 +681,6 @@
             {:query-params (cond-> {}
                              channel (assoc "channel" (str channel))
                              tag     (assoc "tag" tag))}))
-
-(defn push-daily-slots!
-  "POST /api/channels/:channel-id/daily-slots — ingest a kebab-case DailySlot
-   vector. Pseudovision clears existing non-manual events in the slots' date
-   range first, so the push is idempotent for that range. Returns the
-   DailySlotIngestResult ({:ingested :skipped :errors :channel-id})."
-  [config channel-id slots]
-  (let [body (json/generate-string slots)
-        url  (api-url config (str "/api/channels/" channel-id "/daily-slots"))]
-    ;; Diagnostic: log exactly what goes on the wire so a rejection like
-    ;; "Missing start_time" can be traced to the request body (key names,
-    ;; value formats, envelope) rather than guessed at. `first-slot` is the
-    ;; raw map (does it even carry :start_time?); `body-sample` is the actual
-    ;; serialized JSON PV parses.
-    (log/info "push-daily-slots!: request"
-              {:url url
-               :channel-id channel-id
-               :slot-count (count slots)
-               :first-slot (first slots)
-               :body-length (count body)
-               :body-sample (subs body 0 (min 800 (count body)))})
-    (let [resp (request! :post url
-                         {:content-type :json
-                          :body body})]
-      (log/info "push-daily-slots!: response" {:channel-id channel-id :response resp})
-      resp)))
 
 ;; ---------------------------------------------------------------------------
 ;; Health & Version

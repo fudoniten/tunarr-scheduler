@@ -11,20 +11,17 @@ live in the [ecosystem plan](https://github.com/fudoniten/pseudovision/blob/mast
 
 ### One timeline writer (ecosystem step 3)
 
-PV's native engine becomes the only thing that writes a channel's timeline.
-Today the quarterly run syncs the base grid onto it, but monthly overrides only
-reach PV through the weekly DailySlot push, which also deletes non-manual
-events.
+PV's native engine is now the only thing that writes a channel's timeline: the
+weekly DailySlot push is deleted (with PV's `daily-slots` endpoint). Quarterly
+and monthly runs sync the grid plus the overrides that can still air (this
+month and next) as one native schedule; overrides become date-bounded
+`is_override` slots.
 
-- [ ] Teach `native_schedule.clj` to apply monthly overrides as date-bounded
-      manual events for each override window (PV already protects manual
-      events from rebuilds).
-- [ ] Delete the weekly push: `run-weekly!`, `integration/publish-week!`,
-      `publish-daily-slots!`, the PV client's `push-daily-slots!`,
-      `POST /api/scheduling/weekly`, and the weekly CronJob in
-      `deploy/k8s/cronjobs.yaml` (suspended 2026-10-14, so overrides don't
-      apply until the first item lands). PV deletes its `daily-slots` endpoint
-      in the same step.
+- [ ] A quarter's first month gets no overrides: the monthly CronJob generates
+      next month's on the 10th, before the next quarter's grid is frozen on the
+      1st. Pre-generate the quarterly grid earlier (run quarterly with a date
+      in the next quarter, which freezes without syncing) or let monthly fall
+      back to the current grid.
 - [ ] Keep the expander: plan preview and the review loop still use it.
 
 ### Dead code (ecosystem step 3)

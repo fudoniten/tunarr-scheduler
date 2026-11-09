@@ -95,15 +95,19 @@
                 :category arg :channel-tag channel-tag}
       nil)))
 
+(declare override->strip)
+
 (defn content-sources
-  "Distinct collection specs (deduped by :name) `grid`'s strips will need
-   resolved (created-or-found) before `->schedule` can build slot attrs.
+  "Distinct collection specs (deduped by :name) `grid`'s strips, and any
+   `overrides` (see `->override-slot`), will need resolved (created-or-found)
+   before `->schedule` can build slot attrs.
    Each spec: `{:name .. :kind :show :show-id ..}` or
    `{:name .. :kind :category :category .. :channel-tag ..}`."
-  [grid channel-tag]
-  (->> (:strips grid)
-       (keep #(content-source % channel-tag))
-       distinct-by-name))
+  ([grid channel-tag] (content-sources grid channel-tag nil))
+  ([grid channel-tag overrides]
+   (->> (concat (:strips grid) (map (comp override->strip :override) overrides))
+        (keep #(content-source % channel-tag))
+        distinct-by-name)))
 
 ;; ---------------------------------------------------------------------------
 ;; Slot construction
@@ -158,16 +162,65 @@
 
       {:error (str "unrecognized media_id kind '" kind "'") :strip-id (:strip_id strip)})))
 
+;; ---------------------------------------------------------------------------
+;; Monthly overrides -> date-bounded override slots
+;; ---------------------------------------------------------------------------
+
+(defn- override->strip
+  "An Override's scheduling fields in GridStrip shape, so it reuses `->slot`."
+  [override]
+  {:strip_id (:override_id override)
+   :days     (or (get-in override [:scope :days]) "daily")
+   :start    (:start override)
+   :end      (:end override)
+   :content  (:content override)})
+
+(defn- max-date [a b] (if (pos? (compare a b)) a b))
+(defn- min-date [a b] (if (neg? (compare a b)) a b))
+
+(defn override-date-range
+  "Inclusive [active-from active-until] ISO dates for `override`, stored for
+   calendar month `month` (\"YYYY-MM\"): its single `:date`, or its recurring
+   window clamped to the month. nil when the window misses the month."
+  [override month]
+  (let [scope (:scope override)
+        first-day (java.time.LocalDate/parse (str month "-01"))
+        m-from (str first-day)
+        m-until (str (.minusDays (.plusMonths first-day 1) 1))
+        [from until] (if-let [d (:date scope)]
+                       [d d]
+                       [(max-date m-from (or (:effective_start scope) m-from))
+                        (min-date m-until (or (:effective_end scope) m-until))])]
+    (when-not (pos? (compare from until))
+      [from until])))
+
+(defn ->override-slot
+  "One stored Override (`{:month \"YYYY-MM\" :override Override}`) -> PV slot
+   attrs: built like a strip, then bounded to its dates and flagged
+   `is-override` so PV plays it in place of the base strips it overlaps.
+   Returns `{:error ..}` like `->slot`, or nil when the window misses the month."
+  [{:keys [month override]} channel-tag source-id-by-name]
+  (when-let [[from until] (override-date-range override month)]
+    (let [slot (->slot (override->strip override) channel-tag source-id-by-name)]
+      (if (:error slot)
+        slot
+        (assoc slot :active-from from :active-until until :is-override true)))))
+
 (defn ->schedule
-  "Grid -> `{:name :slots :warnings}` for
-   backends.pseudovision.client/create-schedule! + add-slot!. Strips are
-   ordered by start time (ascending) — PV's engine self-corrects each fixed
-   slot's next occurrence regardless of list position, but a chronological
-   read order keeps a hand-inspected schedule legible. Strips that fail to
+  "Grid (+ optional monthly `:overrides`, each `{:month :override}`) ->
+   `{:name :slots :warnings}` for backends.pseudovision.client/create-schedule!
+   + add-slot!. Strips are ordered by start time (ascending), followed by the
+   override slots; PV builds all-fixed schedules day by day, so list order only
+   keeps a hand-inspected schedule legible. Strips or overrides that fail to
    resolve are dropped with a warning rather than failing the whole sync."
-  [grid channel-tag source-id-by-name & {:keys [schedule-name]}]
+  [grid channel-tag source-id-by-name & {:keys [schedule-name overrides]}]
   (let [strips (sort-by (comp parse-mins :start) (:strips grid))
-        built  (mapv #(->slot % channel-tag source-id-by-name) strips)
+        built  (into (mapv #(->slot % channel-tag source-id-by-name) strips)
+                     (keep #(->override-slot % channel-tag source-id-by-name))
+                     (sort-by (fn [{:keys [month override]}]
+                                [(first (override-date-range override month))
+                                 (parse-mins (:start override))])
+                              overrides))
         ok     (remove :error built)
         errs   (filter :error built)
         slots  (into [] (map-indexed (fn [i s] (assoc s :slot-index i))) ok)]

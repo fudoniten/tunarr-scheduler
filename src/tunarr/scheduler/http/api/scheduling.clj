@@ -137,29 +137,15 @@
         (log/error e "daily scheduling task failed")
         {:status 500 :body {:error (util/error-message e)}}))))
 
-(defn weekly-handler
-  "POST /api/scheduling/weekly — expand each channel's grid + overrides for the
-   coming week and push the DailySlots to Pseudovision.
-   Optional ?channel=key / ?channel_id=uuid to limit."
-  [ctx]
-  (fn [req]
-    (try
-      (with-selected-channels ctx channel-params req
-        (fn [ctx']
-          {:status 200 :body {:task "weekly" :results (tasks/run-weekly! ctx')}}))
-      (catch Exception e
-        (log/error e "weekly scheduling task failed")
-        {:status 500 :body {:error (util/error-message e)}}))))
-
 (defn monthly-handler
   "POST /api/scheduling/monthly — propose + store sparse monthly overrides for
    every channel against their frozen grids. Returns 202 with a job ID.
 
-   Optional ?date=YYYY-MM-DD selects which month to generate (default today).
-   Pass a date in next month (run a week or so before month-end) to pre-generate
-   the coming month's overrides — always safe, they're only stored until the
-   weekly expander applies them. Optional ?channel=key / ?channel_id=uuid to
-   limit."
+   Optional ?date=YYYY-MM-DD (or ?date=next-month) selects which month to
+   generate (default today). Override slots are bounded to their own dates, so
+   generating ahead is safe; it needs to be at least two weeks ahead to land
+   past the already-built timeline. Optional ?channel=key / ?channel_id=uuid
+   to limit."
   [ctx]
   (fn [req]
     (with-selected-channels ctx date-params req

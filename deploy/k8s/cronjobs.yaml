@@ -6,9 +6,7 @@
 # image tag to match your cluster.
 #
 #   daily     — extend the playout horizon for every channel
-#   weekly    — push DailySlots to PV (SUSPENDED: it overwrites PV's native
-#               engine timeline with an unfilled one; being deleted)
-#   monthly   — generate + apply a monthly programming strategy
+#   monthly   — generate next month's overrides and sync them to PV
 #   quarterly — generate + apply a quarterly programming strategy
 #
 # Schedules are evaluated in the CronJob's timeZone (UTC below). The service
@@ -56,46 +54,12 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: tunarr-scheduler-weekly
-  labels: { app: tunarr-scheduler, task: weekly }
-spec:
-  schedule: "0 4 * * 1"            # 04:00 every Monday
-  # Suspended 2026-10-14. The DailySlot push deletes the native engine's events
-  # for the week and writes one item per slot with no filler, which is where the
-  # dead air between shows comes from. Monthly overrides stop applying until
-  # they move into native_schedule.clj; then this CronJob is deleted (PLAN.md).
-  suspend: true
-  timeZone: "UTC"
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      backoffLimit: 3
-      activeDeadlineSeconds: 1800
-      template:
-        spec:
-          restartPolicy: Never
-          containers:
-            - name: trigger
-              image: curlimages/curl:8.8.0
-              args:
-                - "-fsS"
-                - "--retry"
-                - "5"
-                - "--retry-delay"
-                - "10"
-                - "-X"
-                - "POST"
-                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/weekly"
----
-apiVersion: batch/v1
-kind: CronJob
-metadata:
   name: tunarr-scheduler-monthly
   labels: { app: tunarr-scheduler, task: monthly }
 spec:
-  schedule: "0 5 1 * *"           # 05:00 on the 1st of every month
+  # 05:00 on the 10th: generate NEXT month's overrides ~3 weeks ahead, so they
+  # land beyond the 14-day timeline PV has already built.
+  schedule: "0 5 10 * *"
   timeZone: "UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -118,7 +82,7 @@ spec:
                 - "10"
                 - "-X"
                 - "POST"
-                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/monthly"
+                - "http://tunarr-scheduler.arr.svc.cluster.local:5545/api/scheduling/monthly?date=next-month"
 ---
 apiVersion: batch/v1
 kind: CronJob

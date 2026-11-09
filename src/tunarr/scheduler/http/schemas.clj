@@ -525,7 +525,7 @@
    month comes from it. Default today. Pass a date inside the upcoming
    period (run a week or so before the boundary) to pre-generate ahead of time."
   [:map
-   [:date       {:optional true} [:string {:description "Target date 'YYYY-MM-DD'; the target quarter/month is derived from it. Default today."}]]
+   [:date       {:optional true} [:string {:description "Target date 'YYYY-MM-DD' (monthly also takes 'next-month'); the target quarter/month is derived from it. Default today."}]]
    [:channel    {:optional true} ChannelSelector]
    [:channel_id {:optional true} ChannelSelector]])
 

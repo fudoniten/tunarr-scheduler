@@ -118,11 +118,25 @@
   (some #(when (= media-id (:media_id %)) (:available_episode_count %))
         (:shows catalog)))
 
+(defn- tag-key
+  "Case- and separator-insensitive comparison key for a tag value: lowercased,
+   `&` read as `and`, every run of characters other than letters, digits and
+   `:` collapsed to one `-`. TS curation stores snake_case tags (`dark_comedy`)
+   while Jellyfin genres and normalised overrides are kebab-case
+   (`dark-comedy`); both reduce to the same key here, matching
+   pseudovision.db.media/resolve-playable-by-tag at air time."
+  [s]
+  (-> (str s)
+      str/lower-case
+      (str/replace "&" "and")
+      (str/replace #"[^a-z0-9:]+" "-")
+      (str/replace #"(^-+)|(-+$)" "")))
+
 (defn- tag-matches?
   "Whether a stored tag value (a tag_aggregate's :tag, a genre's :genre, a
    histogram's :tag) names `category`, matched case-insensitively in either its
    bare form ('sitcom') or the dimension-qualified 'genre:'-prefixed form
-   ('genre:sitcom').
+   ('genre:sitcom'), ignoring hyphen/underscore style (`tag-key`).
 
    `random:<category>` strips carry a bare category, but the dimension model
    stores tags prefixed ('genre:sitcom', 'channel:hua') — so a bare-only equality
@@ -131,8 +145,8 @@
    `tag-runtime-histogram` below already applied for the duration-fit check)."
   [tag-value category]
   (when (and tag-value category)
-    (let [t      (str/lower-case (str tag-value))
-          needle (str/lower-case category)]
+    (let [t      (tag-key tag-value)
+          needle (tag-key category)]
       (or (= t needle) (= t (str "genre:" needle))))))
 
 (defn- category-episode-count

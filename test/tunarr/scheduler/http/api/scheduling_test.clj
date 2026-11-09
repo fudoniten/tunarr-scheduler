@@ -160,16 +160,16 @@
         (is (= 400 (:status bad)))
         (is (re-find #"unrecognized query param" (get-in bad [:body :error])))))))
 
-;; ── Same behavior on the synchronous weekly endpoint ─────────────────────────
+;; ── Same behavior on the synchronous daily endpoint ──────────────────────────
 
-(deftest weekly-shares-selector-and-strict-param-behavior
-  (testing "weekly applies the same channel filter and strict param checks"
+(deftest daily-shares-selector-and-strict-param-behavior
+  (testing "daily applies the same channel filter and strict param checks"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-weekly! (fn [c] (reset! seen (:channels c)) {})]
-        (let [ok ((scheduling/weekly-handler (ctx)) (req {:channel "enigma"}))]
+      (with-redefs [tasks/run-daily! (fn [c & _] (reset! seen (:channels c)) {})]
+        (let [ok ((scheduling/daily-handler (ctx)) (req {:channel "enigma"}))]
           (is (= 200 (:status ok)))
           (is (= #{:enigma} (set (keys @seen)))))
-        (let [bad ((scheduling/weekly-handler (ctx)) (req {} {"nope" "1"}))]
+        (let [bad ((scheduling/daily-handler (ctx)) (req {} {"nope" "1"}))]
           (is (= 400 (:status bad))))))))
 
 ;; ── ?channel matches display name (case-insensitive, multi-word) ───────────
@@ -180,11 +180,11 @@
 ;; names returned 400 "unknown channel(s)". Adding a fullname tier
 ;; (case-insensitive) unblocks the UI's Regenerate buttons.
 
-(deftest weekly-channel-matches-display-name
+(deftest daily-channel-matches-display-name
   (testing "?channel=Enigma TV (multi-word display name) selects :enigma"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-weekly! (fn [c] (reset! seen (:channels c)) {})]
-        (let [resp ((scheduling/weekly-handler (ctx)) (req {:channel "Enigma TV"}))]
+      (with-redefs [tasks/run-daily! (fn [c & _] (reset! seen (:channels c)) {})]
+        (let [resp ((scheduling/daily-handler (ctx)) (req {:channel "Enigma TV"}))]
           (is (= 200 (:status resp)))
           (is (= #{:enigma} (set (keys @seen)))))))))
 
@@ -207,19 +207,19 @@
           (await-job (get-in resp [:body :job :id]))
           (is (= #{:enigma} (set (keys @seen)))))))))
 
-(deftest weekly-display-name-still-400s-when-no-config-channel-matches
+(deftest daily-display-name-still-400s-when-no-config-channel-matches
   (testing "an unknown display name still 400s — the new tier doesn't lower the bar"
     (let [called (atom false)]
-      (with-redefs [tasks/run-weekly! (fn [_] (reset! called true) {})]
-        (let [resp ((scheduling/weekly-handler (ctx)) (req {:channel "Does Not Exist"}))]
+      (with-redefs [tasks/run-daily! (fn [_ & _] (reset! called true) {})]
+        (let [resp ((scheduling/daily-handler (ctx)) (req {:channel "Does Not Exist"}))]
           (is (= 400 (:status resp)))
           (is (re-find #"unknown channel" (get-in resp [:body :error])))
           (is (false? @called)))))))
 
-(deftest weekly-display-name-takes-priority-over-config-key-collision
+(deftest daily-display-name-takes-priority-over-config-key-collision
   (testing "config key match is still preferred (no regression in the existing tier)"
     (let [seen (atom nil)]
-      (with-redefs [tasks/run-weekly! (fn [c] (reset! seen (:channels c)) {})]
-        (let [resp ((scheduling/weekly-handler (ctx)) (req {:channel "enigma"}))]
+      (with-redefs [tasks/run-daily! (fn [c & _] (reset! seen (:channels c)) {})]
+        (let [resp ((scheduling/daily-handler (ctx)) (req {:channel "enigma"}))]
           (is (= 200 (:status resp)))
           (is (= #{:enigma} (set (keys @seen)))))))))

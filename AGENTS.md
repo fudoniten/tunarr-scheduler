@@ -20,7 +20,7 @@
 - **Expansion and feasibility are pure.** No I/O, randomness, or LLM calls in
   `expander.clj`, `feasibility.clj`, or `candidates.clj`. Episode rotation
   happens at air time in PV, not here.
-- **The grid is frozen.** Monthly and weekly steps never mutate it; re-freezing
+- **The grid is frozen.** Monthly steps never mutate it; re-freezing
   inserts a new version.
 
 ## Common pitfalls

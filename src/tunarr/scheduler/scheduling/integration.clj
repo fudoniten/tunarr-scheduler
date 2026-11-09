@@ -2,21 +2,15 @@
   "The Pseudovision boundary for the layered-grid scheduler.
 
    Pseudovision speaks kebab-case JSON; Tunabrain and the internal scheduling
-   contracts speak snake_case. This namespace owns that translation, plus the
-   two cross-system operations:
-
-   • fetch-catalog-profile — GET the aggregate (kebab-case on the wire),
-     convert to a snake_case CatalogProfile (contracts/CatalogProfile) for
-     Tunabrain + the feasibility checker.
-   • publish-daily-slots! / publish-week! — convert the expander's snake_case
-     DailySlots to kebab-case and POST them to Pseudovision (the weekly
-     deterministic step; no Tunabrain call)."
+   contracts speak snake_case. This namespace owns that translation, plus
+   fetch-catalog-profile: GET the aggregate (kebab-case on the wire) and
+   convert it to a snake_case CatalogProfile (contracts/CatalogProfile) for
+   Tunabrain and the feasibility checker."
   (:require [clojure.string :as str]
             [clojure.walk :as walk]
             [taoensso.timbre :as log]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
-            [tunarr.scheduler.scheduling.contracts :as contracts]
-            [tunarr.scheduler.scheduling.plans :as plans]))
+            [tunarr.scheduler.scheduling.contracts :as contracts]))
 
 ;; ---------------------------------------------------------------------------
 ;; Key-case translation (deep, over maps nested in vectors/maps)
@@ -116,47 +110,3 @@
 
       (:default_content grid)
       (update :default_content relabel))))
-
-;; ---------------------------------------------------------------------------
-;; DailySlot publication (expander → kebab-case → Pseudovision)
-;; ---------------------------------------------------------------------------
-
-(defn publish-daily-slots!
-  "Convert snake_case DailySlots (expander output) to Pseudovision's kebab-case
-   and POST them to a channel. `channel-id` is Pseudovision's integer id or a
-   channel-number string. Returns the DailySlotIngestResult.
-
-   If `channel-tag` is supplied, it is prepended to every slot's
-   `:category_filters` so that `random:<genre>` resolution is scoped to the
-   channel's own media pool rather than the entire catalog.
-
-   Sent in kebab-case to match the rest of the Pseudovision wire protocol."
-  [pv-config channel-id slots & {:keys [channel-tag]}]
-  (let [tagged (if channel-tag
-                 (mapv #(update % :category_filters
-                                (fn [f] (vec (cons channel-tag (remove #{channel-tag} f))))) slots)
-                 slots)]
-    (pv/push-daily-slots! pv-config channel-id (mapv ->kebab tagged))))
-
-(defn publish-week!
-  "Expand the channel's stored grid + overrides over [start, end) and push the
-   resulting DailySlots to Pseudovision. The deterministic weekly step: no
-   Tunabrain call. Returns {:channel :pv-channel-id :start :end :slot-count
-   :result}, or {:skipped :no-grid} when no grid is frozen for the window.
-
-   `channel-tag` (optional, e.g. \"channel:hua\") is injected into every slot's
-   `:category_filters` so random resolution stays scoped to the channel pool."
-  [ex pv-config channel pv-channel-id start end & {:keys [channel-tag]}]
-  (let [{:keys [grid_id slots]} (plans/preview ex channel start end)]
-    (if (nil? grid_id)
-      (do (log/info "publish-week!: no frozen grid; skipping"
-                    {:channel channel :start (str start) :end (str end)})
-          {:channel channel :pv-channel-id pv-channel-id
-           :start (str start) :end (str end) :skipped :no-grid})
-      (let [result (publish-daily-slots! pv-config pv-channel-id slots :channel-tag channel-tag)]
-        (log/info "publish-week!: pushed daily slots"
-                  {:channel channel :pv-channel-id pv-channel-id
-                   :slot-count (count slots) :result result})
-        {:channel channel :pv-channel-id pv-channel-id
-         :start (str start) :end (str end)
-         :slot-count (count slots) :result result}))))

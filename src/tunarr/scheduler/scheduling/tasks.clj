@@ -6,9 +6,6 @@
 
   These drive the layered-grid pipeline:
   • run-daily!     — extend the Pseudovision playout horizon for every channel
-  • run-weekly!    — expand each channel's frozen grid + overrides for the
-                     coming week and push the DailySlots to Pseudovision
-                     (deterministic; no Tunabrain call)
   • run-monthly!   — propose + store sparse monthly overrides per channel
   • run-quarterly! — propose → feasibility → repair → freeze the quarterly grid
                      per channel
@@ -19,11 +16,9 @@
   (it's the channel *content* the LLM reasons about). The TS `channel.id`
   UUID (carried in config as `::media/channel-uuid`) is the stable storage key
   for the layered-grid system (grids, overrides, channel_guidance). The PV
-  UUID (`::media/channel-id`) is the integer/UUID PV uses for the daily-slots
-  push and is a separate value from the TS storage UUID."
+  UUID (`::media/channel-id`) identifies the channel to PV and is a separate value from the TS storage UUID."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
-            [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.orchestration :as orch]
             [tunarr.scheduler.scheduling.plans :as plans]
             [tunarr.scheduler.scheduling.storage :as storage]
@@ -60,21 +55,6 @@
                       (when (and executor name-or-slug)
                         (storage/find-channel-id executor name-or-slug))))})
 
-(defn- channel-storage-uuid
-  "The canonical TS `channel.id` UUID for a channel's config entry, used
-   as the storage key for grids/overrides/guidance. Reads
-   `::media/channel-uuid` from the config first; falls back to a
-   `channel` table lookup by `full_name` (case-insensitive) or
-   `name` (the config-key slug) when the configmap doesn't carry
-   `::media/channel-uuid` — the DB row is the source of truth in that
-   case. The fallback keeps the run-weekly!/run-monthly!/run-quarterly!
-   paths working without a configmap rollout."
-  [executor cfg]
-  (or (::media/channel-uuid cfg)
-      (let [name-or-slug (::media/channel-fullname cfg)]
-        (when name-or-slug
-          (storage/find-channel-id executor name-or-slug)))))
-
 (defn- channel-catalog-tag
   "The catalog-aggregate filter tag for a channel, `channel:<slug>`. In
    Pseudovision a media item belongs to a channel by carrying this tag (synced
@@ -96,11 +76,41 @@
                    (or (:id ch) (:channels/id ch))]))
         (pv/list-channels pv-conf)))
 
+(defn- daily-channel-result
+  "Submit one channel's horizon rebuild to PV and wait for the job to finish.
+   PV's rebuild endpoint is asynchronous (202 + job), so treating the 202 as
+   success reported every channel `:ok` even when its build failed or did
+   nothing. Returns `{:status \"ok\"|\"failed\"|\"timeout\" :job-id ..}` plus
+   PV's job result (`:events-generated`, and `:warning` when PV skipped the
+   channel) or `:error`."
+  [conf pv-id horizon job-timeout-ms]
+  (let [submitted (pv/rebuild-playout! conf pv-id {:from "horizon" :horizon horizon})
+        job-id    (get-in submitted [:job :id])
+        job       (if job-id
+                    (pv/await-job! conf job-id :timeout-ms job-timeout-ms)
+                    {:status "failed" :error {:message "PV returned no job id"}})
+        status    (some-> (:status job) name)]
+    (cond-> {:status (case status "succeeded" "ok" (or status "unknown"))
+             :job-id job-id}
+      (map? (:result job))         (merge (select-keys (:result job)
+                                                       [:events-generated :warning]))
+      (= "failed" status)          (assoc :error (or (get-in job [:error :message])
+                                                     "PV job failed"))
+      (= "timeout" status)         (assoc :error (str "PV job did not finish within "
+                                                      (quot job-timeout-ms 60000) " min")))))
+
 (defn run-daily!
   "Extend the playout horizon for every channel via Pseudovision's
    rebuild-horizon endpoint (preserves the cursor and sequential positions).
-   Returns channel-key → :ok / :no-channel-id / :not-found / {:error …}."
-  [{:keys [pseudovision channels]} & {:keys [horizon] :or {horizon default-horizon}}]
+
+   Channels are rebuilt one at a time and each PV job is awaited, so the
+   response says what actually happened per channel. Returns channel-key ->
+   :no-channel-id / :not-found, or a map `{:status \"ok\"|\"failed\"|\"timeout\"
+   :job-id .. :events-generated N :warning .. :error ..}` (see
+   `daily-channel-result`)."
+  [{:keys [pseudovision channels]} & {:keys [horizon job-timeout-ms]
+                                      :or {horizon default-horizon
+                                           job-timeout-ms (* 20 60 1000)}}]
   (log/info "task: daily horizon extension" {:horizon horizon})
   (let [conf  (pv-config pseudovision)
         index (uuid->pv-id conf)]
@@ -113,40 +123,17 @@
                  (not pv-id)                    :not-found
                  :else
                  (try
-                   (pv/rebuild-playout! conf pv-id {:from "horizon" :horizon horizon})
-                   :ok
+                   (let [result (daily-channel-result conf pv-id horizon job-timeout-ms)]
+                     (if (and (= "ok" (:status result)) (nil? (:warning result)))
+                       (log/info "task: horizon extended"
+                                 (assoc result :channel channel-key :channel-id pv-id))
+                       (log/warn "task: horizon extension did not complete"
+                                 (assoc result :channel channel-key :channel-id pv-id)))
+                     result)
                    (catch Exception e
                      (log/error e "task: failed to extend horizon"
                                 {:channel channel-key :channel-id pv-id})
-                     {:error (util/error-message e)})))])))))
-
-(defn run-weekly!
-  "Expand each channel's frozen grid + overrides for the coming week and push the
-  resulting DailySlots to Pseudovision. Deterministic — no Tunabrain call.
-  Returns channel-key → publish result / :no-channel-id / :not-found / {:error}."
-  [{:keys [pseudovision channels catalog]}]
-  (log/info "task: weekly expand + publish")
-  (let [executor (:executor catalog)
-        conf     (pv-config pseudovision)
-        index    (uuid->pv-id conf)
-        start    (plans/today)
-        end      (.plusDays start 7)]
-    (into {}
-          (for [[channel-key cfg] channels]
-            (let [channel-uuid (channel-storage-uuid executor cfg)
-                  pv-id        (get index (str (::media/channel-id cfg)))]
-              [channel-key
-               (cond
-                 (not (::media/channel-id cfg)) :no-channel-id
-                 (not pv-id)                    :not-found
-                 (not channel-uuid)             :no-channel-uuid
-                 :else
-                 (try
-                    (integ/publish-week! executor conf channel-uuid pv-id (str start) (str end)
-                                         :channel-tag (channel-catalog-tag channel-key))
-                   (catch Exception e
-                     (log/error e "task: weekly publish failed" {:channel channel-key})
-                     {:error (util/error-message e)})))])))))
+                     {:status "failed" :error (util/error-message e)})))])))))
 
 (defn- components [{:keys [tunabrain pseudovision catalog]}]
   {:executor (:executor catalog)
@@ -155,27 +142,39 @@
 
 (defn run-monthly!
   "Propose + store sparse monthly overrides for every channel, against the
-   channel's frozen grid for a month.
+   channel's frozen grid for a month, then re-sync each channel's native PV
+   schedule so overrides that can still air reach the playout (see
+   orch/run-monthly!).
 
-   `:date` (optional, a 'YYYY-MM-DD' string or LocalDate) selects WHICH month —
-   the overrides are stored for the month of that date; defaults to today. Pass
-   a date in NEXT month (e.g. run a week before month-end) to pre-generate the
-   coming month's overrides. Unlike quarterly, this is always safe to run ahead:
-   overrides are only stored, never attached to a live playout — the weekly
-   expander applies them per-date once that month arrives, so there is no early
-   cutover and no current-month guard is needed.
+   `:date` (optional, a 'YYYY-MM-DD' string, a LocalDate, or \"next-month\")
+   selects WHICH month; the overrides are stored for the month of that date.
+   Defaults to today. The CronJob passes \"next-month\" on the 10th. The
+   override slots are bounded to their own dates, so syncing them early is safe;
+   run at least two weeks ahead, because the re-sync only extends the timeline
+   past the already-built horizon.
 
-   Returns channel-key → stored overrides record / {:error …} (a missing grid
-   surfaces as an error)."
+   Returns channel-key → stored overrides record (with :native-sync when a PV
+   channel was found) / {:error …} (a missing grid surfaces as an error)."
   [{:keys [channels] :as ctx} & {:keys [date]}]
   (let [comps (components ctx)
-        month (plans/month-of (or date (plans/today)))]
+        ;; Without PV the overrides are still stored; they reach PV on the
+        ;; next successful sync.
+        index (try (uuid->pv-id (:pv-config comps))
+                   (catch Exception e
+                     (log/warn e "task: monthly could not list PV channels; skipping re-sync")
+                     {}))
+        today (plans/today)
+        month (plans/month-of (cond
+                                (= "next-month" (str date)) (.plusMonths today 1)
+                                date                        date
+                                :else                       today))]
     (log/info "task: monthly overrides" {:month month})
     (into {}
           (for [[channel-key cfg] channels]
             [channel-key
              (try (orch/run-monthly! comps (channel-spec (:executor comps) cfg) month
-                                     :catalog-tag (channel-catalog-tag channel-key))
+                                     :catalog-tag (channel-catalog-tag channel-key)
+                                     :pv-channel-id (get index (str (::media/channel-id cfg))))
                   (catch Exception e
                     (log/error e "task: monthly overrides failed" {:channel channel-key})
                     {:error (util/error-message e)}))]))))
