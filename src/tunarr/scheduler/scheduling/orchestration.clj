@@ -9,9 +9,7 @@
    Tunabrain for sparse overrides against the frozen grid and store them.
 
    Operator guidance (the per-channel manual-input surface) is pulled in and fed
-   to the propose calls; it steers but never gates. The weekly deterministic
-   publish step lives in `scheduling.integration/publish-week!` (no Tunabrain
-   call).
+   to the propose calls; it steers but never gates.
 
    `components` is a map of {:executor :tunabrain :pv-config}. The three external
    calls — the CatalogProfile fetch and the two Tunabrain proposals — are taken

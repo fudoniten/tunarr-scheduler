@@ -137,20 +137,6 @@
         (log/error e "daily scheduling task failed")
         {:status 500 :body {:error (util/error-message e)}}))))
 
-(defn weekly-handler
-  "POST /api/scheduling/weekly — expand each channel's grid + overrides for the
-   coming week and push the DailySlots to Pseudovision.
-   Optional ?channel=key / ?channel_id=uuid to limit."
-  [ctx]
-  (fn [req]
-    (try
-      (with-selected-channels ctx channel-params req
-        (fn [ctx']
-          {:status 200 :body {:task "weekly" :results (tasks/run-weekly! ctx')}}))
-      (catch Exception e
-        (log/error e "weekly scheduling task failed")
-        {:status 500 :body {:error (util/error-message e)}}))))
-
 (defn monthly-handler
   "POST /api/scheduling/monthly — propose + store sparse monthly overrides for
    every channel against their frozen grids. Returns 202 with a job ID.

@@ -6,9 +6,6 @@
 
   These drive the layered-grid pipeline:
   • run-daily!     — extend the Pseudovision playout horizon for every channel
-  • run-weekly!    — expand each channel's frozen grid + overrides for the
-                     coming week and push the DailySlots to Pseudovision
-                     (deterministic; no Tunabrain call)
   • run-monthly!   — propose + store sparse monthly overrides per channel
   • run-quarterly! — propose → feasibility → repair → freeze the quarterly grid
                      per channel
@@ -19,11 +16,9 @@
   (it's the channel *content* the LLM reasons about). The TS `channel.id`
   UUID (carried in config as `::media/channel-uuid`) is the stable storage key
   for the layered-grid system (grids, overrides, channel_guidance). The PV
-  UUID (`::media/channel-id`) is the integer/UUID PV uses for the daily-slots
-  push and is a separate value from the TS storage UUID."
+  UUID (`::media/channel-id`) identifies the channel to PV and is a separate value from the TS storage UUID."
   (:require [taoensso.timbre :as log]
             [tunarr.scheduler.media :as media]
-            [tunarr.scheduler.scheduling.integration :as integ]
             [tunarr.scheduler.scheduling.orchestration :as orch]
             [tunarr.scheduler.scheduling.plans :as plans]
             [tunarr.scheduler.scheduling.storage :as storage]
@@ -59,21 +54,6 @@
                     (let [name-or-slug (::media/channel-fullname cfg)]
                       (when (and executor name-or-slug)
                         (storage/find-channel-id executor name-or-slug))))})
-
-(defn- channel-storage-uuid
-  "The canonical TS `channel.id` UUID for a channel's config entry, used
-   as the storage key for grids/overrides/guidance. Reads
-   `::media/channel-uuid` from the config first; falls back to a
-   `channel` table lookup by `full_name` (case-insensitive) or
-   `name` (the config-key slug) when the configmap doesn't carry
-   `::media/channel-uuid` — the DB row is the source of truth in that
-   case. The fallback keeps the run-weekly!/run-monthly!/run-quarterly!
-   paths working without a configmap rollout."
-  [executor cfg]
-  (or (::media/channel-uuid cfg)
-      (let [name-or-slug (::media/channel-fullname cfg)]
-        (when name-or-slug
-          (storage/find-channel-id executor name-or-slug)))))
 
 (defn- channel-catalog-tag
   "The catalog-aggregate filter tag for a channel, `channel:<slug>`. In
@@ -154,34 +134,6 @@
                      (log/error e "task: failed to extend horizon"
                                 {:channel channel-key :channel-id pv-id})
                      {:status "failed" :error (util/error-message e)})))])))))
-
-(defn run-weekly!
-  "Expand each channel's frozen grid + overrides for the coming week and push the
-  resulting DailySlots to Pseudovision. Deterministic — no Tunabrain call.
-  Returns channel-key → publish result / :no-channel-id / :not-found / {:error}."
-  [{:keys [pseudovision channels catalog]}]
-  (log/info "task: weekly expand + publish")
-  (let [executor (:executor catalog)
-        conf     (pv-config pseudovision)
-        index    (uuid->pv-id conf)
-        start    (plans/today)
-        end      (.plusDays start 7)]
-    (into {}
-          (for [[channel-key cfg] channels]
-            (let [channel-uuid (channel-storage-uuid executor cfg)
-                  pv-id        (get index (str (::media/channel-id cfg)))]
-              [channel-key
-               (cond
-                 (not (::media/channel-id cfg)) :no-channel-id
-                 (not pv-id)                    :not-found
-                 (not channel-uuid)             :no-channel-uuid
-                 :else
-                 (try
-                    (integ/publish-week! executor conf channel-uuid pv-id (str start) (str end)
-                                         :channel-tag (channel-catalog-tag channel-key))
-                   (catch Exception e
-                     (log/error e "task: weekly publish failed" {:channel channel-key})
-                     {:error (util/error-message e)})))])))))
 
 (defn- components [{:keys [tunabrain pseudovision catalog]}]
   {:executor (:executor catalog)

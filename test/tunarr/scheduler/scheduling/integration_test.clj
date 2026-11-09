@@ -1,11 +1,8 @@
 (ns tunarr.scheduler.scheduling.integration-test
   "Tests for the Pseudovision boundary: kebab↔snake conversion, CatalogProfile
-   assembly, and DailySlot publication (with the PV client stubbed)."
-  (:require [clojure.test :refer [deftest testing is use-fixtures]]
+   and display labels (with the PV client stubbed)."
+  (:require [clojure.test :refer [deftest testing is]]
             [taoensso.timbre :as log]
-            [next.jdbc :as jdbc]
-            [tunarr.scheduler.sql.executor :as executor]
-            [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.contracts :as c]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
             [tunarr.scheduler.scheduling.integration :as integ]))
@@ -150,81 +147,3 @@
                                    (fn [_cfg _opts] (dissoc pv-catalog-aggregate :shows))]
                        (integ/fetch-catalog-profile ::cfg {:tag "channel:drama"})))]
       (is (not (ignored-filter-warned? warnings))))))
-
-;; ---------------------------------------------------------------------------
-;; publish-daily-slots! (snake → kebab on the wire)
-;; ---------------------------------------------------------------------------
-
-(def snake-slot
-  {:start_time "2026-06-24T08:00:00" :end_time "2026-06-24T10:00:00"
-   :media_id "series:42" :media_selection_strategy "sequential"
-   :category_filters ["comedy" "channel:comedy"] :notes ["Season 1 block"]})
-
-(deftest ^:eftest/synchronized publish-converts-slots-to-kebab
-  (let [capture (atom nil)
-        result  {:ingested 1 :skipped 0 :errors [] :channel-id 7}]
-    (with-redefs [pv/push-daily-slots! (fn [_cfg channel-id slots]
-                                         (reset! capture {:channel-id channel-id :slots slots})
-                                         result)]
-      (let [out (integ/publish-daily-slots! ::cfg 7 [snake-slot])]
-        (is (= result out))
-        (is (= 7 (:channel-id @capture)))
-        (testing "the slot reached the client in kebab-case"
-          (let [sent (first (:slots @capture))]
-            (is (= "2026-06-24T08:00:00" (:start-time sent)))
-            (is (= "series:42" (:media-id sent)))
-            (is (= "sequential" (:media-selection-strategy sent)))
-            (is (= ["comedy" "channel:comedy"] (:category-filters sent)))
-            (is (not (contains? sent :start_time)))))))))
-
-;; ---------------------------------------------------------------------------
-;; publish-week! (expand stored plan → push)
-;; ---------------------------------------------------------------------------
-
-(def ^:dynamic *ex* nil)
-
-(defn- setup-schema [db]
-  (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS grids (
-      id VARCHAR(64) PRIMARY KEY, grid_id VARCHAR(128), channel VARCHAR(128) NOT NULL,
-      quarter VARCHAR(8) NOT NULL, cal_year INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-      status VARCHAR(32) NOT NULL DEFAULT 'frozen', grid TEXT NOT NULL, feasibility TEXT,
-      created_at TEXT NOT NULL, UNIQUE (channel, quarter, cal_year, version))"])
-  (jdbc/execute! db ["CREATE TABLE IF NOT EXISTS overrides (
-      id VARCHAR(64) PRIMARY KEY, overrides_id VARCHAR(128), channel VARCHAR(128) NOT NULL,
-      cal_month VARCHAR(7) NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-      status VARCHAR(32) NOT NULL DEFAULT 'active', overrides TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL, UNIQUE (channel, cal_month, version))"]))
-
-(use-fixtures :each
-  (fn [t]
-    (let [db (jdbc/get-datasource {:dbtype "h2:mem" :dbname (str "integ-" (random-uuid))
-                                   :DB_CLOSE_DELAY "-1" :DATABASE_TO_LOWER "TRUE"})]
-      (setup-schema db)
-      (let [ex (executor/create-executor db :worker-count 1)]
-        (binding [*ex* ex]
-          (try (t) (finally (executor/close! ex))))))))
-
-(def grid
-  {:channel "Classic Comedy"
-   :strips [{:strip_id "prime" :days "weekdays" :start "17:00" :end "18:00"
-             :content {:media_id "series:42" :strategy "sequential"}}]
-   :default_content {:media_id "random:comedy" :strategy "random"}})
-
-(deftest ^:eftest/synchronized publish-week-expands-and-pushes
-  (storage/freeze-grid! *ex* "Classic Comedy" "Q1" 2026 grid :grid-id "g-1")
-  (let [capture (atom nil)]
-    (with-redefs [pv/push-daily-slots! (fn [_cfg channel-id slots]
-                                         (reset! capture {:channel-id channel-id :slots slots})
-                                         {:ingested (count slots) :skipped 0 :errors [] :channel-id channel-id})]
-      (let [out (integ/publish-week! *ex* ::cfg "Classic Comedy" 7 "2026-01-05" "2026-01-12")]
-        (is (= 7 (:pv-channel-id out)))
-        (is (pos? (:slot-count out)))
-        (is (= (:slot-count out) (-> out :result :ingested)))
-        (testing "pushed slots are kebab-case"
-          (is (every? #(contains? % :start-time) (:slots @capture)))
-          (is (some #(= "series:42" (:media-id %)) (:slots @capture))))))))
-
-(deftest ^:eftest/synchronized publish-week-skips-without-grid
-  (with-redefs [pv/push-daily-slots! (fn [& _] (throw (ex-info "should not push" {})))]
-    (let [out (integ/publish-week! *ex* ::cfg "No Grid Channel" 9 "2026-01-05" "2026-01-12")]
-      (is (= :no-grid (:skipped out))))))
