@@ -8,35 +8,26 @@
    Pure function, no I/O. Algorithm from handoff spec §4.3:
 
    • Per-strip capacity — slots_required = airings of the strip over the
-     horizon (dates whose weekday the strip's day-pattern matches). Then by
-     media_id kind:
-       - series:<id> sequential: episodes_available = that show's
-         available_episode_count; want available ≥ slots_required.
-         shortfall if available < slots_required; tight if
-         available < slots_required × MARGIN; else ok.
+     horizon (dates whose weekday the strip's day-pattern matches).
+     Pseudovision fills a strip with as many items as fit back to back, so one
+     airing uses floor(strip length ÷ mean item runtime) items, at least one
+     (`items-per-airing`). The retired DailySlots push aired one item per
+     slot; the checks used to assume that. Then by media_id kind:
+       - series:<id> sequential: episodes needed = Σ over every strip of that
+         show of airings × episodes per airing (the show's
+         avg_runtime_minutes). shortfall if available < needed; tight if
+         available < needed × MARGIN; else ok.
        - random:<category> (pooled): first confirm the category is a real tag
          in the profile at all (tag_aggregates / genres / tag_runtime_histograms,
          bare or 'genre:'-prefixed) — a category that exists in none of them is
-         hallucinated, has no media behind it, and is a shortfall. When it does
-         exist: repeats are fine, so check the pool is non-trivial —
-         episode_count for that category ≥ a small floor. ALSO
-         checked for duration fit — but as a *repetition rate*, not mere
-         presence: the combined weekly airings of every same-length
-         same-category strip, divided by how many items the category's per-tag
-         runtime histogram (CatalogProfile.tag_runtime_histograms) actually has
-         within a tolerance of that length. A handful of half-hour comedies is
-         fine behind one occasional slot and a disaster behind three-a-day (the
-         same few shorts grind round 15×/week) — the rate, not the raw count,
-         tells those apart. This is the
-         grid-authoring-time half of the duration-aware scheduling work (see
-         archive/DURATION_AWARE_SCHEDULING.md §3.4) — Pseudovision's air-time
-         selection (pseudovision#119) already fits content to slots, but
-         without this check a strip could still be authored at a length its
-         category has no content anywhere near, which Pseudovision's
-         selection can only paper over (falling back to closest available),
-         not fix. The worse of the two random-kind statuses wins; messages
+         hallucinated and is a shortfall. When it does exist, check the pool is
+         non-trivial (episode_count ≥ a small floor) and judge repetition: the
+         items per week every same-category strip takes (airings × items per
+         airing) divided by how many items in the category's runtime histogram
+         are no longer than this strip. The worse status wins; messages
          concatenate.
-       - movie:<id>: a single item; tight if it would air more than once.
+       - movie:<id> / program:<id>: a single item; shortfall if it runs
+         longer than the strip, tight if it would air more than once.
    • Overlap — base-grid strips whose day-patterns intersect AND whose time
      windows overlap (ambiguous authoring worth surfacing).
    • Coverage — broadcast-day time covered by no strip when there is no
@@ -61,14 +52,6 @@
 (def ^:const random-pool-floor
   "Minimum pooled episode_count for a random:<category> strip to be comfortable."
   10)
-
-(def ^:const duration-fit-tolerance-minutes
-  "Slack around a strip's own wall-clock length when checking whether its
-   random:<category> pool has content at roughly that duration. Mirrors
-   Pseudovision's air-time tolerance (daily-slots.clj's
-   default-fit-tolerance-minutes) so a 'tight' finding here and a
-   'closest available' fallback at air time describe the same boundary."
-  15)
 
 (def ^:const duration-fit-tight-reps-per-week
   "Weekly repetition rate — airings per week that draw on a random:<category>
@@ -229,18 +212,51 @@
   [catalog category]
   (category-known? catalog category))
 
-(defn- bucket-overlaps-window? [bucket lo hi]
-  (let [bmin (:min_minutes bucket)
-        bmax (or (:max_minutes bucket) Long/MAX_VALUE)]
-    (and (<= bmin hi) (<= lo bmax))))
+(def ^:private default-open-bucket-width-minutes
+  "Assumed width of an open-ended (no :max_minutes) top histogram bucket."
+  15)
 
-(defn- fitting-item-count
-  "Sum of item_count across every bucket in `histogram` whose runtime range
-   overlaps [lo, hi] (an open-ended top bucket's nil max_minutes is treated
-   as unbounded)."
-  [histogram lo hi]
-  (reduce + 0 (keep (fn [b] (when (bucket-overlaps-window? b lo hi) (:item_count b)))
-                     (:buckets histogram))))
+(defn- bucket-fit
+  "How many of `bucket`'s items run no longer than `minutes`: all of them when
+   the bucket ends at or below it, none when it starts above it, and the share
+   of the bucket's range below it otherwise (an open-ended top bucket is taken
+   as `default-open-bucket-width-minutes` wide)."
+  ^double [bucket minutes]
+  (let [lo    (:min_minutes bucket)
+        hi    (or (:max_minutes bucket) (+ lo default-open-bucket-width-minutes))
+        n     (double (:item_count bucket 0))]
+    (cond
+      (<= hi minutes) n
+      (> lo minutes)  0.0
+      :else           (* n (/ (double (- minutes lo)) (max 1 (- hi lo)))))))
+
+(defn- fitting-items
+  "Items in `histogram` short enough to air in a strip of `minutes`, and their
+   mean runtime: `{:count n :mean-minutes m}` (m nil when n is 0). Pseudovision
+   packs a strip with as many items as fit, so an item fits a strip when it is
+   no longer than the strip, not when it is close to the strip's length."
+  [histogram minutes]
+  (let [parts (for [b (:buckets histogram)
+                    :let [n (bucket-fit b minutes)]
+                    :when (pos? n)
+                    :let [hi  (min minutes (or (:max_minutes b)
+                                               (+ (:min_minutes b) default-open-bucket-width-minutes)))
+                          mid (/ (+ (:min_minutes b) hi) 2.0)]]
+                [n mid])
+        n     (reduce + 0.0 (map first parts))]
+    {:count        n
+     :mean-minutes (when (pos? n) (/ (reduce + 0.0 (map (fn [[k m]] (* k m)) parts)) n))}))
+
+(defn items-per-airing
+  "How many items one airing of a `minutes`-long strip uses when its items run
+   `mean-minutes` on average: as many as fit back to back, at least one.
+   Pseudovision fills a block with items until the next one doesn't fit; the
+   retired DailySlots push aired one item per slot, which is what the checks
+   here used to assume."
+  [minutes mean-minutes]
+  (if (and mean-minutes (pos? mean-minutes))
+    (max 1 (long (Math/floor (/ (double minutes) mean-minutes))))
+    1))
 
 (def ^:private status-rank {"ok" 0, "tight" 1, "shortfall" 2})
 
@@ -265,84 +281,101 @@
   [strip]
   (count (cal/pattern->codes (:days strip))))
 
-(defn- fit-window
-  "The [lo hi] duration-tolerance window (minutes) a strip's content must fall
-   within to be a good length fit, `duration-fit-tolerance-minutes` either side
-   of its own wall-clock length."
-  [strip]
-  (let [target (strip-duration-minutes strip)]
-    [(max 0 (- target duration-fit-tolerance-minutes))
-     (+ target duration-fit-tolerance-minutes)]))
+(defn- same-category-strips
+  "Every `random:<category>` strip in `all-strips` whose bare category is
+   `category` (case-insensitive)."
+  [all-strips category]
+  (filter (fn [s]
+            (let [mid (-> s :content :media_id)
+                  c   (media-arg mid)]
+              (and (= "random" (media-kind mid)) c
+                   (= (str/lower-case c) (str/lower-case category)))))
+          all-strips))
 
 (defn- category-weekly-demand
-  "Total weekly airings across every `random:<category>` strip in `all-strips`
-   sharing `strip`'s bare category whose fit-window overlaps `strip`'s — the
-   combined weekly demand competing for the same handful of right-length items.
+  "Items per week that the `random:<category>` strips in `all-strips` take from
+   the pool of items that fit a `minutes`-long strip: for each same-category
+   strip, weekly airings × items per airing (from the mean runtime of the items
+   that fit it).
 
    Repetition has to be judged across strips, not one at a time: three separate
    half-hour comedy strips a day each look individually survivable, but together
-   they pull ~15 airings/week out of the same five or six half-hour comedies, so
-   the same item lands over and over. Judging each strip alone is exactly what
-   let that through."
-  [all-strips strip category]
-  (let [[lo hi] (fit-window strip)]
+   they pull ~15 airings/week out of the same five or six half-hour comedies.
+   A strip no longer than `minutes` draws only on this pool, so all of its
+   demand counts. A longer strip draws on a bigger pool that contains this one,
+   so only the share of its picks that land here counts (this pool's size over
+   its pool's size)."
+  [all-strips category histogram minutes]
+  (let [here (:count (fitting-items histogram minutes))]
     (reduce
-     + 0
-     (for [s all-strips
-           :let [mid (-> s :content :media_id)]
-           :when (= "random" (media-kind mid))
-           :let [c (media-arg mid)]
-           :when (and c (= (str/lower-case c) (str/lower-case category)))
-           :let [[slo shi] (fit-window s)]
-           :when (and (<= slo hi) (<= lo shi))]   ; fit-windows overlap ⇒ shared pool
-       (weekly-airings s)))))
+     + 0.0
+     (for [s (same-category-strips all-strips category)
+           :let [mins (strip-duration-minutes s)
+                 {n :count mean :mean-minutes} (fitting-items histogram mins)
+                 per-week (* (weekly-airings s) (items-per-airing mins mean))]
+           :when (pos? n)]
+       (if (<= mins minutes)
+         per-week
+         (* per-week (min 1.0 (/ here n))))))))
 
 (defn- duration-fit-finding
   "Whether `catalog`'s per-tag runtime histogram for `category` has enough
-   content at roughly `strip`'s wall-clock length for how often the grid airs a
-   slot of that length. Not just presence (the old flat floor) but a *repetition
-   rate*: the combined weekly airings of every same-length same-category strip
-   (`category-weekly-demand`) divided by the number of distinct in-tolerance
-   items. A pool of five half-hour comedies is fine behind one occasional slot
-   and a disaster behind three-a-day — the rate captures the difference the raw
-   count can't.
+   content short enough for `strip` for how often the grid draws on it. An item
+   fits when it is no longer than the strip, because Pseudovision packs a block
+   with every item that fits back to back. The check is a *repetition rate*:
+   the items per week every same-category strip takes (`category-weekly-demand`)
+   divided by the number of items that fit. A pool of five half-hour comedies is
+   fine behind one occasional slot and a disaster behind three-a-day.
 
    Returns nil (nothing to merge) when the catalog profile carries no histogram
-   data for this category at all — an older Pseudovision build, or simply no
-   matching tag — rather than manufacturing a false shortfall out of an absent
-   signal. Otherwise a {:status :message} finding to combine with the pool-floor
-   finding via `combine-findings`. `all-strips` is the whole grid's strip list,
-   needed to sum cross-strip demand."
+   data for this category at all, rather than manufacturing a false shortfall
+   out of an absent signal. Otherwise a {:status :message} finding to combine
+   with the pool-floor finding via `combine-findings`."
   [strip catalog category all-strips]
   (when-let [histogram (tag-runtime-histogram catalog category)]
     (let [target    (strip-duration-minutes strip)
-          [lo hi]   (fit-window strip)
-          fit-count (fitting-item-count histogram lo hi)
-          demand    (category-weekly-demand all-strips strip category)
-          reps      (when (pos? fit-count) (/ demand (double fit-count)))]
+          {fit :count mean :mean-minutes} (fitting-items histogram target)
+          fit-count (long (Math/round (double fit)))
+          per-air   (items-per-airing target mean)
+          demand    (long (Math/round (double (category-weekly-demand all-strips category histogram target))))
+          reps      (when (pos? fit) (/ demand fit))]
       (cond
-        (zero? fit-count)
+        (< fit 0.5)
         {:status "shortfall"
-         :message (format "no '%s' content within %dmin of the strip's %dmin length"
-                          category duration-fit-tolerance-minutes target)}
+         :message (format "no '%s' content short enough for the strip's %dmin length"
+                          category target)}
 
         (>= reps duration-fit-shortfall-reps-per-week)
         {:status "shortfall"
-         :message (format (str "only %d '%s' item(s) within %dmin of the strip's %dmin "
-                               "length for %d airing(s)/week of that length across the grid "
+         :message (format (str "only %d '%s' item(s) fit the strip's %dmin length "
+                               "(~%d per airing) for %d item airing(s)/week across the grid "
                                "— each would repeat ~%.1f×/week")
-                          fit-count category duration-fit-tolerance-minutes target
-                          demand reps)}
+                          fit-count category target per-air demand reps)}
 
         (>= reps duration-fit-tight-reps-per-week)
         {:status "tight"
-         :message (format (str "only %d '%s' item(s) within %dmin of the strip's %dmin "
-                               "length for %d airing(s)/week — repeats ~%.1f×/week")
-                          fit-count category duration-fit-tolerance-minutes target
-                          demand reps)}
+         :message (format (str "only %d '%s' item(s) fit the strip's %dmin length "
+                               "(~%d per airing) for %d item airing(s)/week — repeats ~%.1f×/week")
+                          fit-count category target per-air demand reps)}
 
         :else
         {:status "ok" :message ""}))))
+
+(defn- show-entry [catalog media-id]
+  (some #(when (= media-id (:media_id %)) %) (:shows catalog)))
+
+(defn- series-episodes-required
+  "Episodes the grid's strips of series `media-id` use over the horizon: for each
+   strip of that series, its airings × the episodes one airing packs (strip
+   length ÷ the show's average runtime). Summed across strips because they share
+   one rotation: two daily strips of the same show use it up twice as fast."
+  [all-strips media-id catalog dates]
+  (let [avg (:avg_runtime_minutes (show-entry catalog media-id))]
+    (reduce + 0
+            (for [s all-strips
+                  :when (= media-id (-> s :content :media_id))]
+              (* (slots-required s dates)
+                 (items-per-airing (strip-duration-minutes s) avg))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-strip capacity finding
@@ -364,20 +397,23 @@
      base
      (cond
        ;; Sequential series: avoid repeats ⇒ need enough distinct episodes.
+       ;; Each airing packs as many episodes as fit the strip, and every strip
+       ;; of the same show shares one rotation, so count episodes, not airings.
        (and (= kind "series") (= strategy "sequential"))
        (let [available (or (show-available catalog media-id) 0)
+             needed    (series-episodes-required all-strips media-id catalog dates)
              status (cond
-                      (< available required)            "shortfall"
-                      (< available (* required margin)) "tight"
-                      :else                             "ok")]
+                      (< available needed)            "shortfall"
+                      (< available (* needed margin)) "tight"
+                      :else                           "ok")]
          {:episodes_available available
-          :headroom_ratio (headroom available required)
+          :headroom_ratio (headroom available needed)
           :status status
           :message (case status
-                     "shortfall" (format "needs %d distinct episodes, only %d available"
-                                          required available)
-                     "tight"     (format "thin margin: %d available for %d airings"
-                                          available required)
+                     "shortfall" (format "needs %d distinct episodes for %d airing(s) of this series across the grid, only %d available"
+                                          needed required available)
+                     "tight"     (format "thin margin: %d available for %d episodes"
+                                          available needed)
                      "")})
 
        ;; Non-sequential series: repeats acceptable, only an empty library bites.
@@ -433,14 +469,30 @@
            (combine-findings pool-finding duration-finding)
            pool-finding))
 
-       ;; Single movie: fine once, suspicious if it repeats.
-       (= kind "movie")
-       {:episodes_available 1
-        :headroom_ratio (headroom 1 required)
-        :status (if (> required 1) "tight" "ok")
-        :message (if (> required 1)
-                   (format "single movie would air %d times over the horizon" required)
-                   "")}
+       ;; A single movie or Grout program: it must fit the strip, and is
+       ;; suspicious if it repeats.
+       (contains? #{"movie" "program"} kind)
+       (let [runtime (:avg_runtime_minutes (show-entry catalog media-id))
+             mins    (strip-duration-minutes strip)]
+         (cond
+           (and runtime (> runtime mins))
+           {:episodes_available 1
+            :headroom_ratio (headroom 1 required)
+            :status "shortfall"
+            :message (format "%s runs %dmin, longer than the strip's %dmin"
+                             kind (long (Math/ceil runtime)) mins)}
+
+           (> required 1)
+           {:episodes_available 1
+            :headroom_ratio (headroom 1 required)
+            :status "tight"
+            :message (format "single %s would air %d times over the horizon" kind required)}
+
+           :else
+           {:episodes_available 1
+            :headroom_ratio (headroom 1 required)
+            :status "ok"
+            :message ""}))
 
        :else
        {:episodes_available 0

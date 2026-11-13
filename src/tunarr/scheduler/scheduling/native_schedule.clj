@@ -24,8 +24,12 @@
         via `ensure-collection!`), emits the final slot attrs for
         `backends.pseudovision.client/add-slot!`.
 
-   A `movie:<id>` strip needs no collection: the slot points `media-item-id`
-   straight at the movie."
+   A `movie:<id>` or `program:<id>` strip with a numeric id needs no
+   collection: the slot points `media-item-id` straight at the item. The
+   catalog profile names Jellyfin titles by their remote key (a GUID), not by
+   a numeric id, so such a strip gets a one-item smart collection
+   (`auto:item:<key>`, `{:item-ref key}`), and a series strip's collection
+   looks the show up by `{:show-id key}`. Pseudovision resolves either form."
   (:require [clojure.string :as str]
             [tunarr.scheduler.scheduling.calendar :as cal]))
 
@@ -76,12 +80,18 @@
 ;; Content sources — the PV "smart" collections this grid needs
 ;; ---------------------------------------------------------------------------
 
+(defn- series-source-name [arg] (str "auto:series:" arg))
+(defn- item-source-name [arg] (str "auto:item:" arg))
+
+(defn- single-item-kind? [kind] (contains? #{"movie" "program"} kind))
+
 (defn- category-source-name [category channel-tag]
   (str "auto:category:" (str/lower-case category) ":" channel-tag))
 
 (defn- content-source
   "The collection spec `strip` needs, or nil when its content needs none
-   (a `movie:<id>` strip plays the item directly). `channel-tag` (e.g.
+   (a `movie:<id>`/`program:<id>` strip with a numeric id plays the item
+   directly). `channel-tag` (e.g.
    \"channel:hua\") scopes a category pool to this channel's own mapped
    media — see pseudovision.db.media/resolve-playable-by-tag's :require-tags."
   [strip channel-tag]
@@ -89,8 +99,11 @@
         kind     (media-kind media-id)
         arg      (media-arg media-id)]
     (case kind
-      "series" (when-let [show-id (parse-long-safe arg)]
-                 {:name (str "auto:series:" show-id) :kind :show :show-id show-id})
+      "series" (when-not (str/blank? arg)
+                 {:name (series-source-name arg) :kind :show
+                  :show-id (or (parse-long-safe arg) arg)})
+      ("movie" "program") (when (and (not (str/blank? arg)) (nil? (parse-long-safe arg)))
+                            {:name (item-source-name arg) :kind :item :item-ref arg})
       "random" {:name (category-source-name arg channel-tag) :kind :category
                 :category arg :channel-tag channel-tag}
       nil)))
@@ -101,7 +114,8 @@
   "Distinct collection specs (deduped by :name) `grid`'s strips, and any
    `overrides` (see `->override-slot`), will need resolved (created-or-found)
    before `->schedule` can build slot attrs.
-   Each spec: `{:name .. :kind :show :show-id ..}` or
+   Each spec: `{:name .. :kind :show :show-id ..}`,
+   `{:name .. :kind :item :item-ref ..}` or
    `{:name .. :kind :category :category .. :channel-tag ..}`."
   ([grid channel-tag] (content-sources grid channel-tag nil))
   ([grid channel-tag overrides]
@@ -141,17 +155,18 @@
         base     (merge timing {:custom-title (:label content)})]
     (case kind
       "series"
-      (let [src-name (some->> (parse-long-safe arg) (str "auto:series:"))
-            coll-id  (get source-id-by-name src-name)]
+      (let [coll-id (get source-id-by-name (series-source-name arg))]
         (if coll-id
           (merge base {:collection-id coll-id
                        :playback-order (if (= strategy "random") "random" "chronological")})
           {:error (str "no resolved collection for series " arg) :strip-id (:strip_id strip)}))
 
-      "movie"
+      ("movie" "program")
       (if-let [item-id (parse-long-safe arg)]
         (merge base {:media-item-id item-id :playback-order "chronological"})
-        {:error (str "unparsable movie id " arg) :strip-id (:strip_id strip)})
+        (if-let [coll-id (get source-id-by-name (item-source-name arg))]
+          (merge base {:collection-id coll-id :playback-order "chronological"})
+          {:error (str "no resolved collection for " kind " " arg) :strip-id (:strip_id strip)}))
 
       "random"
       (let [src-name (category-source-name arg channel-tag)
@@ -206,16 +221,39 @@
         slot
         (assoc slot :active-from from :active-until until :is-override true)))))
 
+(defn- bound-slot
+  "`slot` limited to dates in [from, until] (inclusive ISO dates; nil leaves
+   that side open). An error map passes through."
+  [slot from until]
+  (if (:error slot)
+    slot
+    (cond-> slot
+      from  (assoc :active-from from)
+      until (assoc :active-until until))))
+
 (defn ->schedule
   "Grid (+ optional monthly `:overrides`, each `{:month :override}`) ->
    `{:name :slots :warnings}` for backends.pseudovision.client/create-schedule!
    + add-slot!. Strips are ordered by start time (ascending), followed by the
    override slots; PV builds all-fixed schedules day by day, so list order only
    keeps a hand-inspected schedule legible. Strips or overrides that fail to
-   resolve are dropped with a warning rather than failing the whole sync."
-  [grid channel-tag source-id-by-name & {:keys [schedule-name overrides]}]
-  (let [strips (sort-by (comp parse-mins :start) (:strips grid))
-        built  (into (mapv #(->slot % channel-tag source-id-by-name) strips)
+   resolve are dropped with a warning rather than failing the whole sync.
+
+   `:next-grid` with `:next-from` (an ISO date, the next quarter's first day)
+   adds the next quarter's strips as slots that start airing on that date, and
+   ends `grid`'s strips the day before. Syncing the next quarter ahead of time
+   this way switches the channel over exactly on the boundary, and lets the
+   first month's overrides reach PV before that month starts."
+  [grid channel-tag source-id-by-name & {:keys [schedule-name overrides next-grid next-from]}]
+  (let [order  (partial sort-by (comp parse-mins :start))
+        until  (when (and next-grid next-from)
+                 (str (.minusDays (java.time.LocalDate/parse (str next-from)) 1)))
+        base   (mapv #(bound-slot (->slot % channel-tag source-id-by-name) nil until)
+                     (order (:strips grid)))
+        nxt    (when until
+                 (mapv #(bound-slot (->slot % channel-tag source-id-by-name) (str next-from) nil)
+                       (order (:strips next-grid))))
+        built  (into (into base nxt)
                      (keep #(->override-slot % channel-tag source-id-by-name))
                      (sort-by (fn [{:keys [month override]}]
                                 [(first (override-date-range override month))

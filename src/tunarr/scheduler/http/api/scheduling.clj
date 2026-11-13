@@ -177,9 +177,9 @@
    quarterly grid for every channel. Returns 202 with a job ID.
 
    Optional ?date=YYYY-MM-DD selects which quarter to (re)generate: the grid's
-   quarter/year come from that date (default today). Pass a date inside the
-   upcoming quarter (run a week or so before the boundary) to pre-generate the
-   next quarter's grid ahead of time. Optional ?channel=key / ?channel_id=uuid
+   quarter/year come from that date (default today); ?date=next-quarter
+   pre-generates the next quarter's grid and syncs it to start on the boundary
+   (see tasks/run-quarterly!). Optional ?channel=key / ?channel_id=uuid
    to limit."
   [ctx]
   (fn [req]

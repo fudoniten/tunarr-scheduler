@@ -17,11 +17,11 @@ and monthly runs sync the grid plus the overrides that can still air (this
 month and next) as one native schedule; overrides become date-bounded
 `is_override` slots.
 
-- [ ] A quarter's first month gets no overrides: the monthly CronJob generates
-      next month's on the 10th, before the next quarter's grid is frozen on the
-      1st. Pre-generate the quarterly grid earlier (run quarterly with a date
-      in the next quarter, which freezes without syncing) or let monthly fall
-      back to the current grid.
+- [x] A quarter's first month got no overrides. Fixed 2026-11-13: the
+      quarterly CronJob now runs on the 1st of the quarter's last month with
+      `?date=next-quarter`, and the next quarter's grid syncs as slots that
+      start on the boundary (`orch/sync-grids`). The monthly run on the 10th
+      finds that grid. Deploy with pseudovision#187 (remote-key collections).
 - [ ] Keep the expander: plan preview and the review loop still use it.
 
 ### Dead code (ecosystem step 3)

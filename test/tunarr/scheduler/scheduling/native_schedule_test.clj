@@ -33,6 +33,29 @@
     (let [grid {:strips [(strip "s1" "daily" "20:00" "22:00" (content "movie:7"))]}]
       (is (empty? (sut/content-sources grid channel-tag))))))
 
+(deftest remote-key-strips-get-collections
+  (testing "the catalog profile names Jellyfin titles by GUID; those strips get
+            collections Pseudovision resolves by remote key instead of being
+            dropped"
+    (let [guid    "a1b2c3d4e5f6"
+          grid    {:strips [(strip "s1" "weekdays" "17:00" "18:00" (content (str "series:" guid)))
+                            (strip "s2" "sat" "20:00" "22:00" (content (str "movie:" guid)))
+                            (strip "s3" "sun" "20:00" "21:00" (content "program:abc"))]}
+          sources (sut/content-sources grid channel-tag)]
+      (is (some #(= {:name (str "auto:series:" guid) :kind :show :show-id guid} %) sources))
+      (is (some #(= {:name (str "auto:item:" guid) :kind :item :item-ref guid} %) sources))
+      (is (some #(= {:name "auto:item:abc" :kind :item :item-ref "abc"} %) sources))
+      (let [ids {(str "auto:series:" guid) 11 (str "auto:item:" guid) 12 "auto:item:abc" 13}
+            [s1 s2 s3] (map #(sut/->slot % channel-tag ids) (:strips grid))]
+        (is (= 11 (:collection-id s1)))
+        (is (= 12 (:collection-id s2)))
+        (is (nil? (:media-item-id s2)))
+        (is (= 13 (:collection-id s3)))))))
+
+(deftest numeric-program-plays-item-directly
+  (let [slot (sut/->slot (strip "p" "sun" "20:00" "21:00" (content "program:9")) channel-tag {})]
+    (is (= 9 (:media-item-id slot)))))
+
 (deftest content-sources-category-scoped-to-channel
   (testing "the category source name is scoped by channel-tag"
     (let [grid {:strips [(strip "s1" "daily" "12:00" "13:00" (content "random:sitcom"))]}
@@ -161,3 +184,22 @@
         (is (= ["2026-11-26" "2026-11-26" true 127 "18:00:00" "PT3H"]
                ((juxt :active-from :active-until :is-override :days-of-week
                       :start-time :block-duration) o-day)))))))
+
+(deftest next-grid-slots-start-on-the-boundary
+  (testing "the next quarter's strips start on :next-from and the current
+            grid's end the day before"
+    (let [cur  {:channel "C" :strips [(strip "a" "daily" "08:00" "09:00" (content "movie:1"))]}
+          nxt  {:channel "C" :strips [(strip "b" "daily" "08:00" "10:00" (content "movie:2"))]}
+          {:keys [slots warnings]} (sut/->schedule cur channel-tag {}
+                                                   :next-grid nxt :next-from "2027-01-01")
+          [a b] slots]
+      (is (empty? warnings))
+      (is (= 2 (count slots)))
+      (is (= [1 "2026-12-31" nil] [(:media-item-id a) (:active-until a) (:active-from a)]))
+      (is (= [2 "2027-01-01" nil] [(:media-item-id b) (:active-from b) (:active-until b)]))
+      (is (not (:is-override b))))))
+
+(deftest no-next-grid-leaves-slots-unbounded
+  (let [{:keys [slots]} (sut/->schedule {:strips [(strip "a" "daily" "08:00" "09:00" (content "movie:1"))]}
+                                        channel-tag {})]
+    (is (nil? (:active-until (first slots))))))
