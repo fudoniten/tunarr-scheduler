@@ -186,8 +186,9 @@
                 :sync-schedule (fn [pv-config pv-channel-id grid channel-tag & _]
                                 (swap! sync-calls conj [pv-config pv-channel-id grid channel-tag])
                                 {:schedule-id 9 :slot-count 3 :warnings []})})
-        out (orch/run-quarterly! comps channel-spec "Q1" 2026
-                                 :pv-channel-id 42 :catalog-tag "channel:classic-comedy")]
+        out (with-redefs [plans/today (fn [] (java.time.LocalDate/parse "2026-01-05"))]
+              (orch/run-quarterly! comps channel-spec "Q1" 2026
+                                   :pv-channel-id 42 :catalog-tag "channel:classic-comedy"))]
     (is (= 1 (count @sync-calls)))
     (is (= [::pv 42 "channel:classic-comedy"]
            (let [[pv-config pv-channel-id _grid channel-tag] (first @sync-calls)]
@@ -207,11 +208,49 @@
   (let [comps (base-components
                {:propose-grid (fn [_ _] {:grid_id "g-1" :grid feasible-grid})
                 :sync-schedule (fn [& _] (throw (ex-info "pv unreachable" {})))})
-        out (orch/run-quarterly! comps channel-spec "Q1" 2026 :pv-channel-id 42)]
+        out (with-redefs [plans/today (fn [] (java.time.LocalDate/parse "2026-01-05"))]
+              (orch/run-quarterly! comps channel-spec "Q1" 2026 :pv-channel-id 42))]
     (is (= "ok" (:feasibility-status out)) "the grid still froze")
     (is (= "pv unreachable" (:error (:native-sync out))))
     (is (some? (storage/current-grid *ex* channel-uuid "Q1" 2026))
         "the frozen grid is durable regardless of PV sync outcome")))
+
+;; Next quarter: synced as slots that start on its first day, beside the
+;; current quarter's grid.
+(deftest quarterly-next-quarter-syncs-beside-current-grid
+  (let [sync-calls (atom [])
+        next-grid  (assoc feasible-grid :channel "next")
+        comps (base-components
+               {:propose-grid (fn [_ _] {:grid_id "g-2" :grid next-grid})
+                :sync-schedule (fn [_pv _id grid _tag & {:keys [next-grid next-from]}]
+                                 (swap! sync-calls conj {:grid grid :next-grid next-grid
+                                                         :next-from next-from})
+                                 {:schedule-id 9})})]
+    (with-redefs [plans/today (fn [] (java.time.LocalDate/parse "2026-03-01"))]
+      (testing "without a current-quarter grid the sync is skipped"
+        (let [out (orch/run-quarterly! comps channel-spec "Q2" 2026 :pv-channel-id 42)]
+          (is (empty? @sync-calls))
+          (is (re-find #"no frozen grid" (:error (:native-sync out))))))
+      (testing "with one, both grids go in a single sync"
+        (storage/freeze-grid! *ex* channel-uuid "Q1" 2026 feasible-grid :grid-id "g-1")
+        (let [out (orch/run-quarterly! comps channel-spec "Q2" 2026 :pv-channel-id 42)
+              [call] @sync-calls]
+          (is (= {:ok {:schedule-id 9}} (:native-sync out)))
+          (is (= "2026-04-01" (:next-from call)))
+          (is (= (:strips feasible-grid) (:strips (:grid call))))
+          (is (= "next" (:channel (:next-grid call)))))))))
+
+(deftest sync-grids-picks-current-and-next
+  (storage/freeze-grid! *ex* channel-uuid "Q4" 2026 feasible-grid :grid-id "g-4")
+  (testing "only the current quarter frozen"
+    (let [g (orch/sync-grids *ex* channel-uuid (java.time.LocalDate/parse "2026-11-13"))]
+      (is (= (:strips feasible-grid) (:strips (:grid g))))
+      (is (nil? (:next-grid g)))))
+  (testing "a fresh grid stands in for its quarter"
+    (let [g (orch/sync-grids *ex* channel-uuid (java.time.LocalDate/parse "2026-11-13")
+                             :fresh {:quarter "Q1" :year 2027 :grid {:strips []}})]
+      (is (= {:strips []} (:next-grid g)))
+      (is (= "2027-01-01" (:next-from g))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Opt-in review loop wiring (:review-schedule component)
@@ -269,6 +308,14 @@
   (with-redefs [pv/get-collections (fn [_] [{:id 5 :name "auto:series:42"}])
                 pv/create-collection! (fn [_ _] (throw (ex-info "should not create" {})))]
     (is (= 5 (orch/ensure-collection! ::pv {:name "auto:series:42" :kind :show :show-id 42})))))
+
+(deftest ensure-collection-creates-item-collection
+  (let [created (atom nil)]
+    (with-redefs [pv/get-collections    (fn [_] [])
+                  pv/create-collection! (fn [_ attrs] (reset! created attrs) {:id 9})]
+      (is (= 9 (orch/ensure-collection! ::pv {:name "auto:item:abc" :kind :item :item-ref "abc"})))
+      (is (= {:query {:item-ref "abc"}} (:config @created)))
+      (is (= "smart" (:kind @created))))))
 
 (deftest ensure-collection-creates-when-absent
   (let [created (atom nil)]

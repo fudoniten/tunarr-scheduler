@@ -149,7 +149,8 @@
 (defn ensure-collection!
   "Finds an existing Pseudovision collection named `(:name spec)`, or creates
    it from `spec` (a native-schedule/content-sources entry: `{:kind :show
-   :show-id ..}` or `{:kind :category :category .. :channel-tag ..}`).
+   :show-id ..}`, `{:kind :item :item-ref ..}` or `{:kind :category
+   :category .. :channel-tag ..}`).
    Collections are named deterministically (auto:series:<id>,
    auto:category:<cat>:<channel-tag>) precisely so re-freezing a grid finds
    and reuses the same collection instead of accumulating duplicates.
@@ -163,6 +164,7 @@
                :kind "smart"
                :config {:query (case (:kind spec)
                                  :show     {:show-id (:show-id spec)}
+                                 :item     {:item-ref (:item-ref spec)}
                                  :category {:category (:category spec)
                                             :channel-tag (:channel-tag spec)})}})))))
 
@@ -175,6 +177,29 @@
     (vec (for [m [(plans/month-of d) (plans/month-of (.plusMonths d 1))]
                o (:overrides (storage/current-overrides executor channel-uuid m))]
            {:month m :override o}))))
+
+(defn next-quarter-start
+  "The first day of the quarter after the one `date` falls in."
+  ^java.time.LocalDate [date]
+  (second (plans/quarter-range (plans/quarter-of date) (plans/year-of date))))
+
+(defn sync-grids
+  "The grids a native sync for `today` should carry: `{:grid :next-grid
+   :next-from}`. `:grid` is the frozen grid of today's quarter; `:next-grid`
+   is the next quarter's, when one is frozen already, starting on
+   `:next-from` (its first day, an ISO date). `fresh` is
+   `{:quarter :year :grid}` for a grid just frozen, used in place of the stored
+   one for that quarter. `:grid` is nil when today's quarter has no grid."
+  [executor channel-uuid today & {:keys [fresh]}]
+  (let [grid-for (fn [d]
+                   (let [q (plans/quarter-of d) y (plans/year-of d)]
+                     (if (and fresh (= q (:quarter fresh)) (= y (:year fresh)))
+                       (:grid fresh)
+                       (:grid (storage/current-grid executor channel-uuid q y)))))
+        nxt      (next-quarter-start today)
+        next-g   (grid-for nxt)]
+    (cond-> {:grid (grid-for today)}
+      next-g (assoc :next-grid next-g :next-from (str nxt)))))
 
 (defn sync-native-schedule!
   "Translates a frozen Grid to Pseudovision's native schedule/slot model
@@ -209,17 +234,26 @@
    are added as date-bounded override slots, which PV plays in place of the
    base strips they overlap.
 
+   `:next-grid` and `:next-from` (optional, see `sync-grids`) add the next
+   quarter's grid as slots that start on its first day, ending `grid`'s slots
+   the day before.
+
    Returns `{:schedule-id :slot-count :warnings}`."
-  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name rebuild-from overrides]
+  [pv-config pv-channel-id grid channel-tag & {:keys [schedule-name rebuild-from overrides
+                                                      next-grid next-from]
                                                :or   {rebuild-from "horizon"}}]
-  (let [sources (native/content-sources grid channel-tag overrides)
+  (let [sources (native/content-sources
+                 {:strips (concat (:strips grid) (when next-from (:strips next-grid)))}
+                 channel-tag overrides)
         source-id-by-name (into {}
                                  (map (fn [spec] [(:name spec) (ensure-collection! pv-config spec)]))
                                  sources)
         {:keys [name slots warnings]} (native/->schedule
                                        grid channel-tag source-id-by-name
                                        :schedule-name schedule-name
-                                       :overrides overrides)
+                                       :overrides overrides
+                                       :next-grid next-grid
+                                       :next-from next-from)
         prior-schedule-id (:schedule-id (pv/get-playout pv-config pv-channel-id))
         sched   (pv/create-schedule! pv-config {:name name})
         sched-id (:id sched)]
@@ -264,8 +298,12 @@
    (review → revise → re-review, bounded at `:max-reviews`, default 2) on the
    feasible grid before freezing — see `scheduling.review`. Freezes best-effort
    with the final feasibility status attached, and — when `:pv-channel-id` is
-   supplied — syncs the frozen grid onto Pseudovision's native schedule/slot
-   model (`sync-native-schedule!`). Returns the stored grid record plus
+   supplied — syncs onto Pseudovision's native schedule/slot model
+   (`sync-native-schedule!`): today's quarter's grid, plus the next quarter's
+   as slots starting on its first day (`sync-grids`). The grid just frozen
+   takes the place of its quarter's stored one, so this works for either
+   quarter. Syncing the next quarter needs today's quarter frozen; without it
+   the sync is skipped with an error. Returns the stored grid record plus
    `:feasibility-status`, `:repairs`, `:native-sync` (when synced), and
    `:review` (when reviewed).
 
@@ -323,15 +361,23 @@
         labeled        (integ/label-grid-content sanitized profile)
         stored         (storage/freeze-grid! executor channel-uuid quarter year labeled
                                              :grid-id grid-id :feasibility report)
+        today          (plans/today)
+        grids          (when pv-channel-id
+                         (sync-grids executor channel-uuid today
+                                     :fresh {:quarter quarter :year year :grid labeled}))
         sync-result    (when pv-channel-id
-                         (try
-                           {:ok (sync-schedule pv-config pv-channel-id labeled catalog-tag
-                                               :overrides (active-overrides executor channel-uuid
-                                                                            (plans/today)))}
-                           (catch Exception e
-                             (log/error e "native schedule sync failed"
-                                        {:channel channel :pv-channel-id pv-channel-id})
-                             {:error (ex-message e)})))]
+                         (if-not (:grid grids)
+                           {:error (str "no frozen grid for the current quarter; "
+                                        "freeze it before syncing the next one")}
+                           (try
+                             {:ok (sync-schedule pv-config pv-channel-id (:grid grids) catalog-tag
+                                                 :overrides (active-overrides executor channel-uuid today)
+                                                 :next-grid (:next-grid grids)
+                                                 :next-from (:next-from grids))}
+                             (catch Exception e
+                               (log/error e "native schedule sync failed"
+                                          {:channel channel :pv-channel-id pv-channel-id})
+                               {:error (ex-message e)}))))]
     (log/info "quarterly grid frozen"
               {:channel channel :channel-uuid channel-uuid :quarter quarter :year year
                :status (:overall_status report) :repairs repairs
@@ -348,8 +394,9 @@
    for the month's quarter.
 
    When `:pv-channel-id` is given and a grid is frozen for TODAY's quarter, the
-   channel's native schedule is re-synced with that grid plus every override
-   that can still air (`active-overrides`), so the new overrides reach PV. The
+   channel's native schedule is re-synced with that grid (and the next
+   quarter's, when frozen, see `sync-grids`) plus every override that can
+   still air (`active-overrides`), so the new overrides reach PV. The
    re-sync extends the timeline, so an override only takes effect beyond the
    already-built horizon (14 days): run monthly at least two weeks ahead.
    The result carries `:native-sync` ({:ok ..} or {:error ..}) when attempted."
@@ -385,13 +432,13 @@
                 {:channel channel :channel-uuid channel-uuid :month month
                  :count (count (:overrides resp))})
       (let [today    (plans/today)
-            live     (when pv-channel-id
-                       (storage/current-grid executor channel-uuid
-                                             (plans/quarter-of today) (plans/year-of today)))
-            sync-res (when live
+            grids    (when pv-channel-id (sync-grids executor channel-uuid today))
+            sync-res (when (:grid grids)
                        (try
-                         {:ok (sync-schedule pv-config pv-channel-id (:grid live) catalog-tag
-                                             :overrides (active-overrides executor channel-uuid today))}
+                         {:ok (sync-schedule pv-config pv-channel-id (:grid grids) catalog-tag
+                                             :overrides (active-overrides executor channel-uuid today)
+                                             :next-grid (:next-grid grids)
+                                             :next-from (:next-from grids))}
                          (catch Exception e
                            (log/error e "native schedule re-sync after monthly overrides failed"
                                       {:channel channel :pv-channel-id pv-channel-id})

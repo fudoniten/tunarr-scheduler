@@ -145,8 +145,9 @@
            :buckets [{:label "45-60min" :min_minutes 45 :max_minutes 60 :item_count 2}]}]))
 
 (deftest duration-fit-ok-when-content-exists-near-strip-length
-  (testing "a 90-minute random:movie strip is fine when the category has plenty near that length"
-    (let [report (f/check (grid [(strip "movie-slot" "weekdays" "20:00" "21:30" "random:movie"
+  (testing "a two-hour random:movie strip is fine when the category has plenty
+            of movies no longer than that"
+    (let [report (f/check (grid [(strip "movie-slot" "weekdays" "20:00" "22:00" "random:movie"
                                         :strategy "random")])
                           catalog-with-histograms week-start week-end)]
       (is (= "ok" (:status (finding-for report "movie-slot")))))))
@@ -160,7 +161,7 @@
                           catalog-with-histograms week-start week-end)
           found (finding-for report "movie-slot")]
       (is (= "shortfall" (:status found)))
-      (is (str/includes? (:message found) "no 'movie' content within"))
+      (is (str/includes? (:message found) "no 'movie' content short enough"))
       (is (= "blocked" (:overall_status report))
           "a duration shortfall blocks overall_status same as any other shortfall"))))
 
@@ -187,7 +188,7 @@
       (is (= "shortfall" (:status found))
           "duration shortfall (empty buckets) outranks the pool-floor 'tight'")
       (is (str/includes? (:message found) "small pool"))
-      (is (str/includes? (:message found) "no 'rare' content within")))))
+      (is (str/includes? (:message found) "no 'rare' content short enough")))))
 
 (deftest duration-fit-skipped-when-no-histogram-data-for-category
   (testing "a category with no tag_runtime_histograms entry at all is not
@@ -201,18 +202,42 @@
 
 (deftest duration-fit-handles-cross-midnight-strips
   (testing "a strip crossing midnight still computes a sane wall-clock duration"
-    (let [report (f/check (grid [(strip "late-movie" "weekdays" "23:15" "00:45" "random:movie"
+    (let [report (f/check (grid [(strip "late-movie" "weekdays" "23:00" "01:00" "random:movie"
                                         :strategy "random")])
                           catalog-with-histograms week-start week-end)]
-      ;; 23:15 -> 00:45 is 90 minutes, which the movie histogram has plenty of.
+      ;; 23:00 -> 01:00 is 120 minutes; the movie histogram has 12 that fit.
       (is (= "ok" (:status (finding-for report "late-movie")))))))
+
+(deftest duration-fit-flags-strip-exactly-as-long-as-its-content
+  (testing "Pseudovision only airs an item that fits, so a 90-minute strip
+            over 90-105 minute movies would air mostly filler"
+    (let [report (f/check (grid [(strip "tight-movie" "weekdays" "20:00" "21:30" "random:movie"
+                                        :strategy "random")])
+                          catalog-with-histograms week-start week-end)]
+      (is (= "shortfall" (:status (finding-for report "tight-movie")))))))
+
+(deftest random-strip-counts-every-item-an-airing-packs
+  (testing "an hour of sitcoms packs two to three episodes, so five hour-long
+            strips a week take ~10+ items, not 5"
+    (let [cat    (assoc catalog
+                        :genres [{:genre "sitcom" :show_count 3 :episode_count 50}]
+                        :tag_runtime_histograms
+                        [{:tag "genre:sitcom"
+                          :buckets [{:min_minutes 20 :max_minutes 25 :item_count 6}]}])
+          report (f/check (grid [(strip "sc" "weekdays" "18:00" "19:00" "random:sitcom"
+                                        :strategy "random")])
+                          cat week-start week-end)
+          found  (finding-for report "sc")]
+      ;; 6 items, mean 22.5 min ⇒ 2 per airing ⇒ 10/week ⇒ ~1.7 reps/week.
+      (is (= "tight" (:status found)))
+      (is (str/includes? (:message found) "~2 per airing")))))
 
 (deftest category-known-only-via-runtime-histogram-is-not-hallucinated
   (testing "a category present only in tag_runtime_histograms (no genre/aggregate
             episode_count) is a real tag — capacity is 'not assessed', not a
             shortfall (catalog-with-histograms has 'genre:movie' but no 'movie'
             genre/aggregate)"
-    (let [report (f/check (grid [(strip "mv" "weekdays" "20:00" "21:30"
+    (let [report (f/check (grid [(strip "mv" "weekdays" "20:00" "22:00"
                                         "random:movie" :strategy "random")])
                           catalog-with-histograms week-start week-end)
           found  (finding-for report "mv")]
@@ -285,17 +310,17 @@
       (is (= "ok" (:status (finding-for report "com-0")))))))
 
 (deftest long-and-short-slots-of-one-category-are-judged-separately
-  (testing "a 90-minute comedy slot draws from the deep 40-item movie-length
-            bucket, so it stays ok even while the half-hour slots are starved —
-            demand only sums strips whose fit-windows overlap"
+  (testing "a two-hour comedy slot draws mostly from the deep 40-item
+            movie-length bucket, so it stays ok even while the half-hour slots
+            are starved"
     (let [report (f/check (grid (conj (n-short-comedy-strips 3 "weekdays")
-                                      (strip "com-long" "weekdays" "20:00" "21:30"
+                                      (strip "com-long" "weekdays" "20:00" "22:00"
                                              "random:comedy" :strategy "random")))
                           catalog-thin-shorts week-start week-end)]
       (is (= "shortfall" (:status (finding-for report "com-0")))
           "the half-hour slots are still starved")
       (is (= "ok" (:status (finding-for report "com-long")))
-          "the 90-minute slot draws from a different, deep bucket"))))
+          "the two-hour slot draws mostly from a different, deep bucket"))))
 
 (deftest movie-capacity
   (let [report (f/check (grid [(strip "m-once"  ["mon"]    "20:00" "22:00" "movie:classic")
@@ -305,7 +330,42 @@
       (is (= "ok" (:status (finding-for report "m-once")))))
     (testing "a movie airing repeatedly ⇒ tight"
       (is (= "tight" (:status (finding-for report "m-multi"))))
-      (is (str/includes? (:message (finding-for report "m-multi")) "5 times")))))
+      (is (str/includes? (:message (finding-for report "m-multi")) "5 times"))))
+  (testing "a movie longer than its strip ⇒ shortfall"
+    (let [cat    (update catalog :shows conj
+                         {:media_id "movie:epic" :title "Epic" :episode_count 1
+                          :available_episode_count 1 :avg_runtime_minutes 140.0})
+          report (f/check (grid [(strip "m-long" ["sat"] "20:00" "22:00" "movie:epic")])
+                          cat week-start week-end)
+          found  (finding-for report "m-long")]
+      (is (= "shortfall" (:status found)))
+      (is (str/includes? (:message found) "140min")))))
+
+(deftest series-counts-episodes-per-airing
+  (let [cat (update catalog :shows
+                    (fn [shows] (mapv #(cond-> %
+                                         (= "series:seinfeld" (:media_id %))
+                                         (assoc :available_episode_count 12
+                                                :avg_runtime_minutes 22.0))
+                                      shows)))]
+    (testing "an hour strip of a 22-minute show airs two episodes, so five
+              weekday airings need 10 episodes"
+      (let [report (f/check (grid [(strip "s" "weekdays" "17:00" "18:00" "series:seinfeld")])
+                            cat week-start week-end)
+            found  (finding-for report "s")]
+        (is (= 5 (:slots_required found)))
+        (is (= "ok" (:status found)))
+        (is (== 1.2 (:headroom_ratio found)))))
+    (testing "two strips of one show share its episodes"
+      (let [report (f/check (grid [(strip "s1" "weekdays" "17:00" "18:00" "series:seinfeld")
+                                   (strip "s2" "weekdays" "21:00" "22:00" "series:seinfeld")])
+                            cat week-start week-end)]
+        (is (= "shortfall" (:status (finding-for report "s1"))))
+        (is (str/includes? (:message (finding-for report "s1")) "needs 20"))))
+    (testing "without avg_runtime_minutes an airing counts as one episode"
+      (let [report (f/check (grid [(strip "t" "weekdays" "12:00" "13:00" "series:thin")])
+                            catalog week-start week-end)]
+        (is (= "tight" (:status (finding-for report "t"))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Overlap detection
@@ -362,9 +422,14 @@
                                 catalog week-start week-end)))))
   (testing "warnings: an overlap"
     (is (= "warnings" (:overall_status
+                       ;; two strips of one show share its 6 episodes, so use
+                       ;; two shows to isolate the overlap warning.
                        (f/check (grid [(strip "a" "weekdays" "17:00" "18:00" "series:seinfeld")
-                                       (strip "b" "weekdays" "17:30" "18:30" "series:seinfeld")])
-                                catalog week-start week-end)))))
+                                       (strip "b" "weekdays" "17:30" "18:30" "series:wide")])
+                                (update catalog :shows conj
+                                        {:media_id "series:wide" :title "Wide" :episode_count 50
+                                         :available_episode_count 50})
+                                week-start week-end)))))
   (testing "blocked: any shortfall dominates"
     (is (= "blocked" (:overall_status
                       (f/check (grid [(strip "ok"    "weekdays" "17:00" "18:00" "series:seinfeld")

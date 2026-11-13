@@ -24,6 +24,7 @@
             [tunarr.scheduler.scheduling.storage :as storage]
             [tunarr.scheduler.scheduling.orchestration :as orch]
             [tunarr.scheduler.backends.pseudovision.client :as pv]
+            [tunarr.scheduler.scheduling.plans :as plans]
             [tunarr.scheduler.scheduling.tasks :as tasks])
   (:import [java.time LocalDate]))
 
@@ -193,18 +194,29 @@
                     :channels     {:spectrum cfg}
                     :catalog      {:executor *ex*}}
               today       (LocalDate/now)
-              ;; +3 months always lands in the immediately following quarter.
-              next-q-date (.plusMonths today 3)]
+              ;; +3 months always lands in the immediately following quarter,
+              ;; +6 in the one after.
+              next-q-date (.plusMonths today 3)
+              far-q-date  (.plusMonths today 6)]
           (testing "current quarter → native sync applied"
             (reset! captured [])
             (tasks/run-quarterly! ctx :date (str today))
             (is (= 42 (:pv-channel-id (first @captured)))
                 "current-quarter run attaches + rebuilds the live playout"))
-          (testing "future quarter → frozen only, live playout untouched"
+          (testing "next quarter → synced (it starts on its first day)"
             (reset! captured [])
             (tasks/run-quarterly! ctx :date (str next-q-date))
+            (is (= 42 (:pv-channel-id (first @captured)))))
+          (testing "?date=next-quarter targets the following quarter"
+            (reset! captured [])
+            (tasks/run-quarterly! ctx :date "next-quarter")
+            (is (= (plans/quarter-of next-q-date) (:quarter (first @captured))))
+            (is (= 42 (:pv-channel-id (first @captured)))))
+          (testing "two quarters ahead → frozen only, live playout untouched"
+            (reset! captured [])
+            (tasks/run-quarterly! ctx :date (str far-q-date))
             (is (nil? (:pv-channel-id (first @captured)))
-                "future-quarter run skips the native sync"))
+                "a far-future run skips the native sync"))
           (testing "no ?date defaults to today's quarter and applies"
             (reset! captured [])
             (tasks/run-quarterly! ctx)
